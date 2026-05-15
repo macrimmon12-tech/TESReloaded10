@@ -66,7 +66,7 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;_USE_MATH_DEFINES;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeaderFile>
       </PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(SolutionDir)\Core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)\Core;$(SolutionDir)lib\imgui;$(SolutionDir)lib\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>$(SolutionDir)\src\NewVegas\Framework.h</ForcedIncludeFiles>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
@@ -92,7 +92,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;_USE_MATH_DEFINES;_CRT_SECURE_NO_WARNINGS;NEWVEGAS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeaderFile>
       </PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(SolutionDir)\Core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)\Core;$(SolutionDir)lib\imgui;$(SolutionDir)lib\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>$(SolutionDir)\src\NewVegas\Framework.h</ForcedIncludeFiles>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
@@ -176,6 +176,24 @@
     <ClCompile Include="..\lib\Detours\detours.cpp" />
     <ClCompile Include="..\lib\Detours\disasm.cpp" />
     <ClCompile Include="..\lib\Detours\modules.cpp" />
+    <ClCompile Include="..\lib\imgui\imgui.cpp">
+      <ForcedIncludeFiles></ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\lib\imgui\imgui_draw.cpp">
+      <ForcedIncludeFiles></ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\lib\imgui\imgui_tables.cpp">
+      <ForcedIncludeFiles></ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\lib\imgui\imgui_widgets.cpp">
+      <ForcedIncludeFiles></ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\lib\imgui\backends\imgui_impl_dx9.cpp">
+      <ForcedIncludeFiles></ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="..\lib\imgui\backends\imgui_impl_win32.cpp">
+      <ForcedIncludeFiles></ForcedIncludeFiles>
+    </ClCompile>
     <ClCompile Include="..\src\NewVegas\Hooks\FlyCam.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\Game.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\Hooks.cpp" />
@@ -257,6 +275,10 @@
     <ClInclude Include="..\lib\Bink\radbase.h" />
     <ClInclude Include="..\lib\Detours\detours.h" />
     <ClInclude Include="..\lib\Nvidia\nvapi.h" />
+    <ClInclude Include="..\lib\imgui\imgui.h" />
+    <ClInclude Include="..\lib\imgui\imgui_internal.h" />
+    <ClInclude Include="..\lib\imgui\backends\imgui_impl_dx9.h" />
+    <ClInclude Include="..\lib\imgui\backends\imgui_impl_win32.h" />
     <ClInclude Include="..\src\NewVegas\Base.h" />
     <ClInclude Include="..\src\NewVegas\Defines.h" />
     <ClInclude Include="..\src\NewVegas\Framework.h" />
