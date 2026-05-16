@@ -68,10 +68,9 @@ static void SetOverlayVisible(bool visible) {
 		CursorShowDelta = 0;
 		while (ShowCursor(TRUE) < 0) CursorShowDelta++;
 		ClipCursor(nullptr);
-		PatchMouseVTable();           // re-patch in case DI device was recreated
-		ImGui::GetIO().ClearInputKeys();  // discard any stale key state
+		PatchMouseVTable();
+		ImGui::GetIO().ClearInputKeys();
 	} else {
-		RestoreMouseVTable();
 		for (int i = 0; i < CursorShowDelta; i++) ShowCursor(FALSE);
 		CursorShowDelta = 0;
 	}
