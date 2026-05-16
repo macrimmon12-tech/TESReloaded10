@@ -124,6 +124,15 @@ void ImGuiManager::NewFrame() {
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
+
+	// WM_LBUTTONDOWN doesn't reliably reach WndProc in fullscreen/captured mode,
+	// so feed button state directly from the hardware key table instead.
+	if (Visible) {
+		ImGuiIO& io = ImGui::GetIO();
+		io.AddMouseButtonEvent(0, (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0);
+		io.AddMouseButtonEvent(1, (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
+		io.AddMouseButtonEvent(2, (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0);
+	}
 }
 
 void ImGuiManager::Render() {
