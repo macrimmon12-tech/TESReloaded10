@@ -259,14 +259,17 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 
 	bool isLeaf = subsections.empty();
 
+	// Scope all widget IDs to this node's unique path.
+	ImGui::PushID(path.c_str());
+
 	if (isLeaf) {
 		bool selected = (SelectedSection == path);
 		if (ImGui::Selectable(name.c_str(), selected))
 			SelectedSection = path;
+		ImGui::PopID();
 		return;
 	}
 
-	// For shader entries (direct children of "Shaders"), show an inline enable toggle.
 	bool isShaderEntry = parentIsShaders;
 	bool open = false;
 
@@ -277,7 +280,7 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 		ImGui::PushStyleColor(ImGuiCol_Text, enabled
 			? ImVec4(0.40f, 1.00f, 0.40f, 1.0f)
 			: ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
-		open = ImGui::TreeNode(("##tn_" + name).c_str());
+		open = ImGui::TreeNode("##node");
 		ImGui::PopStyleColor();
 
 		ImGui::SameLine();
@@ -306,7 +309,7 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 			}
 		}
 	} else {
-		open = ImGui::TreeNode(("##" + path).c_str());
+		open = ImGui::TreeNode("##node");
 		ImGui::SameLine();
 		ImGui::TextUnformatted(name.c_str());
 	}
@@ -317,6 +320,8 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 			RenderSectionNode(path + "." + sub, sub, childrenAreShaders);
 		ImGui::TreePop();
 	}
+
+	ImGui::PopID();
 }
 
 static void RenderSidebar() {
