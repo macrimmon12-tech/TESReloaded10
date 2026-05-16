@@ -5,7 +5,6 @@
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-// Original GetDeviceState from the mouse DirectInput device vtable (index 9)
 typedef HRESULT(WINAPI* GetDeviceState_t)(IDirectInputDevice8*, DWORD, LPVOID);
 static GetDeviceState_t OriginalGetDeviceState = nullptr;
 
@@ -15,8 +14,9 @@ bool    ImGuiManager::DeviceLost      = false;
 HWND    ImGuiManager::GameWindow      = nullptr;
 WNDPROC ImGuiManager::OriginalWndProc = nullptr;
 
-// Intercepts the game's mouse DirectInput read. When the overlay is open,
-// zero the result so camera movement and button presses don't reach the game.
+// Tracks exactly how many ShowCursor(TRUE) calls we made so we can undo only those.
+static int CursorShowDelta = 0;
+
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
 	if (SUCCEEDED(hr) && ImGuiManager::IsVisible())
@@ -24,11 +24,19 @@ static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cb
 	return hr;
 }
 
-static void PatchMouseVTable() {
+static void** GetMouseVTable() {
 	InputControl* input = Global->GetInputControl();
-	if (!input || !input->mouseInterface) return;
+	if (!input || !input->mouseInterface) return nullptr;
+	return *reinterpret_cast<void***>(input->mouseInterface);
+}
 
-	void** vtable = *reinterpret_cast<void***>(input->mouseInterface);
+static void PatchMouseVTable() {
+	void** vtable = GetMouseVTable();
+	if (!vtable) return;
+
+	// Only patch if not already patched
+	if (vtable[9] == reinterpret_cast<void*>(HookedGetDeviceState)) return;
+
 	OriginalGetDeviceState = reinterpret_cast<GetDeviceState_t>(vtable[9]);
 
 	DWORD oldProtect;
@@ -40,10 +48,8 @@ static void PatchMouseVTable() {
 static void RestoreMouseVTable() {
 	if (!OriginalGetDeviceState) return;
 
-	InputControl* input = Global->GetInputControl();
-	if (!input || !input->mouseInterface) return;
-
-	void** vtable = *reinterpret_cast<void***>(input->mouseInterface);
+	void** vtable = GetMouseVTable();
+	if (!vtable) return;
 
 	DWORD oldProtect;
 	VirtualProtect(&vtable[9], sizeof(void*), PAGE_READWRITE, &oldProtect);
@@ -55,10 +61,14 @@ static void SetOverlayVisible(bool visible) {
 	if (ImGuiManager::IsVisible() == visible) return;
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
-		while (ShowCursor(TRUE) < 0) {}
+		CursorShowDelta = 0;
+		while (ShowCursor(TRUE) < 0)
+			CursorShowDelta++;
 		ClipCursor(nullptr);
 	} else {
-		while (ShowCursor(FALSE) >= 0) {}
+		for (int i = 0; i < CursorShowDelta; i++)
+			ShowCursor(FALSE);
+		CursorShowDelta = 0;
 	}
 }
 
@@ -122,6 +132,8 @@ void ImGuiManager::NewFrame() {
 	if (DeviceLost && coop == D3DERR_DEVICENOTRESET) {
 		ImGui_ImplDX9_CreateDeviceObjects();
 		DeviceLost = false;
+		// Re-patch in case DirectInput reinitialized its device during reset
+		PatchMouseVTable();
 	}
 
 	if (GetAsyncKeyState(VK_F11) & 1)
@@ -131,8 +143,6 @@ void ImGuiManager::NewFrame() {
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 
-	// WM_LBUTTONDOWN doesn't reliably reach WndProc in fullscreen/captured mode,
-	// so feed button state directly from the hardware key table instead.
 	if (Visible) {
 		ImGuiIO& io = ImGui::GetIO();
 		io.AddMouseButtonEvent(0, (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0);
@@ -153,7 +163,6 @@ void ImGuiManager::Render() {
 }
 
 void ImGuiManager::BuildUI() {
-	// Placeholder — replaced in Step 6 with the full NVR settings menu
 	ImGui::ShowDemoWindow();
 }
 
