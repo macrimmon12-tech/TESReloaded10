@@ -709,6 +709,19 @@ void SettingManager::SaveSettings() {
 void SettingManager::RevertSettings() {
 	Config.Init();
 	LoadSettings();
+
+	// Sync runtime shader Enabled flags — UpdateSettings() never touches them,
+	// only SwitchShaderStatus does, so we must fix them up after a config reload.
+	StringList shaders;
+	FillMenuSections(&shaders, "Shaders");
+	for (const auto& name : shaders) {
+		bool want = GetMenuShaderEnabled(name.c_str());
+		EffectRecord* effect = TheShaderManager->GetEffectByName(name.c_str());
+		if (effect) { effect->Enabled = want; continue; }
+		ShaderCollection* shader = TheShaderManager->GetShaderCollectionByName(name.c_str());
+		if (shader) shader->Enabled = want;
+	}
+
 	hasUnsavedChanges = false;
 }
 
