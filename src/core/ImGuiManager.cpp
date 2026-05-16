@@ -21,6 +21,7 @@ WNDPROC ImGuiManager::OriginalWndProc = nullptr;
 static int         CursorShowDelta    = 0;
 static std::string SelectedSection;
 static std::string HoveredDescription;
+static bool        InFileDialog       = false;
 
 // ---- DirectInput mouse block --------------------------------------------------
 
@@ -76,7 +77,7 @@ static void SetOverlayVisible(bool visible) {
 // ---- WndProc -----------------------------------------------------------------
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
+	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE && !InFileDialog)
 		SetOverlayVisible(false);
 
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
@@ -412,7 +413,11 @@ void ImGuiManager::BuildUI() {
 			ofn.nMaxFile        = MAX_PATH;
 			ofn.lpstrDefExt     = "toml";
 			ofn.Flags           = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-			if (GetSaveFileNameA(&ofn))
+			InFileDialog = true;
+			bool ok = GetSaveFileNameA(&ofn) != 0;
+			InFileDialog = false;
+			SetOverlayVisible(true);
+			if (ok)
 				TheSettingManager->SaveSettingsTo(path);
 		}
 		ImGui::SameLine();
