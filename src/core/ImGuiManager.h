@@ -8,6 +8,7 @@ public:
 	static void		Shutdown();
 
 	static bool		IsVisible() { return Visible; }
+	static void		SetVisible(bool visible) { Visible = visible; }
 
 private:
 	static bool		Initialized;

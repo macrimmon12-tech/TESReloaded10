@@ -51,7 +51,21 @@ static void RestoreMouseVTable() {
 	VirtualProtect(&vtable[9], sizeof(void*), oldProtect, &oldProtect);
 }
 
+static void SetOverlayVisible(bool visible) {
+	if (ImGuiManager::IsVisible() == visible) return;
+	ImGuiManager::SetVisible(visible);
+	if (visible) {
+		while (ShowCursor(TRUE) < 0) {}
+		ClipCursor(nullptr);
+	} else {
+		while (ShowCursor(FALSE) >= 0) {}
+	}
+}
+
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
+		SetOverlayVisible(false);
+
 	if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
 		return TRUE;
 	return CallWindowProc(OriginalWndProc, hwnd, msg, wParam, lParam);
@@ -110,16 +124,8 @@ void ImGuiManager::NewFrame() {
 		DeviceLost = false;
 	}
 
-	if (GetAsyncKeyState(VK_F11) & 1) {
-		Visible = !Visible;
-		// ShowCursor is reference-counted — loop until the cursor is actually shown/hidden
-		if (Visible) {
-			while (ShowCursor(TRUE) < 0) {}
-			ClipCursor(nullptr);
-		} else {
-			while (ShowCursor(FALSE) >= 0) {}
-		}
-	}
+	if (GetAsyncKeyState(VK_F11) & 1)
+		SetOverlayVisible(!Visible);
 
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
@@ -154,6 +160,7 @@ void ImGuiManager::BuildUI() {
 void ImGuiManager::Shutdown() {
 	if (!Initialized) return;
 
+	SetOverlayVisible(false);
 	RestoreMouseVTable();
 	SetWindowLong(GameWindow, GWL_WNDPROC, (LONG)(LONG_PTR)OriginalWndProc);
 
