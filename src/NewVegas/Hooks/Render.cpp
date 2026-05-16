@@ -239,10 +239,6 @@ __declspec(naked) void RenderInterfaceHook() {
 		popad
 		call	Jumpers::RenderInterface::Method
 		pushad
-		mov		ecx, TheGameMenuManager
-		call	GameMenuManager::Render
-		popad
-		pushad
 		call	CallImGuiRender
 		popad
 		jmp		Jumpers::RenderInterface::Return
