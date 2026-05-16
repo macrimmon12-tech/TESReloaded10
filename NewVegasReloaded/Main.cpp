@@ -3,6 +3,7 @@
 
 #include "../src/NewVegas/Hooks/Hooks.h"
 #include "../src/core/Device/Hook.h"
+#include "../src/NewVegas/Managers.h"
 
 extern "C" {
 
@@ -100,7 +101,13 @@ extern "C" {
 		if (!Interface->IsEditor) {
 			((NVSEMessagingInterface*)Interface->QueryInterface(kInterface_Messaging))->RegisterListener(Interface->GetPluginHandle(), "NVSE", MessageHandler);
 			((NVSEMessagingInterface*)Interface->QueryInterface(kInterface_Messaging))->RegisterListener(Interface->GetPluginHandle(), "Shader Loader", ShaderLoaderHandler);
-			
+
+			auto* nvseData = (NVSEDataInterface*)Interface->QueryInterface(kInterface_Data);
+			if (nvseData)
+				g_DIHookCtrl = (DIHookControl*)nvseData->GetSingleton(NVSEDataInterface::kNVSEData_DIHookControl);
+
+			g_PlayerControls = (NVSETogglePlayerControlsInterface*)Interface->QueryInterface(kInterface_PlayerControls);
+
 			SettingManager::Initialize();
 			TheSettingManager->LoadSettings();
 			AttachHooks();

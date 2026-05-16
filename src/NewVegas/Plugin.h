@@ -80,6 +80,7 @@ enum
 	// Added v0006
 	kInterface_EventManager,
 	kInterface_Logging,
+	kInterface_PlayerControls,
 
 	kInterface_Max
 };
@@ -163,4 +164,66 @@ struct NVSEMessagingInterface
 	UInt32	version;
 	bool	(* RegisterListener)(PluginHandle listener, const char* sender, EventCallback handler);
 	bool	(* Dispatch)(PluginHandle sender, UInt32 messageType, void * data, UInt32 dataLen, const char* receiver);
+};
+
+struct NVSEDataInterface
+{
+	enum { kVersion = 3 };
+	UInt32 version;
+
+	enum
+	{
+		kNVSEData_DIHookControl = 1,
+		kNVSEData_ArrayMap,
+		kNVSEData_StringMap,
+		kNVSEData_InventoryReferenceMap,
+		kNVSEData_SingletonMax,
+	};
+	void* (*GetSingleton)(UInt32 singletonID);
+
+	enum
+	{
+		kNVSEData_InventoryReferenceCreate = 1,
+		kNVSEData_FuncMax,
+	};
+	void* (*GetFunc)(UInt32 funcID);
+	void* (*GetData)(UInt32 dataID);
+	void  (*ClearScriptDataCache)();
+};
+
+namespace TogglePlayerControlsAlt
+{
+	enum DisabledControlsFlags : UInt32
+	{
+		kFlag_Movement          = 1 << 0,
+		kFlag_Looking           = 1 << 1,
+		kFlag_Pipboy            = 1 << 2,
+		kFlag_Fighting          = 1 << 3,
+		kFlag_POV               = 1 << 4,
+		kFlag_RolloverText      = 1 << 5,
+		kFlag_Sneaking          = 1 << 6,
+		kFlag_Attacking         = 1 << 7,
+		kFlag_EnterVATS         = 1 << 8,
+		kFlag_Jumping           = 1 << 9,
+		kFlag_AimingOrBlocking  = 1 << 10,
+		kFlag_Running           = 1 << 11,
+	};
+
+	enum CheckDisabledHow : UInt8
+	{
+		ByCallingMod = 0,
+		ByAnyMod,
+		ByAnyModOrVanilla,
+		ByVanillaOnly,
+	};
+}
+
+struct NVSETogglePlayerControlsInterface
+{
+	void   (__fastcall* DisablePlayerControlsAlt)(UInt32 flagsToAdd, const char* modName);
+	void   (__fastcall* EnablePlayerControlsAlt)(UInt32 flagsToRemove, const char* modName);
+	bool   (__cdecl*    GetPlayerControlsDisabledAlt)(TogglePlayerControlsAlt::CheckDisabledHow how,
+	                                                   UInt32 flagsToCheck, const char* modName);
+	UInt32 (__fastcall* GetDisabledPlayerControls)(TogglePlayerControlsAlt::CheckDisabledHow how,
+	                                               const char* modName);
 };

@@ -1,3 +1,6 @@
+DIHookControl*                       g_DIHookCtrl     = NULL;
+NVSETogglePlayerControlsInterface*   g_PlayerControls = NULL;
+
 CommandManager*		TheCommandManager	= NULL;
 SettingManager*		TheSettingManager	= NULL;
 ShaderManager*		TheShaderManager	= NULL;
