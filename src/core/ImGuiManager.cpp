@@ -3,14 +3,53 @@
 #include "imgui_impl_dx9.h"
 #include "imgui_impl_win32.h"
 
-// Forward declaration from imgui_impl_win32 — not exposed in the public header
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// Original GetDeviceState from the mouse DirectInput device vtable (index 9)
+typedef HRESULT(WINAPI* GetDeviceState_t)(IDirectInputDevice8*, DWORD, LPVOID);
+static GetDeviceState_t OriginalGetDeviceState = nullptr;
 
 bool    ImGuiManager::Initialized     = false;
 bool    ImGuiManager::Visible         = false;
 bool    ImGuiManager::DeviceLost      = false;
 HWND    ImGuiManager::GameWindow      = nullptr;
 WNDPROC ImGuiManager::OriginalWndProc = nullptr;
+
+// Intercepts the game's mouse DirectInput read. When the overlay is open,
+// zero the result so camera movement and button presses don't reach the game.
+static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
+	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
+	if (SUCCEEDED(hr) && ImGuiManager::IsVisible())
+		memset(lpvData, 0, cbData);
+	return hr;
+}
+
+static void PatchMouseVTable() {
+	InputControl* input = Global->GetInputControl();
+	if (!input || !input->mouseInterface) return;
+
+	void** vtable = *reinterpret_cast<void***>(input->mouseInterface);
+	OriginalGetDeviceState = reinterpret_cast<GetDeviceState_t>(vtable[9]);
+
+	DWORD oldProtect;
+	VirtualProtect(&vtable[9], sizeof(void*), PAGE_READWRITE, &oldProtect);
+	vtable[9] = reinterpret_cast<void*>(HookedGetDeviceState);
+	VirtualProtect(&vtable[9], sizeof(void*), oldProtect, &oldProtect);
+}
+
+static void RestoreMouseVTable() {
+	if (!OriginalGetDeviceState) return;
+
+	InputControl* input = Global->GetInputControl();
+	if (!input || !input->mouseInterface) return;
+
+	void** vtable = *reinterpret_cast<void***>(input->mouseInterface);
+
+	DWORD oldProtect;
+	VirtualProtect(&vtable[9], sizeof(void*), PAGE_READWRITE, &oldProtect);
+	vtable[9] = reinterpret_cast<void*>(OriginalGetDeviceState);
+	VirtualProtect(&vtable[9], sizeof(void*), oldProtect, &oldProtect);
+}
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
@@ -46,6 +85,8 @@ void ImGuiManager::Initialize() {
 
 	OriginalWndProc = (WNDPROC)SetWindowLong(hwnd, GWL_WNDPROC, (LONG)(LONG_PTR)WndProc);
 
+	PatchMouseVTable();
+
 	Initialized = true;
 	Logger::Log("ImGuiManager: Initialized");
 }
@@ -56,7 +97,6 @@ void ImGuiManager::NewFrame() {
 		if (!Initialized) return;
 	}
 
-	// Handle device lost/reset so we never submit draw calls with a dead device
 	HRESULT coop = TheRenderManager->device->TestCooperativeLevel();
 	if (coop == D3DERR_DEVICELOST) {
 		if (!DeviceLost) {
@@ -70,15 +110,14 @@ void ImGuiManager::NewFrame() {
 		DeviceLost = false;
 	}
 
-	// F11 toggles the overlay as a placeholder; Step 6 replaces this
-	// with the configured activation key from SettingManager.
 	if (GetAsyncKeyState(VK_F11) & 1) {
 		Visible = !Visible;
+		// ShowCursor is reference-counted — loop until the cursor is actually shown/hidden
 		if (Visible) {
-			ShowCursor(TRUE);
+			while (ShowCursor(TRUE) < 0) {}
 			ClipCursor(nullptr);
 		} else {
-			ShowCursor(FALSE);
+			while (ShowCursor(FALSE) >= 0) {}
 		}
 	}
 
@@ -106,6 +145,7 @@ void ImGuiManager::BuildUI() {
 void ImGuiManager::Shutdown() {
 	if (!Initialized) return;
 
+	RestoreMouseVTable();
 	SetWindowLong(GameWindow, GWL_WNDPROC, (LONG)(LONG_PTR)OriginalWndProc);
 
 	ImGui_ImplDX9_Shutdown();
