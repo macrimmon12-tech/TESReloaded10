@@ -76,6 +76,18 @@ static void SetOverlayVisible(bool visible) {
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
 		SetOverlayVisible(false);
+
+	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
+	// Manually convert WM_KEYDOWN to characters when ImGui needs text input.
+	if (Visible && msg == WM_KEYDOWN && ImGui::GetIO().WantTextInput) {
+		BYTE ks[256];
+		GetKeyboardState(ks);
+		WCHAR buf[4] = {};
+		int n = ToUnicode((UINT)wParam, (lParam >> 16) & 0xFF, ks, buf, 4, 0);
+		for (int i = 0; i < n; i++)
+			ImGui::GetIO().AddInputCharacterUTF16(buf[i]);
+	}
+
 	if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
 		return TRUE;
 	return CallWindowProc(OriginalWndProc, hwnd, msg, wParam, lParam);
@@ -189,20 +201,18 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node) {
 	}
 	case NodeType::Float: {
 		float val = (float)atof(node.Value);
-		if (ImGui::DragFloat(node.Key, &val, 0.001f, 0.0f, 0.0f, "%.4f"))
-			if (ImGui::IsItemDeactivatedAfterEdit()) {
-				TheSettingManager->SetSetting(node.Section, node.Key, val);
-				TheSettingManager->LoadSettings();
-			}
+		if (ImGui::DragFloat(node.Key, &val, 0.001f, 0.0f, 0.0f, "%.4f")) {
+			TheSettingManager->SetSetting(node.Section, node.Key, val);
+			TheSettingManager->LoadSettings();
+		}
 		break;
 	}
 	case NodeType::Integer: {
 		int val = atoi(node.Value);
-		if (ImGui::DragInt(node.Key, &val, 1.0f))
-			if (ImGui::IsItemDeactivatedAfterEdit()) {
-				TheSettingManager->SetSetting(node.Section, node.Key, val);
-				TheSettingManager->LoadSettings();
-			}
+		if (ImGui::DragInt(node.Key, &val, 1.0f)) {
+			TheSettingManager->SetSetting(node.Section, node.Key, val);
+			TheSettingManager->LoadSettings();
+		}
 		break;
 	}
 	default: {
