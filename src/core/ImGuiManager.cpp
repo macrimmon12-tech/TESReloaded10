@@ -72,8 +72,15 @@ void ImGuiManager::NewFrame() {
 
 	// F11 toggles the overlay as a placeholder; Step 6 replaces this
 	// with the configured activation key from SettingManager.
-	if (GetAsyncKeyState(VK_F11) & 1)
+	if (GetAsyncKeyState(VK_F11) & 1) {
 		Visible = !Visible;
+		if (Visible) {
+			ShowCursor(TRUE);
+			ClipCursor(nullptr);
+		} else {
+			ShowCursor(FALSE);
+		}
+	}
 
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
