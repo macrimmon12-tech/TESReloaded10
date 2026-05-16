@@ -306,7 +306,9 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 			}
 		}
 	} else {
-		open = ImGui::TreeNode(name.c_str());
+		open = ImGui::TreeNode(("##" + path).c_str());
+		ImGui::SameLine();
+		ImGui::TextUnformatted(name.c_str());
 	}
 
 	if (open) {
