@@ -29,7 +29,10 @@ static bool        InFileDialog       = false;
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
-	if (SUCCEEDED(hr) && ImGuiManager::IsVisible())
+	// Only zero mouse-sized buffers (DIMOUSESTATE2 = 20 bytes).  The keyboard
+	// device shares this vtable in dinput8.dll and calls GetDeviceState(256, ...);
+	// passing that through unchanged keeps OnKeyDown/OnKeyPressed working.
+	if (SUCCEEDED(hr) && ImGuiManager::IsVisible() && cbData == sizeof(DIMOUSESTATE2))
 		memset(lpvData, 0, cbData);
 	return hr;
 }
@@ -84,6 +87,11 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
 	// Manually convert WM_KEYDOWN to characters when ImGui needs text input.
+	if (Visible && msg == WM_KEYDOWN && wParam == VK_ESCAPE) {
+		SetOverlayVisible(false);
+		return TRUE;
+	}
+
 	if (Visible && msg == WM_KEYDOWN && ImGui::GetIO().WantTextInput) {
 		BYTE ks[256];
 		GetKeyboardState(ks);
@@ -382,8 +390,10 @@ void ImGuiManager::BuildUI() {
 	ImGui::SetNextWindowSizeConstraints(ImVec2(500.0f, 300.0f), ImVec2(FLT_MAX, FLT_MAX));
 
 	ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
-	if (!ImGui::Begin("New Vegas Reloaded", nullptr, flags)) {
+	bool open = true;
+	if (!ImGui::Begin("New Vegas Reloaded", &open, flags) || !open) {
 		ImGui::End();
+		if (!open) SetOverlayVisible(false);
 		return;
 	}
 
