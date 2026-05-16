@@ -9,66 +9,70 @@
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+typedef HRESULT(WINAPI* GetDeviceState_t)(IDirectInputDevice8*, DWORD, LPVOID);
+static GetDeviceState_t OriginalGetDeviceState = nullptr;
+
 bool    ImGuiManager::Initialized     = false;
 bool    ImGuiManager::Visible         = false;
 bool    ImGuiManager::DeviceLost      = false;
 HWND    ImGuiManager::GameWindow      = nullptr;
 WNDPROC ImGuiManager::OriginalWndProc = nullptr;
 
-static int         CursorShowDelta    = 0;
 static std::string SelectedSection;
 static std::string HoveredDescription;
 static bool        InFileDialog       = false;
 
-// Flags we disable on the player while the overlay is open.
-static constexpr UInt32 kOverlayControlFlags =
-	TogglePlayerControlsAlt::kFlag_Movement   |
-	TogglePlayerControlsAlt::kFlag_Looking    |
-	TogglePlayerControlsAlt::kFlag_Fighting   |
-	TogglePlayerControlsAlt::kFlag_Attacking  |
-	TogglePlayerControlsAlt::kFlag_AimingOrBlocking |
-	TogglePlayerControlsAlt::kFlag_EnterVATS  |
-	TogglePlayerControlsAlt::kFlag_Jumping    |
-	TogglePlayerControlsAlt::kFlag_POV;
+// ---- DirectInput mouse block (zeros lX/lY/lZ deltas + buttons) ---------------
+// xNVSE has no public API to block mouse movement deltas, so we patch the
+// IDirectInputDevice8 vtable directly.  The hook is installed once and never
+// removed; it simply passes through when the overlay is not visible.
 
-// ---- xNVSE input block -------------------------------------------------------
+static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
+	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
+	if (SUCCEEDED(hr) && ImGuiManager::IsVisible())
+		memset(lpvData, 0, cbData);
+	return hr;
+}
+
+static void** GetMouseVTable() {
+	InputControl* input = Global->GetInputControl();
+	if (!input || !input->mouseInterface) return nullptr;
+	return *reinterpret_cast<void***>(input->mouseInterface);
+}
+
+static void PatchMouseVTable() {
+	void** vtable = GetMouseVTable();
+	if (!vtable) return;
+	if (vtable[9] == reinterpret_cast<void*>(HookedGetDeviceState)) return;
+	OriginalGetDeviceState = reinterpret_cast<GetDeviceState_t>(vtable[9]);
+	DWORD old;
+	VirtualProtect(&vtable[9], sizeof(void*), PAGE_READWRITE, &old);
+	vtable[9] = reinterpret_cast<void*>(HookedGetDeviceState);
+	VirtualProtect(&vtable[9], sizeof(void*), old, &old);
+}
+
+// ---- xNVSE input block (mouse buttons / wheel via DIHookControl) -------------
 
 static void BlockGameInput(bool block) {
-	// Block/unblock all mouse buttons and wheel via DIHookControl so clicks and
-	// scroll events don't reach the game while the overlay is open.
 	if (g_DIHookCtrl) {
 		for (UInt32 code = kMacro_MouseButtonOffset; code < kMaxMacros; code++)
 			g_DIHookCtrl->SetKeyDisableState(code, block, DIHookControl::kDisable_User);
 	}
-
-	// Disable/enable player controls (camera, movement, etc.) so the character
-	// doesn't react to mouse deltas or WASD while the overlay is open.
-	if (g_PlayerControls) {
-		if (block)
-			g_PlayerControls->DisablePlayerControlsAlt(kOverlayControlFlags, "NVR");
-		else
-			g_PlayerControls->EnablePlayerControlsAlt(kOverlayControlFlags, "NVR");
-	}
 }
 
-// ---- Cursor / visibility -----------------------------------------------------
+// ---- Visibility --------------------------------------------------------------
 
 static void SetOverlayVisible(bool visible) {
 	if (ImGuiManager::IsVisible() == visible) return;
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
-		// ShowCursor uses a reference counter; track every TRUE call so we can
-		// undo exactly that many FALSE calls on hide.
-		CursorShowDelta = 0;
-		int count;
-		do { count = ShowCursor(TRUE); CursorShowDelta++; } while (count < 0);
 		ClipCursor(nullptr);
 		BlockGameInput(true);
+		ImGui::GetIO().MouseDrawCursor = true;
 		ImGui::GetIO().ClearInputKeys();
 	} else {
 		BlockGameInput(false);
-		for (int i = 0; i < CursorShowDelta; i++) ShowCursor(FALSE);
-		CursorShowDelta = 0;
+		ImGui::GetIO().MouseDrawCursor = false;
 	}
 }
 
@@ -89,17 +93,8 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 			ImGui::GetIO().AddInputCharacterUTF16(buf[i]);
 	}
 
-	if (Visible) {
-		if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
-			return TRUE;
-		// When the overlay is open, keep the cursor visible everywhere in the window.
-		// ImGui only handles WM_SETCURSOR when the mouse is over one of its windows;
-		// if the mouse is in the game viewport the original WndProc would hide it.
-		if (msg == WM_SETCURSOR) {
-			SetCursor(LoadCursor(nullptr, IDC_ARROW));
-			return TRUE;
-		}
-	}
+	if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+		return TRUE;
 	return CallWindowProc(OriginalWndProc, hwnd, msg, wParam, lParam);
 }
 
@@ -131,6 +126,7 @@ void ImGuiManager::Initialize() {
 	ImGui_ImplDX9_Init(device);
 
 	OriginalWndProc = (WNDPROC)SetWindowLong(hwnd, GWL_WNDPROC, (LONG)(LONG_PTR)WndProc);
+	PatchMouseVTable();
 
 	Initialized = true;
 	Logger::Log("ImGuiManager: Initialized");
@@ -160,6 +156,7 @@ void ImGuiManager::NewFrame() {
 	if (DeviceLost && coop == D3DERR_DEVICENOTRESET) {
 		ImGui_ImplDX9_CreateDeviceObjects();
 		DeviceLost = false;
+		PatchMouseVTable();
 	}
 
 	// Close if a game menu is active (inventory, pip-boy, etc.)
