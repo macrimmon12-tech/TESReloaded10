@@ -4,6 +4,8 @@
 #include "imgui_impl_win32.h"
 #include <sstream>
 #include <iomanip>
+#include <commdlg.h>
+#pragma comment(lib, "comdlg32.lib")
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -389,11 +391,35 @@ void ImGuiManager::BuildUI() {
 	else
 		ImGui::TextDisabled("New Vegas Reloaded  %s", PluginVersion::VersionString);
 
-	ImGui::SameLine(ImGui::GetContentRegionAvail().x - 54.0f + ImGui::GetCursorPosX()
-		- ImGui::GetContentRegionAvail().x + ImGui::GetContentRegionAvail().x - 54.0f);
-	if (ImGui::Button("Save", ImVec2(54.0f, 0.0f))) {
-		TheSettingManager->SaveSettings();
-		InterfaceManager->ShowMessage("Settings saved.");
+	{
+		const float btnRevert = 54.0f, btnSaveTo = 72.0f, btnSave = 54.0f;
+		const float spacing   = ImGui::GetStyle().ItemSpacing.x;
+		const float totalW    = btnRevert + btnSaveTo + btnSave + spacing * 2.0f;
+		ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - totalW);
+
+		if (ImGui::Button("Revert", ImVec2(btnRevert, 0.0f))) {
+			TheSettingManager->RevertSettings();
+			SelectedSection.clear();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Save to...", ImVec2(btnSaveTo, 0.0f))) {
+			char path[MAX_PATH] = "NewVegasReloaded.dll.toml";
+			OPENFILENAMEA ofn   = {};
+			ofn.lStructSize     = sizeof(ofn);
+			ofn.hwndOwner       = GameWindow;
+			ofn.lpstrFilter     = "TOML Files\0*.toml\0All Files\0*.*\0";
+			ofn.lpstrFile       = path;
+			ofn.nMaxFile        = MAX_PATH;
+			ofn.lpstrDefExt     = "toml";
+			ofn.Flags           = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+			if (GetSaveFileNameA(&ofn))
+				TheSettingManager->SaveSettingsTo(path);
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Save", ImVec2(btnSave, 0.0f))) {
+			TheSettingManager->SaveSettings();
+			InterfaceManager->ShowMessage("Settings saved.");
+		}
 	}
 
 	ImGui::Separator();

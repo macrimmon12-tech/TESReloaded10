@@ -706,6 +706,18 @@ void SettingManager::SaveSettings() {
 	hasUnsavedChanges = false;
 }
 
+void SettingManager::RevertSettings() {
+	Config.Init();
+	LoadSettings();
+	hasUnsavedChanges = false;
+}
+
+void SettingManager::SaveSettingsTo(const char* Path) {
+	std::ofstream file(Path, std::ios::trunc | std::ios::binary);
+	file << Config.TomlConfig << std::endl;
+	file.close();
+}
+
 int SettingManager::GetSettingI(const char* Section, const char* Key) {
 	Configuration::ConfigNode Node;
 	int Value = 0; //default in case the setting doesn't exist

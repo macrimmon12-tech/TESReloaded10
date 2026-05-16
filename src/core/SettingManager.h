@@ -339,6 +339,8 @@ public:
 	static void				Initialize();
 	void					LoadSettings();
 	void					SaveSettings();
+	void					RevertSettings();
+	void					SaveSettingsTo(const char* Path);
 	int						GetSettingI(const char* Section, const char* Key);
 	float					GetSettingF(const char* Section, const char* Key);
 	char*					GetSettingS(const char* Section, const char* Key, char* Value);
