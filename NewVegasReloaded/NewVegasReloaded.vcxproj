@@ -180,6 +180,9 @@
     <ClCompile Include="..\lib\imgui\imgui.cpp">
       <ForcedIncludeFiles></ForcedIncludeFiles>
     </ClCompile>
+    <ClCompile Include="..\lib\imgui\imgui_demo.cpp">
+      <ForcedIncludeFiles></ForcedIncludeFiles>
+    </ClCompile>
     <ClCompile Include="..\lib\imgui\imgui_draw.cpp">
       <ForcedIncludeFiles></ForcedIncludeFiles>
     </ClCompile>
