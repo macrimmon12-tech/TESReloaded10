@@ -413,7 +413,7 @@ void ImGuiManager::BuildUI() {
 			ofn.lpstrFile       = path;
 			ofn.nMaxFile        = MAX_PATH;
 			ofn.lpstrDefExt     = "toml";
-			ofn.Flags           = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+			ofn.Flags           = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 			InFileDialog = true;
 			bool ok = GetSaveFileNameA(&ofn) != 0;
 			InFileDialog = false;

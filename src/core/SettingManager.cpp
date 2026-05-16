@@ -1,27 +1,33 @@
 #define TOML11_PRESERVE_COMMENTS_BY_DEFAULT
 
+// GetCurrentDirectoryA is reliable at startup but GetSaveFileNameA (and other
+// common-dialog calls) can silently change it.  Capture the game root once and
+// reuse it everywhere config paths are built.
+static const char* GetConfigBase() {
+	static char base[MAX_PATH] = {};
+	if (!base[0]) GetCurrentDirectoryA(MAX_PATH, base);
+	return base;
+}
+
+static void BuildConfigPath(char (&out)[MAX_PATH], const char* suffix) {
+	strcpy(out, GetConfigBase());
+	strcat(out, suffix);
+}
+
 /*
 * The Config Class holds, accesses and maintains the current instance of config document and its keys.
 */
 void SettingManager::Configuration::Init() {
 
-	char TomlFilename[MAX_PATH];
-	char DefaultsFilename[MAX_PATH];
+	char TomlFilename[MAX_PATH], DefaultsFilename[MAX_PATH];
+	BuildConfigPath(TomlFilename,     TomlSettingsFile);
+	BuildConfigPath(DefaultsFilename, DefaultsSettingsFile);
 
 	configLoaded = false;
-	GetCurrentDirectoryA(MAX_PATH, TomlFilename);
-	GetCurrentDirectoryA(MAX_PATH, DefaultsFilename);
-	strcat(TomlFilename, TomlSettingsFile);
-	strcat(DefaultsFilename, DefaultsSettingsFile);
 
 	try {
 		Logger::Log("Loading defaults from file %s", DefaultsFilename);
 		DefaultConfig = toml::parse<toml::preserve_comments, std::map>((std::string_view)DefaultsFilename).as_table();
-
-		//// log config file contents
-		//std::stringstream buffer;
-		//buffer << DefaultConfig << std::endl;
-		//Logger::Log("%s", buffer.str().c_str());
 	}
 	catch (const std::exception& e) {
 		Logger::Log("error loading defaults toml: %s", e.what());
@@ -30,12 +36,6 @@ void SettingManager::Configuration::Init() {
 	try {
 		Logger::Log("Loading settings from file %s", TomlFilename);
 		TomlConfig = toml::parse<toml::discard_comments, std::map>((std::string_view)TomlFilename).as_table();
-
-		//// log config file contents
-		//std::stringstream buffer;
-		//buffer << toml::format(TomlConfig, /*width = */ 0, /*prec = */ 4) << std::endl;
-		//Logger::Log("%s", buffer.str().c_str());
-
 	}
 	catch(const std::exception& e){
 		Logger::Log("error loading toml: %s, new config will be created from defaults.", e.what());
@@ -690,9 +690,7 @@ void SettingManager::GetFormList(const char* SectionName, FormsList* SettingList
 void SettingManager::SaveSettings() {
 
 	char Filename[MAX_PATH];
-
-	GetCurrentDirectoryA(MAX_PATH, Filename);
-	strcat(Filename, TomlSettingsFile);
+	BuildConfigPath(Filename, TomlSettingsFile);
 	std::ofstream ConfigurationFile(Filename, std::ios::trunc | std::ios::binary);
 
 	// log config file contents
