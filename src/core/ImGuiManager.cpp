@@ -65,8 +65,11 @@ static void SetOverlayVisible(bool visible) {
 	if (ImGuiManager::IsVisible() == visible) return;
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
+		// ShowCursor uses a reference counter; we need to track every TRUE call
+		// so we can undo exactly that many FALSE calls on hide.
 		CursorShowDelta = 0;
-		while (ShowCursor(TRUE) < 0) CursorShowDelta++;
+		int count;
+		do { count = ShowCursor(TRUE); CursorShowDelta++; } while (count < 0);
 		ClipCursor(nullptr);
 		PatchMouseVTable();
 		ImGui::GetIO().ClearInputKeys();
@@ -93,8 +96,17 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 			ImGui::GetIO().AddInputCharacterUTF16(buf[i]);
 	}
 
-	if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
-		return TRUE;
+	if (Visible) {
+		if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+			return TRUE;
+		// When the overlay is open, keep the cursor visible everywhere in the window.
+		// ImGui only handles WM_SETCURSOR when the mouse is over one of its windows;
+		// if the mouse is in the game viewport the original WndProc would hide it.
+		if (msg == WM_SETCURSOR) {
+			SetCursor(LoadCursor(nullptr, IDC_ARROW));
+			return TRUE;
+		}
+	}
 	return CallWindowProc(OriginalWndProc, hwnd, msg, wParam, lParam);
 }
 
