@@ -191,6 +191,7 @@ void SettingManager::Configuration::FillSections(StringList* Sections, const cha
 	Sections->clear();
 
 	for (const auto& [key, value] : sectionsTable->as_table()) {
+		if (!value.is_table()) continue; // skip leaf settings, only return sub-sections
 		const char* name = key.c_str();
 		//if (!memcmp(name, "Status", 6)) continue; // Ignore status subsections (TODO: breaks Menu, needs fixing)
 		if (!memcmp(name, "_", 1)) name = name + 1; //discard first "_"
@@ -229,9 +230,10 @@ void SettingManager::Configuration::FillSettings(SettingList* Nodes, const char*
 
 	Nodes->clear();
 	for (const auto& [key, value] : settingsTable->as_table()) {
+		if (value.is_table()) continue; // skip sub-sections, only return leaf settings
 		ConfigNode Node;
-		FillNode(&Node, Section, key.data());
-		Nodes->push_back(Node);
+		if (FillNode(&Node, Section, key.data()))
+			Nodes->push_back(Node);
 	}
 }
 
