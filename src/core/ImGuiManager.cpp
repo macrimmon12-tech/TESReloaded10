@@ -4,7 +4,6 @@
 #include "imgui_impl_win32.h"
 #include <sstream>
 #include <iomanip>
-#include <unordered_map>
 #include <commdlg.h>
 #pragma comment(lib, "comdlg32.lib")
 
@@ -85,6 +84,19 @@ static void SetOverlayVisible(bool visible) {
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE && !InFileDialog)
 		SetOverlayVisible(false);
+
+	// Toggle key handled via WM so it works regardless of DirectInput state.
+	// Reconstruct the DIK code from the scan code + extended flag, then compare
+	// with the configured KeyEnable value.
+	if (msg == WM_KEYDOWN && TheSettingManager) {
+		UINT scancode = (lParam >> 16) & 0xFF;
+		bool ext      = (lParam & (1 << 24)) != 0;
+		UINT dik      = ext ? (0x80 | scancode) : scancode;
+		if (dik == TheSettingManager->SettingsMain.Menu.KeyEnable) {
+			SetOverlayVisible(!Visible);
+			return TRUE;
+		}
+	}
 
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
 	// Manually convert WM_KEYDOWN to characters when ImGui needs text input.
@@ -176,10 +188,6 @@ void ImGuiManager::NewFrame() {
 	if (Visible && !InterfaceManager->IsActive(Menu::MenuType::kMenuType_None))
 		SetOverlayVisible(false);
 
-	// Toggle via the configured key (same DirectInput keycode the old menu used)
-	if (TheSettingManager && Global && Global->OnKeyDown(TheSettingManager->SettingsMain.Menu.KeyEnable))
-		SetOverlayVisible(!Visible);
-
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
@@ -233,18 +241,21 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node) {
 		break;
 	}
 	default: {
-		// A plain local buf reset from node.Value each frame causes ImGui to detect
-		// an external buffer change and reset the in-progress edit every frame.
-		// Use a persistent buffer per widget ID, only refreshed when not editing.
-		static std::unordered_map<ImGuiID, std::array<char, 80>> sBufs;
+		// A local buf reset from node.Value each frame causes ImGui to detect an
+		// external buffer change and reset the in-progress edit every frame.
+		// Persist a string per widget ID; only refresh from node.Value when idle.
+		static std::unordered_map<ImGuiID, std::string> sBufs;
 		ImGuiID id = ImGui::GetID(node.Key);
-		auto& buf = sBufs[id];
+		std::string& persistent = sBufs[id];
 		if (ImGui::GetActiveID() != id)
-			strncpy_s(buf.data(), buf.size(), node.Value, _TRUNCATE);
-		if (ImGui::InputText(node.Key, buf.data(), buf.size()))
-			; // ImGui writes back to buf each frame while active; commit on focus loss
+			persistent = node.Value;
+		char buf[80];
+		strncpy_s(buf, persistent.c_str(), sizeof(buf) - 1);
+		buf[sizeof(buf) - 1] = '\0';
+		if (ImGui::InputText(node.Key, buf, sizeof(buf)))
+			persistent = buf; // keep in sync while ImGui writes back each frame
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
-			TheSettingManager->SetSettingS(node.Section, node.Key, buf.data());
+			TheSettingManager->SetSettingS(node.Section, node.Key, buf);
 			TheSettingManager->LoadSettings();
 		}
 		break;
