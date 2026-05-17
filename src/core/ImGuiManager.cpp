@@ -4,6 +4,7 @@
 #include "imgui_impl_win32.h"
 #include <sstream>
 #include <iomanip>
+#include <unordered_map>
 #include <commdlg.h>
 #pragma comment(lib, "comdlg32.lib")
 
@@ -103,6 +104,10 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
 	if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
 		return TRUE;
+	// WndProcHandler returns 0 for scroll messages, so eat them explicitly to
+	// prevent the game's WndProc from interfering with ImGui child-window scroll.
+	if (Visible && (msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL))
+		return 0;
 	return CallWindowProc(OriginalWndProc, hwnd, msg, wParam, lParam);
 }
 
@@ -228,10 +233,18 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node) {
 		break;
 	}
 	default: {
-		char buf[80];
-		strncpy_s(buf, node.Value, sizeof(buf));
-		if (ImGui::InputText(node.Key, buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-			TheSettingManager->SetSettingS(node.Section, node.Key, buf);
+		// A plain local buf reset from node.Value each frame causes ImGui to detect
+		// an external buffer change and reset the in-progress edit every frame.
+		// Use a persistent buffer per widget ID, only refreshed when not editing.
+		static std::unordered_map<ImGuiID, std::array<char, 80>> sBufs;
+		ImGuiID id = ImGui::GetID(node.Key);
+		auto& buf = sBufs[id];
+		if (ImGui::GetActiveID() != id)
+			strncpy_s(buf.data(), buf.size(), node.Value, _TRUNCATE);
+		if (ImGui::InputText(node.Key, buf.data(), buf.size()))
+			; // ImGui writes back to buf each frame while active; commit on focus loss
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			TheSettingManager->SetSettingS(node.Section, node.Key, buf.data());
 			TheSettingManager->LoadSettings();
 		}
 		break;
