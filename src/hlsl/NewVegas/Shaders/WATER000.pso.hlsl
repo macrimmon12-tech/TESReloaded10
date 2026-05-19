@@ -31,6 +31,7 @@ sampler2D DisplacementMap : register(s3); //unused
 sampler2D DepthMap : register(s4);
 sampler2D TESR_samplerWater : register(s5) < string ResourceName = "Water\water_NRM.dds"; > = sampler_state { ADDRESSU = WRAP; ADDRESSV = WRAP; ADDRESSW = WRAP; MAGFILTER = ANISOTROPIC; MINFILTER = LINEAR; MIPFILTER = LINEAR; } ;
 sampler2D TESR_RippleSampler : register(s6) < string ResourceName = "Precipitations\ripples.dds"; > = sampler_state { ADDRESSU = WRAP; ADDRESSV = WRAP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+sampler2D TESR_CausticsSampler : register(s7) < string ResourceName = "Water\caust_001.dds"; > = sampler_state { ADDRESSU = WRAP; ADDRESSV = WRAP; MAGFILTER = ANISOTROPIC; MINFILTER = ANISOTROPIC; MIPFILTER = ANISOTROPIC; };
 
 #include "Includes/Helpers.hlsl"
 #include "Includes/Water.hlsl"
@@ -84,9 +85,16 @@ PS_OUTPUT main(PS_INPUT IN, float2 PixelPos : VPOS) {
     float4 color = linearize(tex2Dproj(RefractionMap, refractionPos));
     color = getLightTravel(refractedDepth, linShallowColor, linDeepColor, sunLuma, TESR_WaterSettings, color);
     color = lerp(getTurbidityFog(refractedDepth, linShallowColor, TESR_WaterVolume, sunLuma, color), linearize(TESR_WaterLODColor) * sunLuma, LODfade); // fade to full fog to hide LOD seam
+
+    float caustics = getCausticsFromAbove(TESR_CausticsSampler, IN.WorldPosition.xy, TESR_GameTime.x, TESR_WaveParams.z);
+    float causticDepthFade = saturate(1.0 - refractedDepth.x);
+    float causticSunFade = shades(TESR_SunDirection.xyz, float3(0, 0, 1));
+    color.rgb += color.rgb * pows(caustics, 2.0) * sunLuma * causticDepthFade * causticSunFade * TESR_WaterVolume.x * 100 * (1 - LODfade);
+
     //color = getDiffuse(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, distance, linHorizonColor, color);
     color = lerp(color, getFresnel(surfaceNormal, eyeDirection, reflection, TESR_WaveParams.w, color), smoothstep(0, 0.2, refractedDepth.x)); // reduce fresnel in low depths
-    color = getSpecular(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, linSunColor.rgb, color);
+    float roughness = lerp(0.04, 0.15, saturate(TESR_WaveParams.x));
+    color = getSpecular(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, linSunColor.rgb, roughness, color);
     color = lerp(getShoreFade(IN, waterDepth.x, TESR_WaterShorelineParams.x, TESR_WaterVolume.y, color), color, LODfade);
 
     color = delinearize(color);

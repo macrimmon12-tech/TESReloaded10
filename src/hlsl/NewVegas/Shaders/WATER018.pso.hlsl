@@ -77,7 +77,8 @@ PS_OUTPUT main(PS_INPUT IN, float2 PixelPos : VPOS) {
     color = getTurbidityFog(refractedDepth, linShallowColor, TESR_PlacedWaterVolume, sunLuma, color);
     //color = getDiffuse(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, distance, linShallowColor, color);
     color = getFresnel(surfaceNormal, eyeDirection, linHorizonColor, TESR_PlacedWaveParams.w, color);
-    color = getSpecular(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, linSunColor.rgb, color);
+    float roughness = lerp(0.04, 0.15, saturate(TESR_PlacedWaveParams.x));
+    color = getSpecular(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, linSunColor.rgb, roughness, color);
 
     color = delinearize(color); //delinearise
     

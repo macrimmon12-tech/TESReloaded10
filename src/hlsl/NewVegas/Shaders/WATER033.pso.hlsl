@@ -76,7 +76,8 @@ PS_OUTPUT main(PS_INPUT IN) {
     float4 color = linShallowColor * sunLuma;
     // color = getDiffuse(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, distance, linHorizonColor, color);
     color = getFresnel(surfaceNormal, eyeDirection, reflection, TESR_WaveParams.w, color);
-    color = getSpecular(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, linSunColor.rgb, color);
+    float roughness = lerp(0.04, 0.15, saturate(TESR_WaveParams.x));
+    color = getSpecular(surfaceNormal, TESR_SunDirection.xyz, eyeDirection, linSunColor.rgb, roughness, color);
     color.a = 1;
 
     color = delinearize(color); //delinearise

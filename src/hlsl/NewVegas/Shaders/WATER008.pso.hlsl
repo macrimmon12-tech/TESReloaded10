@@ -35,6 +35,7 @@ sampler2D DisplacementMap : register(s3);
 sampler2D DepthMap : register(s4);
 
 sampler2D TESR_samplerWater : register(s5) < string ResourceName = "Water\water_NRM.dds"; > = sampler_state { ADDRESSU = WRAP; ADDRESSV = WRAP; ADDRESSW = WRAP; MAGFILTER = ANISOTROPIC; MINFILTER = LINEAR; MIPFILTER = LINEAR; } ;
+sampler2D TESR_CausticsSampler : register(s6) < string ResourceName = "Water\caust_001.dds"; > = sampler_state { ADDRESSU = WRAP; ADDRESSV = WRAP; MAGFILTER = ANISOTROPIC; MINFILTER = ANISOTROPIC; MIPFILTER = ANISOTROPIC; };
 
 #include "Includes/Helpers.hlsl"
 #include "Includes/Water.hlsl"
@@ -77,7 +78,16 @@ PS_OUTPUT main(PS_INPUT IN, float2 PixelPos : VPOS) {
     float4 color = linearize(tex2Dproj(RefractionMap, refractionPos));
     color = getLightTravel(refractedDepth, linShallowColor, linDeepColor, 0.5, TESR_WaterSettings, color);
    	color = getTurbidityFog(refractedDepth, linShallowColor, TESR_WaterVolume, sunLuma, color);
+
+    float caustics = getCausticsFromAbove(TESR_CausticsSampler, IN.WorldPosition.xy, TESR_GameTime.x, TESR_WaveParams.z);
+    float causticDepthFade = saturate(1.0 - refractedDepth.x);
+    float causticDirFade = shades(TESR_SunDirection.xyz, float3(0, 0, 1));
+    color.rgb += color.rgb * pows(caustics, 2.0) * sunLuma * causticDepthFade * causticDirFade * TESR_WaterVolume.x * 100;
+
     color = getFresnel(surfaceNormal, eyeDirection, linFogColor, TESR_WaveParams.w, color);
+
+    float fresnelFactor = saturate(pow(1.0 - shades(eyeDirection, surfaceNormal), 3));
+    color.rgb += linFogColor.rgb * pows(caustics, 2.0) * fresnelFactor * TESR_WaterVolume.x * 20;
 
 	for (int i= 0; i< 12; i++){
 	    color = getPointLightSpecular(surfaceNormal, TESR_ShadowLightPosition[i], position, eyeDirection, TESR_LightColor[i].rgb * TESR_LightColor[i].w, color);

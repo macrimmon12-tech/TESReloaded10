@@ -58,24 +58,38 @@ float4 getScreenpos(PS_INPUT IN){
     return screenPos;
 }
 
-float3 getWaveTexture(PS_INPUT IN, float distance, float4 waveParams) {
+// Accumulate multiple waves then reconstruct: normalize(float3(n.xy, 1.0 + n.z))
+float3 GerstnerNormal(float2 pos, float2 dir, float wavelength, float kA, float steepness, float phase) {
+    dir = normalize(dir);
+    float k = 2.0 * PI / wavelength;
+    float phi = k * dot(dir, pos) + phase;
+    return float3(-dir.x * kA * cos(phi), -dir.y * kA * cos(phi), -steepness * kA * sin(phi));
+}
 
+float3 getWaveTexture(PS_INPUT IN, float distance, float4 waveParams) {
     float2 texPos = IN.LTEXCOORD_7;
 
-	float waveWidth = waveParams.y;
+    float waveWidth = waveParams.y;
     float choppiness = waveParams.x;
     float speed = TESR_GameTime.x * 0.002 * waveParams.z;
-    float smallScale = 0.5;
-    float bigScale = 2;
-    float3 waveTexture = expand(tex2D(TESR_samplerWater, texPos * smallScale * waveWidth + normalize(float2(1, 4)) * speed)).xyz * 0.5;
-    float3 waveTextureLarge = expand(tex2D(TESR_samplerWater, texPos * bigScale * waveWidth + normalize(float2(-3, -2)) * speed)).xyz * 1;
-    float3 waveTextureMicro = expand(tex2D(TESR_samplerWater, texPos * bigScale * 2 * waveWidth + normalize(float2(2, 2)) * speed)).xyz * 0.3;
+    float steepness = saturate(choppiness) * 0.4;
+    float baseWavelength = 8.0 / max(waveWidth, 0.01);
 
-    // combine waves
-    waveTexture = float3(waveTextureLarge.xy + waveTexture.xy + waveTextureMicro.xy,  waveTextureLarge.z + waveTexture.z + waveTextureMicro.z);
-    waveTexture.z *= 1/max(choppiness, 0.000001);
-    // waveTexture.z *= lerp(1, 0.5, (distance / 4096)) / max(choppiness, 0.000001);
+    // Four Gerstner waves: tiling-free primary structure replacing the two large-scale texture samples
+    float kA = 0.28;
+    float3 n = float3(0, 0, 0);
+    n += GerstnerNormal(texPos, float2( 1.0,  2.0), baseWavelength,        kA,        steepness, speed * 1.00);
+    n += GerstnerNormal(texPos, float2(-2.0,  3.0), baseWavelength * 0.71, kA * 0.85, steepness, speed * 1.25);
+    n += GerstnerNormal(texPos, float2( 3.0, -2.0), baseWavelength * 0.53, kA * 0.65, steepness, speed * 1.55);
+    n += GerstnerNormal(texPos, float2(-1.0, -3.0), baseWavelength * 0.37, kA * 0.45, steepness, speed * 1.90);
 
+    float3 primaryNormal = normalize(float3(n.xy, 1.0 + n.z));
+
+    // Single micro-detail texture sample for high-frequency surface ripples
+    float3 microDetail = expand(tex2D(TESR_samplerWater, texPos * 4.0 * waveWidth + normalize(float2(1, 3)) * speed)).xyz * 0.3;
+
+    float3 waveTexture = float3(primaryNormal.xy + microDetail.xy, primaryNormal.z);
+    waveTexture.z *= 1.0 / max(choppiness, 0.000001);
     waveTexture = normalize(waveTexture);
 
     return waveTexture;
@@ -152,28 +166,30 @@ float4 getFresnel(float3 surfaceNormal, float3 eyeDirection, float4 reflection, 
     return float4(result, 1);
 }
 
-float4 getSpecular(float3 surfaceNormal, float3 lightDir, float3 eyeDirection, float3 specColor, float4 color){
-    float specularBoost = 10;
-    float glossiness = 10000;
-
+float4 getSpecular(float3 surfaceNormal, float3 lightDir, float3 eyeDirection, float3 specColor, float roughness, float4 color){
+    float specularBoost = 6;
     float3 normal = normalize(surfaceNormal);
-    float3 halfway = normalize(eyeDirection + lightDir);
+
+    // Find the closest point on the sun disk to the specular reflection ray.
+    // This accounts for the sun's angular size rather than treating it as a point,
+    // giving a broader and more physically natural highlight on water.
+    float3 R = reflect(-eyeDirection, normal);
+    float radius = sin(SUN_RADIUS);
+    float dist = cos(SUN_RADIUS);
+    float RdotL = dot(R, lightDir);
+    float3 tangent = R - RdotL * lightDir;
+    float tangentLen = length(tangent);
+    float3 sunDir = (RdotL < dist && tangentLen > 0.001) ?
+        normalize(dist * lightDir + (tangent / tangentLen) * radius) : R;
+
+    float3 halfway = normalize(eyeDirection + sunDir);
     float NdotH = shades(normal, halfway);
+    float NdotV = max(shades(normal, eyeDirection), 0.00001);
+    float NdotS = max(shades(normal, sunDir), 0.00001);
 
-    float3 result;
-    if (true){
-        float NdotL = shades(normal, lightDir);
-        float NdotV = shades(normal, eyeDirection);
-
-        float3 Ks = FresnelShlick(0.08, halfway, eyeDirection);
-        result = color.rgb + BRDF(0.02, Ks, NdotV, NdotL, NdotH) * specColor * specularBoost * NdotL;
-    } else{
-        // phong blinn specular
-        float specular = pows(NdotH, glossiness);
-        result = color.rgb + specular * specColor.rgb * specularBoost;
-    }
-
-    return float4(result, 1);
+    float3 Ks = FresnelShlick(0.04, halfway, eyeDirection);
+    float3 result = color.rgb + BRDF(roughness, Ks, NdotV, NdotS, NdotH) * specColor * specularBoost * NdotS;
+    return float4(result, color.a);
 }
 
 float4 getPointLightSpecular(float3 surfaceNormal, float4 lightPosition, float3 worldPosition, float3 eyeDirection, float3 specColor, float4 color){
@@ -258,4 +274,15 @@ float3 getRipples(PS_INPUT IN, sampler2D puddlesSampler, float3 surfaceNormal, f
     float3 combnom = normalize(float3(ripnormal.xy + surfaceNormal.xy, surfaceNormal.z));
 
     return combnom;
+}
+
+// Returns raw caustic intensity sampled from a caustic texture at world XY position.
+// Apply as: color.rgb += color.rgb * pows(result, 2.0) * strength * 100;
+// Two scrolling layers combined with min() produce the sharp bright-line caustic pattern.
+float getCausticsFromAbove(sampler2D causticsSampler, float2 worldXY, float gameTime, float waveSpeed) {
+    float speed = gameTime * 0.01 * waveSpeed;
+    float scale = 0.002;
+    float layer1 = tex2D(causticsSampler, worldXY * scale        + speed * normalize(float2(-1.2, -2.5))).r;
+    float layer2 = tex2D(causticsSampler, worldXY * scale * 1.2  + speed * normalize(float2( 0.5,  2.0))).r;
+    return pows(min(layer1, layer2), 1.3) * 4.0;
 }
