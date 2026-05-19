@@ -86,9 +86,6 @@ PS_OUTPUT main(PS_INPUT IN, float2 PixelPos : VPOS) {
 
     color = getFresnel(surfaceNormal, eyeDirection, linFogColor, TESR_WaveParams.w, color);
 
-    float fresnelFactor = saturate(pow(1.0 - shades(eyeDirection, surfaceNormal), 3));
-    color.rgb += linFogColor.rgb * pows(caustics, 2.0) * fresnelFactor * TESR_WaterVolume.x * 20;
-
 	for (int i= 0; i< 12; i++){
 	    color = getPointLightSpecular(surfaceNormal, TESR_ShadowLightPosition[i], position, eyeDirection, TESR_LightColor[i].rgb * TESR_LightColor[i].w, color);
 	    color = getPointLightSpecular(surfaceNormal, TESR_LightPosition[i], position, eyeDirection,  TESR_LightColor[ 12 + i].rgb * TESR_LightColor[ 12 + i].w, color);
