@@ -6,8 +6,9 @@ float4x4 TESR_ShadowCameraToLightTransformOrtho;
 float4 TESR_ReciprocalResolution;
 float4 TESR_GameTime;
 float4 TESR_RainData; // x:rain amount, set by weather (0 to 1), y: vertical scale, z: speed of rainfall w: opacity
-float4 TESR_RainAspect; // x:refraction amount, y: base color, z: bloom, w: movement lean scale
+float4 TESR_RainAspect;   // x:refraction amount, y: base color, z: bloom, w: movement lean scale
 float4 TESR_RainVelocity; // xyz: smoothed camera velocity in world space, w: speed magnitude
+float4 TESR_RainSheet;    // x: scroll speed (windSpeed*baseSpeed*cos(dir)), y: band scale, z: strength, w: per-layer depth phase
 float4 TESR_FogColor;
 float4 TESR_SunDirection;
 float4 TESR_SunColor;
@@ -112,6 +113,12 @@ float4 Rain( VSOUT IN ) : COLOR0
 		// add new drop influence to the fragment, by extracting the brightest spots in the gradients grid using the edge parameter
 		float drop = smoothstep(edge, -edge, dropGradient) * (rainNoise.x / (1.0f + 0.2f * i)); // fade opacity with each iteration
 		drop *= GetOrtho(orthoStart + step * i) * (depth > DEPTH * i); // depth and ortho check for rain
+
+		// sheeting: horizontal density wave scrolling with wind, phase-offset per layer for depth
+		float sheetPhase = uv.x * TESR_RainSheet.y + TESR_RainSheet.x * timetick + float(i) * TESR_RainSheet.w;
+		float sheetWave = 0.5 + 0.5 * sin(sheetPhase * 2.0 * PI);
+		drop *= lerp(1.0 - TESR_RainSheet.z, 1.0, sheetWave);
+
 		totalRain += drop;
 	}
 

@@ -34,6 +34,14 @@ void RainEffect::UpdateConstants() {
 		);
 	}
 	Constants.PrevCamPos = camPos;
+
+	// Sheet scroll: windSpeed drives magnitude, direction from Sky if toggled, else from settings
+	Sky* sky = Tes->sky;
+	if (sky) {
+		float windSpd = sky->windSpeed;
+		float windDir = Constants.UseWindDirection ? sky->windDirection : Constants.SheetDirection;
+		Constants.Sheet.x = windSpd * Constants.SheetBaseSpeed * cosf(windDir);
+	}
 }
 
 void RainEffect::UpdateSettings() {
@@ -44,12 +52,20 @@ void RainEffect::UpdateSettings() {
 	Constants.Aspect.x = TheSettingManager->GetSettingF("Shaders.Precipitations.Main", "Refraction");
 	Constants.Aspect.y = TheSettingManager->GetSettingF("Shaders.Precipitations.Main", "Coloring");
 	Constants.Aspect.z = TheSettingManager->GetSettingF("Shaders.Precipitations.Main", "Bloom");
+
+	Constants.Sheet.y = TheSettingManager->GetSettingF("Shaders.Precipitations.Main", "SheetScale");
+	Constants.Sheet.z = TheSettingManager->GetSettingF("Shaders.Precipitations.Main", "SheetStrength");
+	Constants.Sheet.w = TheSettingManager->GetSettingF("Shaders.Precipitations.Main", "SheetDepthPhase");
+	Constants.SheetBaseSpeed  = TheSettingManager->GetSettingF("Shaders.Precipitations.Main", "SheetSpeed");
+	Constants.UseWindDirection = TheSettingManager->GetSettingI("Shaders.Precipitations.Main", "UseWindDirection") != 0;
+	Constants.SheetDirection   = TheSettingManager->GetSettingF("Shaders.Precipitations.Main", "SheetDirection");
 }
 
 void RainEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_RainData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_RainAspect", &Constants.Aspect);
 	TheShaderManager->RegisterConstant("TESR_RainVelocity", &Constants.Velocity);
+	TheShaderManager->RegisterConstant("TESR_RainSheet", &Constants.Sheet);
 }
 
 bool RainEffect::ShouldRender() {
