@@ -13,6 +13,27 @@ void RainEffect::UpdateConstants() {
 	}
 
 	Constants.Data.x = Constants.RainAnimator.GetValue();
+
+	// Derive camera velocity from position delta, smoothed to reduce jitter
+	float frameTime = TheShaderManager->ShaderConst.GameTime.w;
+	const D3DXVECTOR4& camPos = TheRenderManager->CameraPosition;
+	if (frameTime > 0.001f) {
+		D3DXVECTOR4 rawVel;
+		rawVel.x = (camPos.x - Constants.PrevCamPos.x) / frameTime;
+		rawVel.y = (camPos.y - Constants.PrevCamPos.y) / frameTime;
+		rawVel.z = (camPos.z - Constants.PrevCamPos.z) / frameTime;
+		rawVel.w = 0.0f;
+		float smooth = min(1.0f, frameTime * 6.0f); // converges in ~0.17s
+		Constants.Velocity.x += (rawVel.x - Constants.Velocity.x) * smooth;
+		Constants.Velocity.y += (rawVel.y - Constants.Velocity.y) * smooth;
+		Constants.Velocity.z += (rawVel.z - Constants.Velocity.z) * smooth;
+		Constants.Velocity.w = sqrtf(
+			Constants.Velocity.x * Constants.Velocity.x +
+			Constants.Velocity.y * Constants.Velocity.y +
+			Constants.Velocity.z * Constants.Velocity.z
+		);
+	}
+	Constants.PrevCamPos = camPos;
 }
 
 void RainEffect::UpdateSettings() {
@@ -28,6 +49,7 @@ void RainEffect::UpdateSettings() {
 void RainEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_RainData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_RainAspect", &Constants.Aspect);
+	TheShaderManager->RegisterConstant("TESR_RainVelocity", &Constants.Velocity);
 }
 
 bool RainEffect::ShouldRender() {

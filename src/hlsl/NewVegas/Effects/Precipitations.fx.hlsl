@@ -6,7 +6,8 @@ float4x4 TESR_ShadowCameraToLightTransformOrtho;
 float4 TESR_ReciprocalResolution;
 float4 TESR_GameTime;
 float4 TESR_RainData; // x:rain amount, set by weather (0 to 1), y: vertical scale, z: speed of rainfall w: opacity
-float4 TESR_RainAspect; // x:refraction amount, y: base color
+float4 TESR_RainAspect; // x:refraction amount, y: base color, z: bloom, w: movement lean scale
+float4 TESR_RainVelocity; // xyz: smoothed camera velocity in world space, w: speed magnitude
 float4 TESR_FogColor;
 float4 TESR_SunDirection;
 float4 TESR_SunColor;
@@ -83,7 +84,12 @@ float4 Rain( VSOUT IN ) : COLOR0
 	
 	// each iteration adds a cylindrical layer of drops
     float depth = readDepth(IN.UVCoord);
-	float2 uv = cylindrical(rayStart.xyz); // converts world coordinates to cylinder coordinates around the player
+
+	// Lean the rain against player movement by offsetting the cylindrical reference direction.
+	// RainAspect.w is a user-tunable multiplier for lean intensity (1.0 = default).
+	float leanScale = 0.00035f * (TESR_RainAspect.w > 0.0f ? TESR_RainAspect.w : 1.0f);
+	float3 leanedRay = rayStart.xyz - TESR_RainVelocity.xyz * leanScale;
+	float2 uv = cylindrical(leanedRay); // cylindrical coords around the player, leaned by movement
 
 	float totalRain = 0.0f;
 
