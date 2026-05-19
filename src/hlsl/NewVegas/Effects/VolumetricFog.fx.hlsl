@@ -21,6 +21,13 @@ float4 TESR_VolumetricFogSimple; // Simple Fog
 float4 TESR_VolumetricFogBlend; // Blend factor for each Fog
 float4 TESR_VolumetricFogHeight; // Height of each Fog
 float4 TESR_VolumetricFogData; // General shader settings
+float4 TESR_GameTime;
+float4 TESR_VolumetricFogWind;  // xy: exterior scroll vector (vel), zw: interior drift vector (vel)
+float4 TESR_VolumetricFogNoise; // x: patch frequency, y: noise strength, z: sun attenuation, w: fog light strength
+float4 TESR_FogLight0;          // xyz: world pos, w: radius
+float4 TESR_FogLight1;
+float4 TESR_FogLightColor0;     // xyz: color, w: dimmer
+float4 TESR_FogLightColor1;
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -99,10 +106,24 @@ float3 getFog(float distance, float3 density){
 	return 1 - exp(-distance * density * 0.0001);
 }
 
+// Two-frequency procedural noise for wind-driven fog density patches
+float fogPatchNoise(float2 p) {
+	return 0.5 + 0.4 * sin(p.x) * sin(p.y) + 0.1 * sin(p.x * 2.3 + p.y * 1.7);
+}
+
+// Point light contribution to fog: quadratic falloff within radius
+float3 fogLightContrib(float3 worldPos, float4 lightPos, float4 lightColor) {
+	float3 diff = worldPos - lightPos.xyz;
+	float dist2 = dot(diff, diff);
+	float radius2 = lightPos.w * lightPos.w;
+	if (radius2 < 1.0) return float3(0, 0, 0);
+	float falloff = saturate(1.0 - dist2 / radius2);
+	return lightColor.rgb * lightColor.w * falloff * falloff;
+}
+
 #define stepnum 32
 // exponential fog based on https://iquilezles.org/articles/fog/
-//  (a/b) * exp(-ro.y*b) * (1.0-exp(-t*rd.y*b))/rd.y;
-float getHeightFog(float distance, float falloff, float3 worldPos, float heightOffset){
+float getHeightFog(float distance, float falloff, float3 worldPos, float heightOffset, float2 scroll, float noiseFreq, float noiseStrength){
 	float3 eyeVector = worldPos - TESR_CameraPosition.xyz;
 	float3 step = eyeVector / stepnum;
 	float stepDist = length(step);
@@ -112,11 +133,12 @@ float getHeightFog(float distance, float falloff, float3 worldPos, float heightO
 	[unroll]
 	for (int i = 0; i < stepnum; i++){
 		pos += step;
-		fog += exp(-falloff * pos.z) * stepDist;
+		float density = exp(-falloff * pos.z);
+		float noise = lerp(1.0, fogPatchNoise(pos.xy * noiseFreq + scroll), noiseStrength);
+		fog += density * noise * stepDist;
 	}
-	
-	// return fog; // apply distance modifiers from weather/settings
-	return fog * (length(eyeVector) / distance); // apply distance modifiers from weather/settings
+
+	return fog * (length(eyeVector) / distance);
 }
 
 float3 mixFog(float3 color, float3 fogColor, float3 extinctionColor, float3 inscatteringColor, float distance, float density){
@@ -125,9 +147,8 @@ float3 mixFog(float3 color, float3 fogColor, float3 extinctionColor, float3 insc
 	return color * saturate(1 - extColor) + fogColor * saturate(insColor);
 }
 
-float3 mixHeightFog(float3 color, float3 fogColor, float3 extinctionColor, float3 inscatteringColor, float distance, float density, float falloff, float3 worldPos, float offset){
-	float fog = density * 0.00000001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset);
-	// float fog = density * 0.00001 * getHeightFog(distance, falloff * 0.000000005f, worldPos, offset);
+float3 mixHeightFog(float3 color, float3 fogColor, float3 extinctionColor, float3 inscatteringColor, float distance, float density, float falloff, float3 worldPos, float offset, float2 scroll, float noiseFreq, float noiseStrength){
+	float fog = density * 0.00000001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset, scroll, noiseFreq, noiseStrength);
 	float3 extColor = fog * extinctionColor;
 	float3 insColor = fog * inscatteringColor;
 	return color * saturate(1 - extColor) + fogColor * saturate(insColor);
@@ -171,6 +192,9 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
     float isDayTimeFog = smoothstep(0.1, 0.6, TESR_SunAmount.x);
 	float SunsetFog = sin(TESR_SunAmount.x * PI) * 0.001 * isExterior;
 
+	float timetick = TESR_GameTime.z;
+	float2 fogScroll = lerp(TESR_VolumetricFogWind.zw, TESR_VolumetricFogWind.xy, isExterior) * timetick;
+
 	float3 eyeVector = toWorld(IN.UVCoord);
 	float3 eyeDirection = normalize(eyeVector);
 	eyeVector *= depth;
@@ -212,7 +236,8 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 
 		float sunScattering = pows(compress(sunDir), 2 + sunStrength); 				  // more scattering looking towards the sun direction
 		sunScattering *= pow(1 - sunHeight, 2) * isDayTimeFog * SunGlare;             // more scattering when sun is low or sunglare is high
-		sun = sunColor * sunScattering * SunPower * 100; 
+		sun = sunColor * sunScattering * SunPower * 100;
+		sun *= exp(-TESR_VolumetricFogNoise.z * strength); // denser fog attenuates sunlight penetration
 
 		isSky = getSky(IN.UVCoord);
 
@@ -231,8 +256,10 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 
 	finalColor = lerp (finalColor, skyColor, distantFog * saturate(DistantFogBlend) * distantHeightFade * isExterior);
 
+	float3 fogLightTint = TESR_VolumetricFogNoise.w * (fogLightContrib(worldPos, TESR_FogLight0, TESR_FogLightColor0) + fogLightContrib(worldPos, TESR_FogLight1, TESR_FogLightColor1));
 	float4 heightFogColor = fogColor(skyColor, pureFogColor, strength, HeightFogSkyColor, sun, FogSaturation);
-	float3 heightFog = mixHeightFog(finalColor.rgb, heightFogColor.rgb, extinction, inScattering, fogDepth, strength * HeightFogDensity, 1.5 / (fogPower * HeightFogFalloff), worldPos, HeightFogHeight);
+	heightFogColor.rgb += fogLightTint;
+	float3 heightFog = mixHeightFog(finalColor.rgb, heightFogColor.rgb, extinction, inScattering, fogDepth, strength * HeightFogDensity, 1.5 / (fogPower * HeightFogFalloff), worldPos, HeightFogHeight, fogScroll, TESR_VolumetricFogNoise.x, TESR_VolumetricFogNoise.y);
 	finalColor = lerp(finalColor, float4(heightFog, 1), saturate(HeightFogBlend));
 
     finalColor = max(lerp(color, finalColor, FogAmount), 0.0f);
