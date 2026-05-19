@@ -10,6 +10,8 @@ public:
 	struct SnowStruct {
 		Animator		SnowAnimator;
 		D3DXVECTOR4		Data;
+		D3DXVECTOR4		Velocity;    // smoothed world-space camera velocity (xyz), speed magnitude (w)
+		D3DXVECTOR4		PrevCamPos;  // previous frame camera position for velocity derivation
 	};
 	SnowStruct	Constants;
 

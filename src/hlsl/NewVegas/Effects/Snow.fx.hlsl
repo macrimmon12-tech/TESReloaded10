@@ -4,7 +4,8 @@
 float4x4 TESR_WorldViewProjectionTransform;
 float4x4 TESR_ShadowCameraToLightTransformOrtho;
 float4 TESR_GameTime;
-float4 TESR_SnowData; // x: amount of snow; z: snow falling speed
+float4 TESR_SnowData; // x: amount of snow; z: snow falling speed, w: movement lean scale multiplier
+float4 TESR_SnowVelocity; // xyz: smoothed camera velocity in world space, w: speed magnitude
 float4 TESR_SunColor;
 float4 TESR_SunAmbient;
 
@@ -80,7 +81,12 @@ float4 Snow( VSOUT IN ) : COLOR0
 	
 	// each iteration adds a cylindrical layer of drops
     float depth = readDepth(IN.UVCoord);
-	float2 uv = cylindrical(rayStart.xyz); // converts world coordinates to cylinder coordinates around the player
+
+	// Lean the snow against player movement by offsetting the cylindrical reference direction.
+	// TESR_SnowData.w is a user-tunable multiplier for lean intensity (1.0 = default).
+	float leanScale = 0.00035f * (TESR_SnowData.w > 0.0f ? TESR_SnowData.w : 1.0f);
+	float3 leanedRay = rayStart.xyz - TESR_SnowVelocity.xyz * leanScale;
+	float2 uv = cylindrical(leanedRay); // cylindrical coords around the player, leaned by movement
 
 	float totalSnow = 0.0f;
 
