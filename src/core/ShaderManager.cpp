@@ -371,7 +371,7 @@ void ShaderManager::UpdateConstants() {
 	timer.LogTime("ShaderManager::UpdateConstants for generic constants");
 
 	if (TheSettingManager->SettingsChanged) {
-		TheGameMenuManager->UpdateSettings();
+		// TheGameMenuManager->UpdateSettings(); — replaced by ImGui overlay
 
 		// update settings
 		for (const auto [Name, effect] : EffectsNames) {

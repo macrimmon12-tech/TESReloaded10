@@ -216,7 +216,7 @@ void __cdecl ProcessImageSpaceShadersHook(NiDX9Renderer* Renderer, BSRenderedTex
 	if (GameSurface) GameSurface->Release();
 }
 
-static void RenderMainMenuMovie() { 
+static void RenderMainMenuMovie() {
 
 	if (TheSettingManager->SettingsMain.Main.ReplaceIntro && InterfaceManager->IsActive(Menu::MenuType::kMenuType_Main))
 		TheBinkManager->Render(MainMenuMovie);
@@ -225,16 +225,21 @@ static void RenderMainMenuMovie() {
 
 }
 
+static void CallImGuiNewFrame() { ImGuiManager::NewFrame(); }
+static void CallImGuiRender()   { ImGuiManager::Render(); }
+
 __declspec(naked) void RenderInterfaceHook() {
 
 	__asm {
 		pushad
 		call	RenderMainMenuMovie
 		popad
+		pushad
+		call	CallImGuiNewFrame
+		popad
 		call	Jumpers::RenderInterface::Method
 		pushad
-		mov		ecx, TheGameMenuManager
-		call	GameMenuManager::Render
+		call	CallImGuiRender
 		popad
 		jmp		Jumpers::RenderInterface::Return
 	}

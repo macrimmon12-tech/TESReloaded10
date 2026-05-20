@@ -2,3 +2,7 @@
 	path = lib/toml11
 	url = https://github.com/ToruNiina/toml11.git
 	ignore = dirty
+[submodule "lib/imgui"]
+	path = lib/imgui
+	url = https://github.com/ocornut/imgui.git
+	branch = docking

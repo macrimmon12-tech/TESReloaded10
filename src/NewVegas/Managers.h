@@ -12,6 +12,9 @@ class ShadowManager;	extern ShadowManager*		TheShadowManager;
 class CameraManager;	extern CameraManager*		TheCameraManager;
 class BinkManager;		extern BinkManager*			TheBinkManager;
 
+class DIHookControl;                         extern DIHookControl*                        g_DIHookCtrl;
+struct NVSETogglePlayerControlsInterface;    extern NVSETogglePlayerControlsInterface*     g_PlayerControls;
+
 class Main;					extern Main*					Global;
 class TES;					extern TES*						Tes;
 class PlayerCharacter;		extern PlayerCharacter*			Player;
@@ -30,6 +33,8 @@ class ShadowSceneNode;		extern ShadowSceneNode*			SceneNode;
 #include "../Core/FrameRateManager.h"
 #include "../Core/GameEventManager.h"
 #include "../Core/GameMenuManager.h"
+#include "../Core/ImGuiManager.h"
+#include "nvse/DIHookControl.h"
 #include "../Core/RenderPass.h"
 #include "../Core/ShadowManager.h"
 #include "../Core/CameraManager.h"
