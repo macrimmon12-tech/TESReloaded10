@@ -29,12 +29,19 @@ static bool        InFileDialog       = false;
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
-	// Zero both mouse (DIMOUSESTATE2 = 20 bytes) and keyboard (256 bytes) buffers
-	// when the overlay is open.  Toggle key is handled via WM_KEYDOWN so it works
-	// even with the keyboard buffer zeroed.
-	if (SUCCEEDED(hr) && ImGuiManager::IsVisible())
-		if (cbData == sizeof(DIMOUSESTATE2) || cbData == 256)
+	if (SUCCEEDED(hr) && ImGuiManager::IsVisible()) {
+		if (cbData == sizeof(DIMOUSESTATE2)) {
 			memset(lpvData, 0, cbData);
+		} else if (cbData == 256) {
+			// Zero all keyboard keys except the toggle key so OnKeyDown can still
+			// detect it to close the overlay, while movement/actions are blocked.
+			BYTE toggleKey = TheSettingManager
+				? (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable : 0;
+			BYTE toggleState = toggleKey ? ((BYTE*)lpvData)[toggleKey] : 0;
+			memset(lpvData, 0, cbData);
+			if (toggleKey) ((BYTE*)lpvData)[toggleKey] = toggleState;
+		}
+	}
 	return hr;
 }
 
@@ -87,18 +94,6 @@ static void SetOverlayVisible(bool visible) {
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE && !InFileDialog)
 		SetOverlayVisible(false);
-
-	// Toggle key via WM — works even when DI keyboard buffer is zeroed.
-	// Reconstruct DIK from scan code + extended flag to match the stored KeyEnable value.
-	if (msg == WM_KEYDOWN && TheSettingManager) {
-		UINT scan = (lParam >> 16) & 0xFF;
-		bool ext  = (lParam & (1 << 24)) != 0;
-		UINT dik  = ext ? (0x80 | scan) : scan;
-		if (dik == TheSettingManager->SettingsMain.Menu.KeyEnable) {
-			SetOverlayVisible(!Visible);
-			return TRUE;
-		}
-	}
 
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
 	// Manually convert WM_KEYDOWN to characters when ImGui needs text input.
@@ -189,6 +184,11 @@ void ImGuiManager::NewFrame() {
 	// Close if a game menu is active (inventory, pip-boy, etc.)
 	if (Visible && !InterfaceManager->IsActive(Menu::MenuType::kMenuType_None))
 		SetOverlayVisible(false);
+
+	// Toggle via DirectInput raw buffer — OnKeyDown reads CurrentKeyState which
+	// is the raw DI buffer, preserved for this key even when the rest is zeroed.
+	if (TheSettingManager && Global && Global->OnKeyDown(TheSettingManager->SettingsMain.Menu.KeyEnable))
+		SetOverlayVisible(!Visible);
 
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
