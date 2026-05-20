@@ -5,8 +5,7 @@
 #include "imgui_impl_win32.h"
 #include <sstream>
 #include <iomanip>
-#include <commdlg.h>
-#pragma comment(lib, "comdlg32.lib")
+#include <ctime>
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -20,20 +19,32 @@ HWND    ImGuiManager::GameWindow      = nullptr;
 WNDPROC ImGuiManager::OriginalWndProc = nullptr;
 
 static std::string SelectedSection;
-static bool        InFileDialog       = false;
 
 // ---- DirectInput mouse block (zeros lX/lY/lZ deltas + buttons) ---------------
 // xNVSE has no public API to block mouse movement deltas, so we patch the
 // IDirectInputDevice8 vtable directly.  The hook is installed once and never
 // removed; it simply passes through when the overlay is not visible.
 
+static float s_pendingWheelDelta = 0.0f;
+
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
-	// Only zero mouse-sized buffers (DIMOUSESTATE2 = 20 bytes).  The keyboard
-	// device shares this vtable in dinput8.dll and calls GetDeviceState(256, ...);
-	// passing that through unchanged keeps OnKeyDown/OnKeyPressed working.
-	if (SUCCEEDED(hr) && ImGuiManager::IsVisible() && cbData == sizeof(DIMOUSESTATE2))
-		memset(lpvData, 0, cbData);
+	if (SUCCEEDED(hr) && ImGuiManager::IsVisible()) {
+		if (cbData == sizeof(DIMOUSESTATE2)) {
+			// Capture scroll wheel delta before zeroing so we can feed it to ImGui.
+			// WM_MOUSEWHEEL is suppressed by DXVK so WndProc never sees it.
+			s_pendingWheelDelta += ((DIMOUSESTATE2*)lpvData)->lZ / (float)WHEEL_DELTA;
+			memset(lpvData, 0, cbData);
+		} else if (cbData == 256) {
+			// Zero keyboard buffer to block game movement/actions.
+			// Preserve the toggle key so OnKeyDown can still close the overlay.
+			BYTE toggleKey = TheSettingManager
+				? (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable : 0;
+			BYTE toggleState = toggleKey ? ((BYTE*)lpvData)[toggleKey] : 0;
+			memset(lpvData, 0, cbData);
+			if (toggleKey) ((BYTE*)lpvData)[toggleKey] = toggleState;
+		}
+	}
 	return hr;
 }
 
@@ -58,7 +69,9 @@ static void PatchMouseVTable() {
 
 static void BlockGameInput(bool block) {
 	if (g_DIHookCtrl) {
-		for (UInt32 code = kMacro_MouseButtonOffset; code < kMaxMacros; code++)
+		// Block keyboard (0-255) and mouse buttons/wheel (256+) so the game
+		// doesn't process input while the overlay is open.
+		for (UInt32 code = 0; code < kMaxMacros; code++)
 			g_DIHookCtrl->SetKeyDisableState(code, block, DIHookControl::kDisable_User);
 	}
 }
@@ -82,26 +95,17 @@ static void SetOverlayVisible(bool visible) {
 // ---- WndProc -----------------------------------------------------------------
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE && !InFileDialog)
+	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
 		SetOverlayVisible(false);
 
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
 	// Manually convert WM_KEYDOWN to characters when ImGui needs text input.
-	if (Visible && msg == WM_KEYDOWN && wParam == VK_ESCAPE) {
-		SetOverlayVisible(false);
+	// Eat Escape WM so the game never sees it; actual close is handled in BuildUI
+	// via polling (waits for key release before unblocking DI).
+	if (Visible && msg == WM_KEYDOWN && wParam == VK_ESCAPE)
 		return TRUE;
-	}
 
-	if (Visible && msg == WM_KEYDOWN && ImGui::GetIO().WantTextInput) {
-		BYTE ks[256];
-		GetKeyboardState(ks);
-		WCHAR buf[4] = {};
-		int n = ToUnicode((UINT)wParam, (lParam >> 16) & 0xFF, ks, buf, 4, 0);
-		for (int i = 0; i < n; i++)
-			ImGui::GetIO().AddInputCharacterUTF16(buf[i]);
-	}
-
-	if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
 		return TRUE;
 	// WndProcHandler returns 0 for scroll messages, so eat them explicitly to
 	// prevent the game's WndProc from interfering with ImGui child-window scroll.
@@ -155,6 +159,89 @@ void ImGuiManager::Shutdown() {
 	Logger::Log("ImGuiManager: Shutdown");
 }
 
+// ---- Input polling (DXVK suppresses WM_KEYDOWN/WM_MOUSEWHEEL) ---------------
+
+static ImGuiKey VkToImGuiKey(int vk) {
+	switch (vk) {
+	case VK_TAB:      return ImGuiKey_Tab;
+	case VK_LEFT:     return ImGuiKey_LeftArrow;
+	case VK_RIGHT:    return ImGuiKey_RightArrow;
+	case VK_UP:       return ImGuiKey_UpArrow;
+	case VK_DOWN:     return ImGuiKey_DownArrow;
+	case VK_PRIOR:    return ImGuiKey_PageUp;
+	case VK_NEXT:     return ImGuiKey_PageDown;
+	case VK_HOME:     return ImGuiKey_Home;
+	case VK_END:      return ImGuiKey_End;
+	case VK_INSERT:   return ImGuiKey_Insert;
+	case VK_DELETE:   return ImGuiKey_Delete;
+	case VK_BACK:     return ImGuiKey_Backspace;
+	case VK_RETURN:   return ImGuiKey_Enter;
+	case VK_ESCAPE:   return ImGuiKey_Escape;
+	case VK_LSHIFT:   return ImGuiKey_LeftShift;
+	case VK_RSHIFT:   return ImGuiKey_RightShift;
+	case VK_LCONTROL: return ImGuiKey_LeftCtrl;
+	case VK_RCONTROL: return ImGuiKey_RightCtrl;
+	case VK_LMENU:    return ImGuiKey_LeftAlt;
+	case VK_RMENU:    return ImGuiKey_RightAlt;
+	case 'A': return ImGuiKey_A;
+	case 'C': return ImGuiKey_C;
+	case 'V': return ImGuiKey_V;
+	case 'X': return ImGuiKey_X;
+	case 'Z': return ImGuiKey_Z;
+	default:          return ImGuiKey_None;
+	}
+}
+
+static void PollKeyboardForImGui() {
+	static bool prevState[256] = {};
+	ImGuiIO& io = ImGui::GetIO();
+
+	// Convert the DIK toggle key to a VK so we can skip it — it's for open/close
+	// only and should not also navigate ImGui widgets.
+	int toggleVK = 0;
+	if (TheSettingManager) {
+		BYTE dik = (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable;
+		bool ext  = (dik & 0x80) != 0;
+		UINT scan = ext ? ((dik & 0x7F) | 0x100) : dik;
+		toggleVK = (int)MapVirtualKey(scan, MAPVK_VSC_TO_VK_EX);
+	}
+
+	// Build keyboard state for ToUnicode using async values for modifiers.
+	BYTE ks[256] = {};
+	GetKeyboardState(ks);
+	auto abit = [](int vk) -> BYTE { return (GetAsyncKeyState(vk) & 0x8000) ? 0x80 : 0; };
+	ks[VK_SHIFT]   = abit(VK_SHIFT);
+	ks[VK_CONTROL] = abit(VK_CONTROL);
+	ks[VK_MENU]    = abit(VK_MENU);
+	ks[VK_CAPITAL] = (GetKeyState(VK_CAPITAL) & 1) ? 0x01 : 0;
+
+	for (int vk = 1; vk < 256; vk++) {
+		// Skip generic aliases — we handle left/right variants explicitly.
+		if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU) continue;
+		// Skip the overlay toggle key — handled by OnKeyDown, not ImGui nav.
+		if (toggleVK && vk == toggleVK) { prevState[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0; continue; }
+
+		bool cur  = (GetAsyncKeyState(vk) & 0x8000) != 0;
+		bool prev = prevState[vk];
+
+		// Inject key state transitions for navigation/modifier keys.
+		ImGuiKey key = VkToImGuiKey(vk);
+		if (key != ImGuiKey_None && cur != prev)
+			io.AddKeyEvent(key, cur);
+
+		// Inject printable character on fresh press.
+		if (cur && !prev) {
+			UINT scan = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
+			WCHAR buf[4] = {};
+			int n = ToUnicode(vk, scan, ks, buf, 4, 0);
+			for (int i = 0; i < n; i++)
+				io.AddInputCharacterUTF16(buf[i]);
+		}
+
+		prevState[vk] = cur;
+	}
+}
+
 // ---- Frame -------------------------------------------------------------------
 
 void ImGuiManager::NewFrame() {
@@ -175,7 +262,8 @@ void ImGuiManager::NewFrame() {
 	if (Visible && !InterfaceManager->IsActive(Menu::MenuType::kMenuType_None))
 		SetOverlayVisible(false);
 
-	// Toggle via the configured key (same DirectInput keycode the old menu used)
+	// Toggle via DirectInput raw buffer — OnKeyDown reads CurrentKeyState which
+	// is the raw DI buffer, preserved for this key even when the rest is zeroed.
 	if (TheSettingManager && Global && Global->OnKeyDown(TheSettingManager->SettingsMain.Menu.KeyEnable))
 		SetOverlayVisible(!Visible);
 
@@ -188,6 +276,11 @@ void ImGuiManager::NewFrame() {
 		io.AddMouseButtonEvent(0, (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0);
 		io.AddMouseButtonEvent(1, (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
 		io.AddMouseButtonEvent(2, (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0);
+		if (s_pendingWheelDelta != 0.0f) {
+			io.AddMouseWheelEvent(0.0f, s_pendingWheelDelta);
+			s_pendingWheelDelta = 0.0f;
+		}
+		PollKeyboardForImGui();
 	}
 }
 
@@ -400,6 +493,15 @@ void ImGuiManager::BuildUI() {
 
 	if (!Visible) return;
 
+	// Wait for Escape release before closing so the game doesn't see it still held.
+	static bool escapePending = false;
+	if (ImGui::IsKeyPressed(ImGuiKey_Escape)) escapePending = true;
+	if (escapePending && !ImGui::IsKeyDown(ImGuiKey_Escape)) {
+		escapePending = false;
+		SetOverlayVisible(false);
+		return;
+	}
+
 	ImGui::SetNextWindowSize(ImVec2(960.0f, 620.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSizeConstraints(ImVec2(500.0f, 300.0f), ImVec2(FLT_MAX, FLT_MAX));
 
@@ -418,9 +520,9 @@ void ImGuiManager::BuildUI() {
 		ImGui::TextDisabled("New Vegas Reloaded  %s", PluginVersion::VersionString);
 
 	{
-		const float btnRevert = 54.0f, btnSaveTo = 72.0f, btnSave = 54.0f;
+		const float btnRevert = 54.0f, btnCopy = 72.0f, btnSave = 54.0f;
 		const float spacing   = ImGui::GetStyle().ItemSpacing.x;
-		const float totalW    = btnRevert + btnSaveTo + btnSave + spacing * 2.0f;
+		const float totalW    = btnRevert + btnCopy + btnSave + spacing * 2.0f;
 		ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - totalW);
 
 		if (ImGui::Button("Revert", ImVec2(btnRevert, 0.0f))) {
@@ -428,23 +530,58 @@ void ImGuiManager::BuildUI() {
 			SelectedSection.clear();
 		}
 		ImGui::SameLine();
-		if (ImGui::Button("Save to...", ImVec2(btnSaveTo, 0.0f))) {
-			char path[MAX_PATH] = "NewVegasReloaded.dll.toml";
-			OPENFILENAMEA ofn   = {};
-			ofn.lStructSize     = sizeof(ofn);
-			ofn.hwndOwner       = GameWindow;
-			ofn.lpstrFilter     = "TOML Files\0*.toml\0All Files\0*.*\0";
-			ofn.lpstrFile       = path;
-			ofn.nMaxFile        = MAX_PATH;
-			ofn.lpstrDefExt     = "toml";
-			ofn.Flags           = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-			InFileDialog = true;
-			bool ok = GetSaveFileNameA(&ofn) != 0;
-			InFileDialog = false;
-			SetForegroundWindow(GameWindow);
-			SetOverlayVisible(true);
-			if (ok)
-				TheSettingManager->SaveSettingsTo(path);
+		if (ImGui::Button("Save Copy", ImVec2(btnCopy, 0.0f))) {
+			// Build timestamped path next to the DLL, e.g.:
+			// NewVegasReloaded_20260519_2119_WastelandNV.dll.toml
+			char dllPath[MAX_PATH] = {};
+			HMODULE hMod = nullptr;
+			GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+				GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				(LPCSTR)&ImGuiManager::Initialize, &hMod);
+			GetModuleFileNameA(hMod, dllPath, MAX_PATH);
+
+			// Strip ".dll" suffix to get base path
+			char* ext = strrchr(dllPath, '.');
+			if (ext) *ext = '\0';
+
+			// Timestamp
+			time_t now = time(nullptr);
+			tm lt = {};
+			localtime_s(&lt, &now);
+			char ts[32] = {};
+			strftime(ts, sizeof(ts), "%Y%m%d_%H%M", &lt);
+
+			// Location: always include worldspace + cell editor ID for TTW compatibility.
+			auto sanitize = [](const char* s, std::string& out) {
+				if (s && s[0])
+					for (const char* c = s; *c; c++)
+						out += (isalnum((unsigned char)*c) ? *c : '_');
+			};
+			std::string loc;
+			if (Player && Player->parentCell) {
+				TESWorldSpace* ws = Player->GetWorldSpace();
+				std::string wsName, cellName;
+				if (ws) sanitize(ws->GetEditorName(), wsName);
+				sanitize(Player->parentCell->GetEditorName(), cellName);
+				if (!wsName.empty()) loc = wsName;
+				if (!cellName.empty()) loc += (loc.empty() ? "" : "_") + cellName;
+				// Append grid coords for exterior cells
+				TESObjectCELL::CellCoordinates* coords = Player->parentCell->coords;
+				if (coords) {
+					char grid[32] = {};
+					_snprintf_s(grid, sizeof(grid), "_%d_%d", coords->x, coords->y);
+					loc += grid;
+				}
+			}
+
+			char savePath[MAX_PATH] = {};
+			if (loc.empty())
+				_snprintf_s(savePath, sizeof(savePath), "%s_%s.dll.toml", dllPath, ts);
+			else
+				_snprintf_s(savePath, sizeof(savePath), "%s_%s_%s.dll.toml", dllPath, ts, loc.c_str());
+
+			TheSettingManager->SaveSettingsTo(savePath);
+			InterfaceManager->ShowMessage("Settings copy saved.");
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Save", ImVec2(btnSave, 0.0f))) {
