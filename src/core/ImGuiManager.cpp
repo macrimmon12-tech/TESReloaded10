@@ -86,19 +86,6 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE && !InFileDialog)
 		SetOverlayVisible(false);
 
-	// Toggle key handled via WM so it works regardless of DirectInput state.
-	// Reconstruct the DIK code from the scan code + extended flag, then compare
-	// with the configured KeyEnable value.
-	if (msg == WM_KEYDOWN && TheSettingManager) {
-		UINT scancode = (lParam >> 16) & 0xFF;
-		bool ext      = (lParam & (1 << 24)) != 0;
-		UINT dik      = ext ? (0x80 | scancode) : scancode;
-		if (dik == TheSettingManager->SettingsMain.Menu.KeyEnable) {
-			SetOverlayVisible(!Visible);
-			return TRUE;
-		}
-	}
-
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
 	// Manually convert WM_KEYDOWN to characters when ImGui needs text input.
 	if (Visible && msg == WM_KEYDOWN && wParam == VK_ESCAPE) {
@@ -188,6 +175,10 @@ void ImGuiManager::NewFrame() {
 	// Close if a game menu is active (inventory, pip-boy, etc.)
 	if (Visible && !InterfaceManager->IsActive(Menu::MenuType::kMenuType_None))
 		SetOverlayVisible(false);
+
+	// Toggle via the configured key (same DirectInput keycode the old menu used)
+	if (TheSettingManager && Global && Global->OnKeyDown(TheSettingManager->SettingsMain.Menu.KeyEnable))
+		SetOverlayVisible(!Visible);
 
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
