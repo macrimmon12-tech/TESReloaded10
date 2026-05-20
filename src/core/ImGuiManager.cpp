@@ -58,7 +58,9 @@ static void PatchMouseVTable() {
 
 static void BlockGameInput(bool block) {
 	if (g_DIHookCtrl) {
-		for (UInt32 code = kMacro_MouseButtonOffset; code < kMaxMacros; code++)
+		// Block keyboard (0-255) and mouse buttons/wheel (256+) so the game
+		// doesn't process input while the overlay is open.
+		for (UInt32 code = 0; code < kMaxMacros; code++)
 			g_DIHookCtrl->SetKeyDisableState(code, block, DIHookControl::kDisable_User);
 	}
 }
