@@ -29,11 +29,12 @@ static bool        InFileDialog       = false;
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
-	// Only zero mouse-sized buffers (DIMOUSESTATE2 = 20 bytes).  The keyboard
-	// device shares this vtable in dinput8.dll and calls GetDeviceState(256, ...);
-	// passing that through unchanged keeps OnKeyDown/OnKeyPressed working.
-	if (SUCCEEDED(hr) && ImGuiManager::IsVisible() && cbData == sizeof(DIMOUSESTATE2))
-		memset(lpvData, 0, cbData);
+	// Zero both mouse (DIMOUSESTATE2 = 20 bytes) and keyboard (256 bytes) buffers
+	// when the overlay is open.  Toggle key is handled via WM_KEYDOWN so it works
+	// even with the keyboard buffer zeroed.
+	if (SUCCEEDED(hr) && ImGuiManager::IsVisible())
+		if (cbData == sizeof(DIMOUSESTATE2) || cbData == 256)
+			memset(lpvData, 0, cbData);
 	return hr;
 }
 
@@ -86,6 +87,18 @@ static void SetOverlayVisible(bool visible) {
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE && !InFileDialog)
 		SetOverlayVisible(false);
+
+	// Toggle key via WM — works even when DI keyboard buffer is zeroed.
+	// Reconstruct DIK from scan code + extended flag to match the stored KeyEnable value.
+	if (msg == WM_KEYDOWN && TheSettingManager) {
+		UINT scan = (lParam >> 16) & 0xFF;
+		bool ext  = (lParam & (1 << 24)) != 0;
+		UINT dik  = ext ? (0x80 | scan) : scan;
+		if (dik == TheSettingManager->SettingsMain.Menu.KeyEnable) {
+			SetOverlayVisible(!Visible);
+			return TRUE;
+		}
+	}
 
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
 	// Manually convert WM_KEYDOWN to characters when ImGui needs text input.
@@ -176,10 +189,6 @@ void ImGuiManager::NewFrame() {
 	// Close if a game menu is active (inventory, pip-boy, etc.)
 	if (Visible && !InterfaceManager->IsActive(Menu::MenuType::kMenuType_None))
 		SetOverlayVisible(false);
-
-	// Toggle via the configured key (same DirectInput keycode the old menu used)
-	if (TheSettingManager && Global && Global->OnKeyDown(TheSettingManager->SettingsMain.Menu.KeyEnable))
-		SetOverlayVisible(!Visible);
 
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
