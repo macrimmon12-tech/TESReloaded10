@@ -443,6 +443,7 @@ void ImGuiManager::BuildUI() {
 			InFileDialog = true;
 			bool ok = GetSaveFileNameA(&ofn) != 0;
 			InFileDialog = false;
+			SetForegroundWindow(GameWindow);
 			SetOverlayVisible(true);
 			if (ok)
 				TheSettingManager->SaveSettingsTo(path);
