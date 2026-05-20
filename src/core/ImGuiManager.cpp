@@ -20,7 +20,6 @@ HWND    ImGuiManager::GameWindow      = nullptr;
 WNDPROC ImGuiManager::OriginalWndProc = nullptr;
 
 static std::string SelectedSection;
-static std::string HoveredDescription;
 static bool        InFileDialog       = false;
 
 // ---- DirectInput mouse block (zeros lX/lY/lZ deltas + buttons) ---------------
@@ -254,8 +253,13 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node) {
 	}
 	}
 
-	if (ImGui::IsItemHovered() && !node.Description.empty())
-		HoveredDescription = node.Description;
+	if (ImGui::IsItemHovered() && !node.Description.empty()) {
+		ImGui::BeginTooltip();
+		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+		ImGui::TextUnformatted(node.Description.c_str());
+		ImGui::PopTextWrapPos();
+		ImGui::EndTooltip();
+	}
 
 	ImGui::PopID();
 }
@@ -274,8 +278,6 @@ static void RenderContent() {
 		return;
 	}
 
-	HoveredDescription.clear();
-
 	ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.45f, 1.0f), "%s", SelectedSection.c_str());
 	ImGui::Separator();
 	ImGui::Spacing();
@@ -283,11 +285,7 @@ static void RenderContent() {
 	for (auto& setting : settings)
 		RenderSetting(setting);
 
-	if (!HoveredDescription.empty()) {
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::TextWrapped("%s", HoveredDescription.c_str());
-	}
+
 }
 
 // Recursive sidebar tree — path is the full dotted section path, name is the display label.
