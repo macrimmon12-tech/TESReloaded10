@@ -27,14 +27,19 @@ static bool        InFileDialog       = false;
 // IDirectInputDevice8 vtable directly.  The hook is installed once and never
 // removed; it simply passes through when the overlay is not visible.
 
+static float s_pendingWheelDelta = 0.0f;
+
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
 	if (SUCCEEDED(hr) && ImGuiManager::IsVisible()) {
 		if (cbData == sizeof(DIMOUSESTATE2)) {
+			// Capture scroll wheel delta before zeroing so we can feed it to ImGui.
+			// WM_MOUSEWHEEL is suppressed by DXVK so WndProc never sees it.
+			s_pendingWheelDelta += ((DIMOUSESTATE2*)lpvData)->lZ / (float)WHEEL_DELTA;
 			memset(lpvData, 0, cbData);
 		} else if (cbData == 256) {
-			// Zero all keyboard keys except the toggle key so OnKeyDown can still
-			// detect it to close the overlay, while movement/actions are blocked.
+			// Zero keyboard buffer to block game movement/actions.
+			// Preserve the toggle key so OnKeyDown can still close the overlay.
 			BYTE toggleKey = TheSettingManager
 				? (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable : 0;
 			BYTE toggleState = toggleKey ? ((BYTE*)lpvData)[toggleKey] : 0;
@@ -102,18 +107,7 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 		return TRUE;
 	}
 
-	if (Visible && msg == WM_KEYDOWN) {
-		Logger::Log("ImGui WM_KEYDOWN vk=%u", (unsigned)wParam);
-		BYTE ks[256];
-		GetKeyboardState(ks);
-		WCHAR buf[4] = {};
-		int n = ToUnicode((UINT)wParam, (lParam >> 16) & 0xFF, ks, buf, 4, 0);
-		Logger::Log("ImGui ToUnicode n=%d", n);
-		for (int i = 0; i < n; i++)
-			ImGui::GetIO().AddInputCharacterUTF16(buf[i]);
-	}
-
-	if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
 		return TRUE;
 	// WndProcHandler returns 0 for scroll messages, so eat them explicitly to
 	// prevent the game's WndProc from interfering with ImGui child-window scroll.
@@ -167,6 +161,77 @@ void ImGuiManager::Shutdown() {
 	Logger::Log("ImGuiManager: Shutdown");
 }
 
+// ---- Input polling (DXVK suppresses WM_KEYDOWN/WM_MOUSEWHEEL) ---------------
+
+static ImGuiKey VkToImGuiKey(int vk) {
+	switch (vk) {
+	case VK_TAB:      return ImGuiKey_Tab;
+	case VK_LEFT:     return ImGuiKey_LeftArrow;
+	case VK_RIGHT:    return ImGuiKey_RightArrow;
+	case VK_UP:       return ImGuiKey_UpArrow;
+	case VK_DOWN:     return ImGuiKey_DownArrow;
+	case VK_PRIOR:    return ImGuiKey_PageUp;
+	case VK_NEXT:     return ImGuiKey_PageDown;
+	case VK_HOME:     return ImGuiKey_Home;
+	case VK_END:      return ImGuiKey_End;
+	case VK_INSERT:   return ImGuiKey_Insert;
+	case VK_DELETE:   return ImGuiKey_Delete;
+	case VK_BACK:     return ImGuiKey_Backspace;
+	case VK_RETURN:   return ImGuiKey_Enter;
+	case VK_ESCAPE:   return ImGuiKey_Escape;
+	case VK_LSHIFT:   return ImGuiKey_LeftShift;
+	case VK_RSHIFT:   return ImGuiKey_RightShift;
+	case VK_LCONTROL: return ImGuiKey_LeftCtrl;
+	case VK_RCONTROL: return ImGuiKey_RightCtrl;
+	case VK_LMENU:    return ImGuiKey_LeftAlt;
+	case VK_RMENU:    return ImGuiKey_RightAlt;
+	case 'A': return ImGuiKey_A;
+	case 'C': return ImGuiKey_C;
+	case 'V': return ImGuiKey_V;
+	case 'X': return ImGuiKey_X;
+	case 'Z': return ImGuiKey_Z;
+	default:          return ImGuiKey_None;
+	}
+}
+
+static void PollKeyboardForImGui() {
+	static bool prevState[256] = {};
+	ImGuiIO& io = ImGui::GetIO();
+
+	// Build keyboard state for ToUnicode using async values for modifiers.
+	BYTE ks[256] = {};
+	GetKeyboardState(ks);
+	auto abit = [](int vk) -> BYTE { return (GetAsyncKeyState(vk) & 0x8000) ? 0x80 : 0; };
+	ks[VK_SHIFT]   = abit(VK_SHIFT);
+	ks[VK_CONTROL] = abit(VK_CONTROL);
+	ks[VK_MENU]    = abit(VK_MENU);
+	ks[VK_CAPITAL] = (GetKeyState(VK_CAPITAL) & 1) ? 0x01 : 0;
+
+	for (int vk = 1; vk < 256; vk++) {
+		// Skip generic aliases — we handle left/right variants explicitly.
+		if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU) continue;
+
+		bool cur  = (GetAsyncKeyState(vk) & 0x8000) != 0;
+		bool prev = prevState[vk];
+
+		// Inject key state transitions for navigation/modifier keys.
+		ImGuiKey key = VkToImGuiKey(vk);
+		if (key != ImGuiKey_None && cur != prev)
+			io.AddKeyEvent(key, cur);
+
+		// Inject printable character on fresh press.
+		if (cur && !prev) {
+			UINT scan = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
+			WCHAR buf[4] = {};
+			int n = ToUnicode(vk, scan, ks, buf, 4, 0);
+			for (int i = 0; i < n; i++)
+				io.AddInputCharacterUTF16(buf[i]);
+		}
+
+		prevState[vk] = cur;
+	}
+}
+
 // ---- Frame -------------------------------------------------------------------
 
 void ImGuiManager::NewFrame() {
@@ -201,6 +266,11 @@ void ImGuiManager::NewFrame() {
 		io.AddMouseButtonEvent(0, (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0);
 		io.AddMouseButtonEvent(1, (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
 		io.AddMouseButtonEvent(2, (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0);
+		if (s_pendingWheelDelta != 0.0f) {
+			io.AddMouseWheelEvent(0.0f, s_pendingWheelDelta);
+			s_pendingWheelDelta = 0.0f;
+		}
+		PollKeyboardForImGui();
 	}
 }
 
