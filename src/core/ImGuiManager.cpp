@@ -483,7 +483,11 @@ void ImGuiManager::BuildUI() {
 
 	if (!Visible) return;
 
-	if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+	// Wait for Escape release before closing so the game doesn't see it still held.
+	static bool escapePending = false;
+	if (ImGui::IsKeyPressed(ImGuiKey_Escape)) escapePending = true;
+	if (escapePending && !ImGui::IsKeyDown(ImGuiKey_Escape)) {
+		escapePending = false;
 		SetOverlayVisible(false);
 		return;
 	}
