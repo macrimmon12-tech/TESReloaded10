@@ -100,10 +100,10 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
 	// Manually convert WM_KEYDOWN to characters when ImGui needs text input.
-	if (Visible && msg == WM_KEYDOWN && wParam == VK_ESCAPE) {
-		SetOverlayVisible(false);
+	// Eat Escape WM so the game never sees it; actual close is handled in BuildUI
+	// via polling (waits for key release before unblocking DI).
+	if (Visible && msg == WM_KEYDOWN && wParam == VK_ESCAPE)
 		return TRUE;
-	}
 
 if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
 		return TRUE;
@@ -551,21 +551,20 @@ void ImGuiManager::BuildUI() {
 			char ts[32] = {};
 			strftime(ts, sizeof(ts), "%Y%m%d_%H%M", &lt);
 
-			// Location: worldspace for exterior, cell name for interior
+			// Location: always include worldspace + cell editor ID for TTW compatibility.
+			auto sanitize = [](const char* s, std::string& out) {
+				if (s && s[0])
+					for (const char* c = s; *c; c++)
+						out += (isalnum((unsigned char)*c) ? *c : '_');
+			};
 			std::string loc;
 			if (Player && Player->parentCell) {
-				const char* name = nullptr;
-				if (Player->parentCell->IsInterior()) {
-					name = Player->parentCell->GetEditorName();
-				} else {
-					TESWorldSpace* ws = Player->GetWorldSpace();
-					if (ws) name = ws->GetEditorName();
-				}
-				if (name && name[0]) {
-					// Sanitize: keep alphanumeric, replace the rest with '_'
-					for (const char* c = name; *c; c++)
-						loc += (isalnum((unsigned char)*c) ? *c : '_');
-				}
+				TESWorldSpace* ws = Player->GetWorldSpace();
+				std::string wsName, cellName;
+				if (ws) sanitize(ws->GetEditorName(), wsName);
+				sanitize(Player->parentCell->GetEditorName(), cellName);
+				if (!wsName.empty()) loc = wsName;
+				if (!cellName.empty()) loc += (loc.empty() ? "" : "_") + cellName;
 			}
 
 			char savePath[MAX_PATH] = {};
