@@ -483,6 +483,11 @@ void ImGuiManager::BuildUI() {
 
 	if (!Visible) return;
 
+	if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+		SetOverlayVisible(false);
+		return;
+	}
+
 	ImGui::SetNextWindowSize(ImVec2(960.0f, 620.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSizeConstraints(ImVec2(500.0f, 300.0f), ImVec2(FLT_MAX, FLT_MAX));
 
