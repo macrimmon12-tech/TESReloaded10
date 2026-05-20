@@ -5,8 +5,7 @@
 #include "imgui_impl_win32.h"
 #include <sstream>
 #include <iomanip>
-#include <commdlg.h>
-#pragma comment(lib, "comdlg32.lib")
+#include <ctime>
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -20,7 +19,6 @@ HWND    ImGuiManager::GameWindow      = nullptr;
 WNDPROC ImGuiManager::OriginalWndProc = nullptr;
 
 static std::string SelectedSection;
-static bool        InFileDialog       = false;
 
 // ---- DirectInput mouse block (zeros lX/lY/lZ deltas + buttons) ---------------
 // xNVSE has no public API to block mouse movement deltas, so we patch the
@@ -97,7 +95,7 @@ static void SetOverlayVisible(bool visible) {
 // ---- WndProc -----------------------------------------------------------------
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE && !InFileDialog)
+	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
 		SetOverlayVisible(false);
 
 	// FNV doesn't call TranslateMessage so WM_CHAR is never posted.
@@ -522,9 +520,9 @@ void ImGuiManager::BuildUI() {
 		ImGui::TextDisabled("New Vegas Reloaded  %s", PluginVersion::VersionString);
 
 	{
-		const float btnRevert = 54.0f, btnSaveTo = 72.0f, btnSave = 54.0f;
+		const float btnRevert = 54.0f, btnCopy = 72.0f, btnSave = 54.0f;
 		const float spacing   = ImGui::GetStyle().ItemSpacing.x;
-		const float totalW    = btnRevert + btnSaveTo + btnSave + spacing * 2.0f;
+		const float totalW    = btnRevert + btnCopy + btnSave + spacing * 2.0f;
 		ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - totalW);
 
 		if (ImGui::Button("Revert", ImVec2(btnRevert, 0.0f))) {
@@ -532,25 +530,52 @@ void ImGuiManager::BuildUI() {
 			SelectedSection.clear();
 		}
 		ImGui::SameLine();
-		if (ImGui::Button("Save to...", ImVec2(btnSaveTo, 0.0f))) {
-			char path[MAX_PATH] = "NewVegasReloaded.dll.toml";
-			OPENFILENAMEA ofn   = {};
-			ofn.lStructSize     = sizeof(ofn);
-			ofn.hwndOwner       = GameWindow;
-			ofn.lpstrFilter     = "TOML Files\0*.toml\0All Files\0*.*\0";
-			ofn.lpstrFile       = path;
-			ofn.nMaxFile        = MAX_PATH;
-			ofn.lpstrDefExt     = "toml";
-			ofn.Flags           = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-			InFileDialog = true;
-			bool ok = GetSaveFileNameA(&ofn) != 0;
-			InFileDialog = false;
-			SetForegroundWindow(GameWindow);
-			ClipCursor(nullptr);
-			ImGui::GetIO().ClearInputKeys();
-			SetOverlayVisible(true);
-			if (ok)
-				TheSettingManager->SaveSettingsTo(path);
+		if (ImGui::Button("Save Copy", ImVec2(btnCopy, 0.0f))) {
+			// Build timestamped path next to the DLL, e.g.:
+			// NewVegasReloaded_20260519_2119_WastelandNV.dll.toml
+			char dllPath[MAX_PATH] = {};
+			HMODULE hMod = nullptr;
+			GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+				GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				(LPCSTR)&ImGuiManager::Initialize, &hMod);
+			GetModuleFileNameA(hMod, dllPath, MAX_PATH);
+
+			// Strip ".dll" suffix to get base path
+			char* ext = strrchr(dllPath, '.');
+			if (ext) *ext = '\0';
+
+			// Timestamp
+			time_t now = time(nullptr);
+			tm lt = {};
+			localtime_s(&lt, &now);
+			char ts[32] = {};
+			strftime(ts, sizeof(ts), "%Y%m%d_%H%M", &lt);
+
+			// Location: worldspace for exterior, cell name for interior
+			std::string loc;
+			if (Player && Player->parentCell) {
+				const char* name = nullptr;
+				if (Player->parentCell->IsInterior()) {
+					name = Player->parentCell->GetEditorName();
+				} else {
+					TESWorldSpace* ws = Player->GetWorldSpace();
+					if (ws) name = ws->GetEditorName();
+				}
+				if (name && name[0]) {
+					// Sanitize: keep alphanumeric, replace the rest with '_'
+					for (const char* c = name; *c; c++)
+						loc += (isalnum((unsigned char)*c) ? *c : '_');
+				}
+			}
+
+			char savePath[MAX_PATH] = {};
+			if (loc.empty())
+				_snprintf_s(savePath, sizeof(savePath), "%s_%s.dll.toml", dllPath, ts);
+			else
+				_snprintf_s(savePath, sizeof(savePath), "%s_%s_%s.dll.toml", dllPath, ts, loc.c_str());
+
+			TheSettingManager->SaveSettingsTo(savePath);
+			InterfaceManager->ShowMessage("Settings copy saved.");
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Save", ImVec2(btnSave, 0.0f))) {
