@@ -102,7 +102,7 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 		return TRUE;
 	}
 
-	if (Visible && msg == WM_KEYDOWN && ImGui::GetIO().WantTextInput) {
+	if (Visible && msg == WM_KEYDOWN) {
 		BYTE ks[256];
 		GetKeyboardState(ks);
 		WCHAR buf[4] = {};
