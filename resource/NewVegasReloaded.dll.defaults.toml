@@ -553,6 +553,12 @@ Opacity = 1.0                        # Opacity of the drops.
 Refraction = 1.0                     # Distance of the refraction of the screen image by the droplets.
 Speed = 3.0                          # Multiplier for the rain speed.
 VerticalScale = 1.6                  # Multiplier for the length of the drops/streaks.
+SheetStrength = 0.4                  # Strength of wind-driven density waves (sheeting). 0 disables.
+SheetScale = 3.0                     # Horizontal frequency of sheet bands. Higher = narrower bands.
+SheetSpeed = 1.0                     # Base scroll speed multiplier for sheets (scaled by wind speed).
+SheetDepthPhase = 0.3                # Phase offset per rain layer so sheets stagger with depth.
+UseWindDirection = 0                 # 1 = use live wind direction from sky, 0 = use SheetDirection angle.
+SheetDirection = 0.0                 # Fallback sheet scroll direction in radians (0 = east).
 
 [_Shaders.Precipitations.Status]
 Enabled = true                       # Rain effect that is blocked by objects above and refracts light.
@@ -863,6 +869,13 @@ FogNight = 2.0                      # Scales the fog distances at night.
 SimpleFogSkyColor = 20.0            # Strong fogs will use the weather fog color instead of the sky. This setting changes how strong the fog should be for that.
 SimpleFogHeight = 0.2               # Limit the sky influence/height rate of dissipation for simple fog.
 SimpleFogBlend = 0.5                # General strength of the impact of simple fog on the final look.
+NoiseFrequency = 0.000015           # Spatial scale of wind-driven fog density patches. Higher = smaller patches.
+NoiseStrength = 0.5                 # Blend between uniform fog (0) and fully patchy noise (1).
+WindSpeed = 1.0                     # Multiplier on sky wind speed for fog scroll rate.
+UseWindDirection = 0                # 1 = use live wind direction from sky, 0 = use WindDirection angle.
+WindDirection = 0.0                 # Fallback fog scroll direction in radians when UseWindDirection is 0.
+SunAttenuation = 2.0                # How much dense fog blocks sun scattering. Higher = darker fog in thick weather.
+FogLightStrength = 0.3              # How strongly nearby point lights tint the height fog color.
 
 
 [_Shaders.VolumetricFog.Interiors]
@@ -880,6 +893,11 @@ Extinction = 0.4                    # Light lost due to absorption of particles 
 Inscattering = 0.35                 # Light gained from light scattering when seen through the fog.
 SimpleFogHeight = 0.5               # Limit the sky influence/height rate of dissipation for simple fog.
 SimpleFogBlend = 0.2                # General strength of the impact of simple fog on the final look.
+NoiseFrequency = 0.000015           # Spatial scale of fog density patches. Higher = smaller patches.
+NoiseStrength = 0.3                 # Blend between uniform fog (0) and fully patchy noise (1).
+DriftSpeed = 0.3                    # Speed of the independent interior fog drift.
+DriftDirection = 0.8                # Direction of interior fog drift in radians.
+FogLightStrength = 0.5              # How strongly nearby point lights tint the height fog color.
 
 
 [_Shaders.VolumetricFog.Status]
