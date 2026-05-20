@@ -565,6 +565,13 @@ void ImGuiManager::BuildUI() {
 				sanitize(Player->parentCell->GetEditorName(), cellName);
 				if (!wsName.empty()) loc = wsName;
 				if (!cellName.empty()) loc += (loc.empty() ? "" : "_") + cellName;
+				// Append grid coords for exterior cells
+				TESObjectCELL::CellCoordinates* coords = Player->parentCell->coords;
+				if (coords) {
+					char grid[32] = {};
+					_snprintf_s(grid, sizeof(grid), "_%d_%d", coords->x, coords->y);
+					loc += grid;
+				}
 			}
 
 			char savePath[MAX_PATH] = {};
