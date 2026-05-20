@@ -103,10 +103,12 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 	}
 
 	if (Visible && msg == WM_KEYDOWN) {
+		Logger::Log("ImGui WM_KEYDOWN vk=%u", (unsigned)wParam);
 		BYTE ks[256];
 		GetKeyboardState(ks);
 		WCHAR buf[4] = {};
 		int n = ToUnicode((UINT)wParam, (lParam >> 16) & 0xFF, ks, buf, 4, 0);
+		Logger::Log("ImGui ToUnicode n=%d", n);
 		for (int i = 0; i < n; i++)
 			ImGui::GetIO().AddInputCharacterUTF16(buf[i]);
 	}
