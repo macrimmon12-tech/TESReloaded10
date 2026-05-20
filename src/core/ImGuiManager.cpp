@@ -546,6 +546,8 @@ void ImGuiManager::BuildUI() {
 			bool ok = GetSaveFileNameA(&ofn) != 0;
 			InFileDialog = false;
 			SetForegroundWindow(GameWindow);
+			ClipCursor(nullptr);
+			ImGui::GetIO().ClearInputKeys();
 			SetOverlayVisible(true);
 			if (ok)
 				TheSettingManager->SaveSettingsTo(path);
