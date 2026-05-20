@@ -198,6 +198,16 @@ static void PollKeyboardForImGui() {
 	static bool prevState[256] = {};
 	ImGuiIO& io = ImGui::GetIO();
 
+	// Convert the DIK toggle key to a VK so we can skip it — it's for open/close
+	// only and should not also navigate ImGui widgets.
+	int toggleVK = 0;
+	if (TheSettingManager) {
+		BYTE dik = (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable;
+		bool ext  = (dik & 0x80) != 0;
+		UINT scan = ext ? ((dik & 0x7F) | 0x100) : dik;
+		toggleVK = (int)MapVirtualKey(scan, MAPVK_VSC_TO_VK_EX);
+	}
+
 	// Build keyboard state for ToUnicode using async values for modifiers.
 	BYTE ks[256] = {};
 	GetKeyboardState(ks);
@@ -210,6 +220,8 @@ static void PollKeyboardForImGui() {
 	for (int vk = 1; vk < 256; vk++) {
 		// Skip generic aliases — we handle left/right variants explicitly.
 		if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU) continue;
+		// Skip the overlay toggle key — handled by OnKeyDown, not ImGui nav.
+		if (toggleVK && vk == toggleVK) { prevState[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0; continue; }
 
 		bool cur  = (GetAsyncKeyState(vk) & 0x8000) != 0;
 		bool prev = prevState[vk];
