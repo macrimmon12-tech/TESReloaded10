@@ -37,6 +37,10 @@ void ShaderManager::Initialize() {
 	if (ec) {
 		Logger::Log("Failed to create effect cache directory: %s", ec.message());
 	}
+	std::filesystem::create_directories("Data/Textures/NewVegasReloaded/LUTs", ec);
+	if (ec) {
+		Logger::Log("Failed to create LUT directory: %s", ec.message());
+	}
 
 	// initializing the list of effect names
 	TheShaderManager->RegisterEffect<AvgLumaEffect>(&TheShaderManager->Effects.AvgLuma);
@@ -45,6 +49,7 @@ void ShaderManager::Initialize() {
 	TheShaderManager->RegisterEffect<BloomEffect>(&TheShaderManager->Effects.Bloom);
 	TheShaderManager->RegisterEffect<BloomLegacyEffect>(&TheShaderManager->Effects.BloomLegacy);
 	TheShaderManager->RegisterEffect<ColoringEffect>(&TheShaderManager->Effects.Coloring);
+	TheShaderManager->RegisterEffect<LUTEffect>(&TheShaderManager->Effects.LUT);
 	TheShaderManager->RegisterEffect<CinemaEffect>(&TheShaderManager->Effects.Cinema);
 	TheShaderManager->RegisterEffect<CombineDepthEffect>(&TheShaderManager->Effects.CombineDepth);
 	TheShaderManager->RegisterEffect<DepthOfFieldEffect>(&TheShaderManager->Effects.DepthOfField);
@@ -266,7 +271,8 @@ void ShaderManager::UpdateConstants() {
 	float sunRiseLight = step(SunriseStart - 1.0f, SunriseEnd - 1.0f, GameHour); // 0 at night to 1 after sunrise
 	float sunSetLight = step(SunsetEnd + 1.0f, SunsetStart + 1.0f, GameHour);  // 1 before sunset to 0 at night
 	float newDayLight = sunRiseLight * sunSetLight;
-	GameState.transitionCurve = smoothStep(0.0f, 1.0f, newDayLight); // a curve for day/night transitions that occurs mostly during second half of sunset
+	float transitionPower = max(0.01f, TheSettingManager->SettingsMain.Transitions.TransitionCurvePower);
+	GameState.transitionCurve = pow(smoothStep(0.0f, 1.0f, newDayLight), transitionPower); // a curve for day/night transitions that occurs mostly during second half of sunset
 
 	GameState.isDayTimeChanged = (newDayLight != GameState.dayLight);  // allow effects to fire settings update during sunset/sunrise transitions
 	GameState.dayLight = newDayLight;
@@ -787,6 +793,7 @@ void ShaderManager::RenderEffects(IDirect3DSurface9* RenderTarget) {
 
 	// screenspace coloring/blurring effects get rendered last
 	Effects.Coloring->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
+	Effects.LUT->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.DepthOfField->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.MotionBlur->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 

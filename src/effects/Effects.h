@@ -8,6 +8,7 @@
 #include "BloomLegacy.h"
 #include "Cinema.h"
 #include "Coloring.h"
+#include "LUT.h"
 #include "CombineDepth.h"
 #include "DepthOfField.h"
 #include "Exposure.h"

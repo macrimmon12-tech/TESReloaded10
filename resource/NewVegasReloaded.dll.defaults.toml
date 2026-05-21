@@ -26,6 +26,9 @@ DebugVar3 = 0.0         # Custom variable used when developing shaders.
 DebugVar4 = 0.0         # Custom variable used when developing shaders.
 TraceShaders = 25       # Keyboard shortcut to print used shaders list to the log.
 
+[_Main.Transitions.Main]
+TransitionCurvePower = 1.0             # Day/night transition curve exponent. 1.0 = current smoothstep behavior. Higher values sharpen the transition; lower values soften it.
+
 [_Main.FlyCam.Main]
 Enabled = true
 KeyAdd = 78
@@ -231,7 +234,16 @@ Saturation = -0.1
 Strength = 0.5
 
 [_Shaders.Coloring.Status]
-Enabled = false                        # 
+Enabled = false                        #
+
+[_Shaders.LUT.Main]
+DayLUT      = ''                       # Filename of the day LUT (PNG in Data/Textures/NewVegasReloaded/LUTs/).
+NightLUT    = ''                       # Filename of the night LUT.
+InteriorLUT = ''                       # Filename of the interior LUT.
+Strength    = 1.0                      # Overall LUT blend strength (0.0 = no effect, 1.0 = full).
+
+[_Shaders.LUT.Status]
+Enabled = false                        #
 
 [_Shaders.Debug.Status]
 Enabled = false                        # Displays debug information: depth, normal and shadow buffers, colors of the weather/fog and lights positions.

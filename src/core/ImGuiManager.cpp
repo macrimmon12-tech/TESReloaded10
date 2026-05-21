@@ -302,7 +302,10 @@ static bool ShouldHideSection(const std::string& name) {
 }
 
 static bool ShouldHideKey(const char* key) {
-	return strncmp(key, "TextColor", 9) == 0 || strncmp(key, "TextShadow", 10) == 0;
+	if (strncmp(key, "TextColor", 9) == 0 || strncmp(key, "TextShadow", 10) == 0) return true;
+	// LUT filenames are rendered as cycle pickers, not raw InputText
+	if (strcmp(key, "DayLUT") == 0 || strcmp(key, "NightLUT") == 0 || strcmp(key, "InteriorLUT") == 0) return true;
+	return false;
 }
 
 static const struct { int dik; const char* name; } kDIKTable[] = {
@@ -560,6 +563,40 @@ static void RenderContent() {
 	ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.45f, 1.0f), "%s", SelectedSection.c_str());
 	ImGui::Separator();
 	ImGui::Spacing();
+
+	// LUT section: render DNI cycle pickers before the normal settings loop
+	if (SelectedSection == "Shaders.LUT.Main") {
+		LUTEffect* lut = TheShaderManager->Effects.LUT;
+		if (lut) {
+			if (lut->LUTFiles.empty()) {
+				ImGui::TextDisabled("No LUTs found in Data/Textures/NewVegasReloaded/LUTs/");
+			} else {
+				auto renderPicker = [&](const char* label, int& idx, int slot) {
+					ImGui::PushID(label);
+					ImGui::Text("%s", label);
+					ImGui::SameLine();
+					if (ImGui::ArrowButton("##prev", ImGuiDir_Left)) {
+						idx = ((idx - 1) + (int)lut->LUTFiles.size()) % (int)lut->LUTFiles.size();
+						lut->LoadLUT(slot, lut->LUTFiles[idx].c_str());
+					}
+					ImGui::SameLine();
+					ImGui::TextUnformatted(lut->LUTFiles[idx].c_str());
+					ImGui::SameLine();
+					if (ImGui::ArrowButton("##next", ImGuiDir_Right)) {
+						idx = (idx + 1) % (int)lut->LUTFiles.size();
+						lut->LoadLUT(slot, lut->LUTFiles[idx].c_str());
+					}
+					ImGui::PopID();
+				};
+				renderPicker("Day     ", lut->DayIdx,      0);
+				renderPicker("Night   ", lut->NightIdx,    1);
+				renderPicker("Interior", lut->InteriorIdx, 2);
+			}
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+		}
+	}
 
 	// Build key->index map for RGB triple detection
 	std::unordered_map<std::string, int> keyIdx;

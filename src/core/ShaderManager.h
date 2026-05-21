@@ -83,6 +83,7 @@ public:
 		BloomEffect*			Bloom;
 		BloomLegacyEffect*		BloomLegacy;
 		ColoringEffect*			Coloring;
+		LUTEffect*				LUT;
 		CinemaEffect*			Cinema;
 		ExposureEffect*			Exposure;
 		FlashlightEffect*		Flashlight;

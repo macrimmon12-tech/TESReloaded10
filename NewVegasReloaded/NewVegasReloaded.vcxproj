@@ -142,6 +142,7 @@
     <ClCompile Include="..\src\effects\BloomLegacy.cpp" />
     <ClCompile Include="..\src\effects\Cinema.cpp" />
     <ClCompile Include="..\src\effects\Coloring.cpp" />
+    <ClCompile Include="..\src\effects\LUT.cpp" />
     <ClCompile Include="..\src\effects\CombineDepth.cpp" />
     <ClCompile Include="..\src\effects\Debug.cpp" />
     <ClCompile Include="..\src\effects\DepthOfField.cpp" />
@@ -241,6 +242,7 @@
     <ClInclude Include="..\src\effects\BloomLegacy.h" />
     <ClInclude Include="..\src\effects\Cinema.h" />
     <ClInclude Include="..\src\effects\Coloring.h" />
+    <ClInclude Include="..\src\effects\LUT.h" />
     <ClInclude Include="..\src\effects\CombineDepth.h" />
     <ClInclude Include="..\src\effects\Debug.h" />
     <ClInclude Include="..\src\effects\DepthOfField.h" />
