@@ -460,6 +460,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
+		bool hovered = ImGui::IsItemHovered();
 		if (isShader) {
 			ImGui::SameLine();
 			if (ImGui::SmallButton("-")) {
@@ -474,7 +475,15 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 				TheSettingManager->LoadSettings();
 			}
 		}
-		break;
+		if (hovered && !node.Description.empty()) {
+			ImGui::BeginTooltip();
+			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+			ImGui::TextUnformatted(node.Description.c_str());
+			ImGui::PopTextWrapPos();
+			ImGui::EndTooltip();
+		}
+		ImGui::PopID();
+		return;
 	}
 	case NodeType::Integer: {
 		int val = atoi(node.Value);
@@ -498,6 +507,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 		buf[sizeof(buf) - 1] = '\0';
 		if (ImGui::InputText(node.Key, buf, sizeof(buf)))
 			persistent = buf; // keep in sync while ImGui writes back each frame
+		bool hovered = ImGui::IsItemHovered();
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
 			TheSettingManager->SetSettingS(node.Section, node.Key, buf);
 			TheSettingManager->LoadSettings();
@@ -508,7 +518,15 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 				ImGui::OpenPopup("DIKReference");
 			RenderDIKPopup();
 		}
-		break;
+		if (hovered && !node.Description.empty()) {
+			ImGui::BeginTooltip();
+			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+			ImGui::TextUnformatted(node.Description.c_str());
+			ImGui::PopTextWrapPos();
+			ImGui::EndTooltip();
+		}
+		ImGui::PopID();
+		return;
 	}
 	}
 
