@@ -26,8 +26,9 @@ static std::string SelectedSection;
 // IDirectInputDevice8 vtable directly.  The hook is installed once and never
 // removed; it simply passes through when the overlay is not visible.
 
-static float s_pendingWheelDelta = 0.0f;
-static float s_shaderStepSize   = 0.1f;
+static float s_pendingWheelDelta      = 0.0f;
+static float s_shaderStepSize         = 0.1f;
+static bool  s_colorStatesNeedReset   = false;
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
@@ -371,19 +372,37 @@ static void RenderColorTriple(
 	SettingManager::Configuration::ConfigNode& nodeB,
 	const std::string& prefix)
 {
-	float rv = (float)atof(nodeR.Value);
-	float gv = (float)atof(nodeG.Value);
-	float bv = (float)atof(nodeB.Value);
+	// Persistent state: only initialise from node values once per section visit.
+	// Re-reading each frame forces max(col)=1 every frame, pinning the picker
+	// dot to the top edge of the triangle and resetting the intensity slider.
+	struct ColorState { float col[3]; float scale; };
+	static std::unordered_map<std::string, ColorState> s_states;
 
-	float scale = rv > gv ? rv : gv;
-	if (bv > scale) scale = bv;
-	float col[3];
-	if (scale > 0.0f) {
-		col[0] = rv / scale; col[1] = gv / scale; col[2] = bv / scale;
-	} else {
-		scale = 1.0f;
-		col[0] = col[1] = col[2] = 0.0f;
+	if (s_colorStatesNeedReset) {
+		s_states.clear();
+		s_colorStatesNeedReset = false;
 	}
+
+	std::string stateKey = std::string(nodeR.Section) + "." + prefix;
+	if (s_states.find(stateKey) == s_states.end()) {
+		float rv = (float)atof(nodeR.Value);
+		float gv = (float)atof(nodeG.Value);
+		float bv = (float)atof(nodeB.Value);
+		float sc = rv > gv ? rv : gv;
+		if (bv > sc) sc = bv;
+		ColorState cs;
+		if (sc > 0.0f) {
+			cs.scale    = sc;
+			cs.col[0]   = rv / sc;
+			cs.col[1]   = gv / sc;
+			cs.col[2]   = bv / sc;
+		} else {
+			cs.scale    = 1.0f;
+			cs.col[0]   = cs.col[1] = cs.col[2] = 0.0f;
+		}
+		s_states[stateKey] = cs;
+	}
+	ColorState& cs = s_states[stateKey];
 
 	// Trim trailing underscores for display
 	std::string label = prefix;
@@ -393,20 +412,20 @@ static void RenderColorTriple(
 	ImGui::TextUnformatted(label.c_str());
 
 	bool changed = false;
-	if (ImGui::ColorPicker3("##col", col,
+	if (ImGui::ColorPicker3("##col", cs.col,
 		ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoSidePreview))
 		changed = true;
 
 	ImGui::Text("Intensity");
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-	if (ImGui::DragFloat("##intensity", &scale, 0.01f, 0.0f, 0.0f, "%.4f"))
+	if (ImGui::DragFloat("##intensity", &cs.scale, 0.01f, 0.0f, 0.0f, "%.4f"))
 		changed = true;
 
 	if (changed) {
-		TheSettingManager->SetSetting(nodeR.Section, nodeR.Key, col[0] * scale);
-		TheSettingManager->SetSetting(nodeG.Section, nodeG.Key, col[1] * scale);
-		TheSettingManager->SetSetting(nodeB.Section, nodeB.Key, col[2] * scale);
+		TheSettingManager->SetSetting(nodeR.Section, nodeR.Key, cs.col[0] * cs.scale);
+		TheSettingManager->SetSetting(nodeG.Section, nodeG.Key, cs.col[1] * cs.scale);
+		TheSettingManager->SetSetting(nodeB.Section, nodeB.Key, cs.col[2] * cs.scale);
 		TheSettingManager->LoadSettings();
 	}
 
@@ -702,6 +721,7 @@ void ImGuiManager::BuildUI() {
 		if (ImGui::Button("Revert", ImVec2(btnRevert, 0.0f))) {
 			TheSettingManager->RevertSettings();
 			SelectedSection.clear();
+			s_colorStatesNeedReset = true;
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Save Copy", ImVec2(btnCopy, 0.0f))) {
