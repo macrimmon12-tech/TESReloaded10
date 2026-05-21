@@ -532,15 +532,16 @@ static void RenderContent() {
 	std::unordered_set<std::string> handled;
 
 	for (auto& s : settings) {
-		if (handled.count(s.Key)) continue;
+		std::string key(s.Key);
+		if (handled.count(key)) continue;
 		if (ShouldHideKey(s.Key)) continue;
 
 		// RGB triple → color picker (shader sections only)
-		if (isShader && !s.Key.empty() && s.Key.back() == 'R' && s.Key.size() > 1) {
-			std::string pfx = s.Key.substr(0, s.Key.size() - 1);
+		if (isShader && key.size() > 1 && key.back() == 'R') {
+			std::string pfx = key.substr(0, key.size() - 1);
 			std::string kG = pfx + "G", kB = pfx + "B";
 			if (keyIdx.count(kG) && keyIdx.count(kB)) {
-				handled.insert(s.Key);
+				handled.insert(key);
 				handled.insert(kG);
 				handled.insert(kB);
 				RenderColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
