@@ -6,7 +6,6 @@
 #include <sstream>
 #include <iomanip>
 #include <ctime>
-#include <algorithm>
 #include <unordered_set>
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -376,7 +375,8 @@ static void RenderColorTriple(
 	float gv = (float)atof(nodeG.Value);
 	float bv = (float)atof(nodeB.Value);
 
-	float scale = std::max({ rv, gv, bv });
+	float scale = rv > gv ? rv : gv;
+	if (bv > scale) scale = bv;
 	float col[3];
 	if (scale > 0.0f) {
 		col[0] = rv / scale; col[1] = gv / scale; col[2] = bv / scale;
