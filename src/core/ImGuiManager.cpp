@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iomanip>
 #include <ctime>
+#include <unordered_set>
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -25,7 +26,9 @@ static std::string SelectedSection;
 // IDirectInputDevice8 vtable directly.  The hook is installed once and never
 // removed; it simply passes through when the overlay is not visible.
 
-static float s_pendingWheelDelta = 0.0f;
+static float s_pendingWheelDelta      = 0.0f;
+static float s_shaderStepSize         = 0.1f;
+static bool  s_colorStatesNeedReset   = false;
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
@@ -294,7 +297,150 @@ void ImGuiManager::Render() {
 
 // ---- Menu UI -----------------------------------------------------------------
 
-static void RenderSetting(SettingManager::Configuration::ConfigNode& node) {
+static bool ShouldHideSection(const std::string& name) {
+	return name == "WeatherMode";
+}
+
+static bool ShouldHideKey(const char* key) {
+	return strncmp(key, "TextColor", 9) == 0 || strncmp(key, "TextShadow", 10) == 0;
+}
+
+static const struct { int dik; const char* name; } kDIKTable[] = {
+	{ 0x01, "Escape" },
+	{ 0x02, "1" }, { 0x03, "2" }, { 0x04, "3" }, { 0x05, "4" }, { 0x06, "5" },
+	{ 0x07, "6" }, { 0x08, "7" }, { 0x09, "8" }, { 0x0A, "9" }, { 0x0B, "0" },
+	{ 0x0C, "Minus (-)" }, { 0x0D, "Equals (=)" }, { 0x0E, "Backspace" },
+	{ 0x0F, "Tab" },
+	{ 0x10, "Q" }, { 0x11, "W" }, { 0x12, "E" }, { 0x13, "R" }, { 0x14, "T" },
+	{ 0x15, "Y" }, { 0x16, "U" }, { 0x17, "I" }, { 0x18, "O" }, { 0x19, "P" },
+	{ 0x1A, "[ Left Bracket" }, { 0x1B, "] Right Bracket" }, { 0x1C, "Enter" },
+	{ 0x1D, "Left Ctrl" },
+	{ 0x1E, "A" }, { 0x1F, "S" }, { 0x20, "D" }, { 0x21, "F" }, { 0x22, "G" },
+	{ 0x23, "H" }, { 0x24, "J" }, { 0x25, "K" }, { 0x26, "L" },
+	{ 0x27, "Semicolon (;)" }, { 0x28, "Apostrophe (')" }, { 0x29, "Grave (`)" },
+	{ 0x2A, "Left Shift" }, { 0x2B, "Backslash (\\)" },
+	{ 0x2C, "Z" }, { 0x2D, "X" }, { 0x2E, "C" }, { 0x2F, "V" },
+	{ 0x30, "B" }, { 0x31, "N" }, { 0x32, "M" },
+	{ 0x33, "Comma (,)" }, { 0x34, "Period (.)" }, { 0x35, "Slash (/)" },
+	{ 0x36, "Right Shift" }, { 0x37, "Numpad *" }, { 0x38, "Left Alt" },
+	{ 0x39, "Space" }, { 0x3A, "Caps Lock" },
+	{ 0x3B, "F1" }, { 0x3C, "F2" }, { 0x3D, "F3" }, { 0x3E, "F4" },
+	{ 0x3F, "F5" }, { 0x40, "F6" }, { 0x41, "F7" }, { 0x42, "F8" },
+	{ 0x43, "F9" }, { 0x44, "F10" },
+	{ 0x45, "Num Lock" }, { 0x46, "Scroll Lock" },
+	{ 0x47, "Numpad 7" }, { 0x48, "Numpad 8" }, { 0x49, "Numpad 9" },
+	{ 0x4A, "Numpad -" },
+	{ 0x4B, "Numpad 4" }, { 0x4C, "Numpad 5" }, { 0x4D, "Numpad 6" },
+	{ 0x4E, "Numpad +" },
+	{ 0x4F, "Numpad 1" }, { 0x50, "Numpad 2" }, { 0x51, "Numpad 3" },
+	{ 0x52, "Numpad 0" }, { 0x53, "Numpad ." },
+	{ 0x57, "F11" }, { 0x58, "F12" },
+	{ 0x9C, "Numpad Enter" }, { 0x9D, "Right Ctrl" },
+	{ 0xB5, "Numpad /" }, { 0xB7, "Print Screen" }, { 0xB8, "Right Alt" },
+	{ 0xC5, "Pause" }, { 0xC7, "Home" },
+	{ 0xC8, "Up Arrow" }, { 0xC9, "Page Up" }, { 0xCB, "Left Arrow" },
+	{ 0xCD, "Right Arrow" }, { 0xCF, "End" },
+	{ 0xD0, "Down Arrow" }, { 0xD1, "Page Down" },
+	{ 0xD2, "Insert" }, { 0xD3, "Delete" },
+};
+
+static void RenderDIKPopup() {
+	if (!ImGui::BeginPopup("DIKReference")) return;
+	ImGui::Text("DirectInput Scancodes");
+	ImGui::Separator();
+	if (ImGui::BeginTable("diktbl", 2,
+		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
+		ImVec2(220.0f, 320.0f)))
+	{
+		ImGui::TableSetupScrollFreeze(0, 1);
+		ImGui::TableSetupColumn("Code");
+		ImGui::TableSetupColumn("Key");
+		ImGui::TableHeadersRow();
+		for (auto& e : kDIKTable) {
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0); ImGui::Text("0x%02X (%d)", e.dik, e.dik);
+			ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(e.name);
+		}
+		ImGui::EndTable();
+	}
+	ImGui::EndPopup();
+}
+
+static void RenderColorTriple(
+	SettingManager::Configuration::ConfigNode& nodeR,
+	SettingManager::Configuration::ConfigNode& nodeG,
+	SettingManager::Configuration::ConfigNode& nodeB,
+	const std::string& prefix)
+{
+	// Persistent state: only initialise from node values once per section visit.
+	// Re-reading each frame forces max(col)=1 every frame, pinning the picker
+	// dot to the top edge of the triangle and resetting the intensity slider.
+	struct ColorState { float col[3]; float scale; };
+	static std::unordered_map<std::string, ColorState> s_states;
+
+	if (s_colorStatesNeedReset) {
+		s_states.clear();
+		s_colorStatesNeedReset = false;
+	}
+
+	std::string stateKey = std::string(nodeR.Section) + "." + prefix;
+	if (s_states.find(stateKey) == s_states.end()) {
+		float rv = (float)atof(nodeR.Value);
+		float gv = (float)atof(nodeG.Value);
+		float bv = (float)atof(nodeB.Value);
+		float sc = rv > gv ? rv : gv;
+		if (bv > sc) sc = bv;
+		ColorState cs;
+		if (sc > 0.0f) {
+			cs.scale    = sc;
+			cs.col[0]   = rv / sc;
+			cs.col[1]   = gv / sc;
+			cs.col[2]   = bv / sc;
+		} else {
+			cs.scale    = 1.0f;
+			cs.col[0]   = cs.col[1] = cs.col[2] = 0.0f;
+		}
+		s_states[stateKey] = cs;
+	}
+	ColorState& cs = s_states[stateKey];
+
+	// Trim trailing underscores for display
+	std::string label = prefix;
+	while (!label.empty() && label.back() == '_') label.pop_back();
+
+	ImGui::PushID(prefix.c_str());
+	ImGui::TextUnformatted(label.c_str());
+
+	bool changed = false;
+	if (ImGui::ColorPicker3("##col", cs.col,
+		ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoSidePreview))
+		changed = true;
+
+	ImGui::Text("Intensity");
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+	if (ImGui::DragFloat("##intensity", &cs.scale, 0.01f, 0.0f, 0.0f, "%.4f"))
+		changed = true;
+
+	if (changed) {
+		TheSettingManager->SetSetting(nodeR.Section, nodeR.Key, cs.col[0] * cs.scale);
+		TheSettingManager->SetSetting(nodeG.Section, nodeG.Key, cs.col[1] * cs.scale);
+		TheSettingManager->SetSetting(nodeB.Section, nodeB.Key, cs.col[2] * cs.scale);
+		TheSettingManager->LoadSettings();
+	}
+
+	if (!nodeR.Description.empty()) {
+		ImGui::BeginTooltip();
+		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+		ImGui::TextUnformatted(nodeR.Description.c_str());
+		ImGui::PopTextWrapPos();
+		ImGui::EndTooltip();
+	}
+
+	ImGui::PopID();
+}
+
+static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool isShader = false) {
 	using NodeType = SettingManager::Configuration::NodeType;
 
 	ImGui::PushID(node.Key);
@@ -314,7 +460,30 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node) {
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
-		break;
+		bool hovered = ImGui::IsItemHovered();
+		if (isShader) {
+			ImGui::SameLine();
+			if (ImGui::SmallButton("-")) {
+				val -= s_shaderStepSize;
+				TheSettingManager->SetSetting(node.Section, node.Key, val);
+				TheSettingManager->LoadSettings();
+			}
+			ImGui::SameLine();
+			if (ImGui::SmallButton("+")) {
+				val += s_shaderStepSize;
+				TheSettingManager->SetSetting(node.Section, node.Key, val);
+				TheSettingManager->LoadSettings();
+			}
+		}
+		if (hovered && !node.Description.empty()) {
+			ImGui::BeginTooltip();
+			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+			ImGui::TextUnformatted(node.Description.c_str());
+			ImGui::PopTextWrapPos();
+			ImGui::EndTooltip();
+		}
+		ImGui::PopID();
+		return;
 	}
 	case NodeType::Integer: {
 		int val = atoi(node.Value);
@@ -338,11 +507,26 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node) {
 		buf[sizeof(buf) - 1] = '\0';
 		if (ImGui::InputText(node.Key, buf, sizeof(buf)))
 			persistent = buf; // keep in sync while ImGui writes back each frame
+		bool hovered = ImGui::IsItemHovered();
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
 			TheSettingManager->SetSettingS(node.Section, node.Key, buf);
 			TheSettingManager->LoadSettings();
 		}
-		break;
+		if (strcmp(node.Key, "KeyEnable") == 0) {
+			ImGui::SameLine();
+			if (ImGui::SmallButton("(?)"))
+				ImGui::OpenPopup("DIKReference");
+			RenderDIKPopup();
+		}
+		if (hovered && !node.Description.empty()) {
+			ImGui::BeginTooltip();
+			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+			ImGui::TextUnformatted(node.Description.c_str());
+			ImGui::PopTextWrapPos();
+			ImGui::EndTooltip();
+		}
+		ImGui::PopID();
+		return;
 	}
 	}
 
@@ -371,18 +555,45 @@ static void RenderContent() {
 		return;
 	}
 
+	bool isShader = (SelectedSection.find("Shaders") == 0);
+
 	ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.45f, 1.0f), "%s", SelectedSection.c_str());
 	ImGui::Separator();
 	ImGui::Spacing();
 
-	for (auto& setting : settings)
-		RenderSetting(setting);
+	// Build key->index map for RGB triple detection
+	std::unordered_map<std::string, int> keyIdx;
+	for (int i = 0; i < (int)settings.size(); i++)
+		keyIdx[settings[i].Key] = i;
 
+	std::unordered_set<std::string> handled;
 
+	for (auto& s : settings) {
+		std::string key(s.Key);
+		if (handled.count(key)) continue;
+		if (ShouldHideKey(s.Key)) continue;
+
+		// RGB triple → color picker (shader sections only)
+		if (isShader && key.size() > 1 && key.back() == 'R') {
+			std::string pfx = key.substr(0, key.size() - 1);
+			std::string kG = pfx + "G", kB = pfx + "B";
+			if (keyIdx.count(kG) && keyIdx.count(kB)) {
+				handled.insert(key);
+				handled.insert(kG);
+				handled.insert(kB);
+				RenderColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
+				continue;
+			}
+		}
+
+		RenderSetting(s, isShader);
+	}
 }
 
 // Recursive sidebar tree — path is the full dotted section path, name is the display label.
 static void RenderSectionNode(const std::string& path, const std::string& name, bool parentIsShaders) {
+	if (ShouldHideSection(name)) return;
+
 	StringList subsections;
 	TheSettingManager->FillMenuSections(&subsections, path.c_str());
 
@@ -528,6 +739,7 @@ void ImGuiManager::BuildUI() {
 		if (ImGui::Button("Revert", ImVec2(btnRevert, 0.0f))) {
 			TheSettingManager->RevertSettings();
 			SelectedSection.clear();
+			s_colorStatesNeedReset = true;
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Save Copy", ImVec2(btnCopy, 0.0f))) {
@@ -587,6 +799,20 @@ void ImGuiManager::BuildUI() {
 		if (ImGui::Button("Save", ImVec2(btnSave, 0.0f))) {
 			TheSettingManager->SaveSettings();
 			InterfaceManager->ShowMessage("Settings saved.");
+		}
+	}
+
+	// Step size selector — always visible, applies to shader +/- buttons
+	{
+		ImGui::Text("Step:");
+		static const float kSteps[]  = { 0.001f, 0.01f, 0.1f, 1.0f };
+		static const char* kLabels[] = { "0.001", "0.01", "0.1", "1.0" };
+		for (int i = 0; i < 4; i++) {
+			ImGui::SameLine();
+			bool active = fabsf(s_shaderStepSize - kSteps[i]) < 1e-6f;
+			if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+			if (ImGui::SmallButton(kLabels[i])) s_shaderStepSize = kSteps[i];
+			if (active) ImGui::PopStyleColor();
 		}
 	}
 
