@@ -177,7 +177,9 @@ void __cdecl ProcessImageSpaceShadersHook(NiDX9Renderer* Renderer, BSRenderedTex
 	
 	TheRenderManager->UpdateSceneCameraData();
 	TheRenderManager->SetupSceneCamera();
-	TheShaderManager->UpdateConstants();
+	// UpdateConstants already ran in RenderHook before the scene render; constants
+	// (sun/fog/weather/time) don't change within the same frame so the second call
+	// was pure redundant work.
 
 	if (SourceTarget && TheSettingManager->SettingsMain.Main.RenderPreTonemapping) {
 		SourceTarget->GetD3DTexture(0)->GetSurfaceLevel(0, &GameSurface); // get the surface from the game render target

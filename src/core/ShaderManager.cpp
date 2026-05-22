@@ -700,6 +700,18 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	if (!Player->parentCell) return;
 	if (GameState.OverlayIsOn && TESMain::IsMenuBackgroundReady()) return; // disable all effects during terminal/lockpicking sequences
 
+	// Skip all device setup and StretchRect copies if nothing in this batch will render.
+	const bool anyPreEnabled =
+		Effects.CombineDepth->Enabled || Effects.Normals->Enabled ||
+		Effects.ShadowsExteriors->Enabled || Effects.ShadowsInteriors->Enabled ||
+		Effects.SnowAccumulation->Enabled || Effects.AmbientOcclusion->Enabled ||
+		Effects.WetWorld->Enabled || Effects.Flashlight->Enabled ||
+		Effects.Specular->Enabled || Effects.Underwater->Enabled ||
+		Effects.VolumetricFog->Enabled || Effects.GodRays->Enabled ||
+		Effects.Exposure->Enabled || Effects.Bloom->Enabled ||
+		Effects.Lens->Enabled || avglumaRequired;
+	if (!anyPreEnabled) return;
+
 	auto timer = TimeLogger();
 
 	IDirect3DDevice9* Device = TheRenderManager->device;
@@ -764,6 +776,17 @@ void ShaderManager::RenderEffects(IDirect3DSurface9* RenderTarget) {
 	if (!TheSettingManager->SettingsMain.Main.RenderEffects) return; // Main toggle
 	if (!Player->parentCell) return;
 	if (GameState.OverlayIsOn) return; // disable all effects during terminal/lockpicking sequences because they bleed through the overlay
+
+	// Skip all device setup and StretchRect copies if nothing in this batch will render.
+	const bool anyPostEnabled =
+		Effects.Rain->Enabled || Effects.Snow->Enabled ||
+		Effects.BloomLegacy->Enabled || Effects.Coloring->Enabled ||
+		Effects.DepthOfField->Enabled || Effects.MotionBlur->Enabled ||
+		Effects.BloodLens->Enabled || Effects.WaterLens->Enabled ||
+		Effects.LowHF->Enabled || Effects.SMAA->Enabled ||
+		Effects.Sharpening->Enabled || Effects.Cinema->Enabled ||
+		Effects.ImageAdjust->Enabled || Effects.Debug->Enabled;
+	if (!anyPostEnabled) return;
 
 	auto timer = TimeLogger();
 
