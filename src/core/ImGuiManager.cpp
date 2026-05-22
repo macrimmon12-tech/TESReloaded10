@@ -60,6 +60,8 @@ struct CfabBaselines {
 	float filmGrain    =  0.3f;
 	float vignetteDark =  1.2f;
 	float vignetteRad  =  0.6f;
+	float lensStrength =  0.4f;
+	float lensSmudge   =  0.0f;
 	bool  loaded       =  false;
 };
 static CfabBaselines s_cfabBase;
@@ -77,6 +79,8 @@ static void CfabSaveBaselines() {
 	s_cfabBase.filmGrain    = TheSettingManager->GetSettingF("Shaders.Cinema.Main",                  "FilmGrainAmount");
 	s_cfabBase.vignetteDark = TheSettingManager->GetSettingF("Shaders.Cinema.Main",                  "VignetteDarkness");
 	s_cfabBase.vignetteRad  = TheSettingManager->GetSettingF("Shaders.Cinema.Main",                  "VignetteRadius");
+	s_cfabBase.lensStrength = TheSettingManager->GetSettingF("Shaders.Lens.Main",                    "Strength");
+	s_cfabBase.lensSmudge   = TheSettingManager->GetSettingF("Shaders.Lens.Main",                    "Smudginess");
 	s_cfabBase.loaded = true;
 }
 
@@ -93,6 +97,8 @@ static void CfabRestoreBaselines() {
 	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "FilmGrainAmount",     s_cfabBase.filmGrain);
 	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteDarkness",    s_cfabBase.vignetteDark);
 	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteRadius",      s_cfabBase.vignetteRad);
+	TheSettingManager->SetSetting("Shaders.Lens.Main",                    "Strength",            s_cfabBase.lensStrength);
+	TheSettingManager->SetSetting("Shaders.Lens.Main",                    "Smudginess",          s_cfabBase.lensSmudge);
 	TheSettingManager->LoadSettings();
 	s_cfabBase.loaded = false;
 }
@@ -110,13 +116,15 @@ static void CfabApply(float x, float y, float z) {
 	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveR",         b.curveR       + x * 0.20f);
 	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveG",         b.curveG       + x * 0.05f);
 	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveB",         b.curveB       - x * 0.15f);
-	TheSettingManager->SetSetting("Shaders.DepthOfField.FirstPersonView", "BaseBlurRadius",      ImMax(0.0f, b.dofBlur    + y * 2.5f));
-	TheSettingManager->SetSetting("Shaders.Sharpening.Main",              "Strength",            ImMax(0.0f, b.sharpening - y * 0.6f));
-	TheSettingManager->SetSetting("Shaders.Bloom.Main",                   "Strength",            ImMax(0.0f, b.bloom      + y * 1.5f));
-	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "ChromaticAberration", ImMax(0.0f, b.chroma     + z * 2.0f));
-	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "FilmGrainAmount",     ImMax(0.0f, b.filmGrain  + z * 0.5f));
-	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteDarkness",    ImMax(0.0f, b.vignetteDark + z * 1.0f));
-	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteRadius",      ImClamp(b.vignetteRad - z * 0.2f, 0.0f, 1.0f));
+	TheSettingManager->SetSetting("Shaders.DepthOfField.FirstPersonView", "BaseBlurRadius",      ImMax(0.0f, b.dofBlur    + y * 6.0f));
+	TheSettingManager->SetSetting("Shaders.Sharpening.Main",              "Strength",            ImMax(0.0f, b.sharpening - y * 1.5f));
+	TheSettingManager->SetSetting("Shaders.Bloom.Main",                   "Strength",            ImMax(0.0f, b.bloom      + y * 4.0f));
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "ChromaticAberration", ImMax(0.0f, b.chroma     + z * 5.0f));
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "FilmGrainAmount",     ImMax(0.0f, b.filmGrain  + z * 1.3f));
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteDarkness",    ImMax(0.0f, b.vignetteDark + z * 2.5f));
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteRadius",      ImClamp(b.vignetteRad - z * 0.5f, 0.0f, 1.0f));
+	TheSettingManager->SetSetting("Shaders.Lens.Main",                    "Smudginess",          ImMax(0.0f, b.lensSmudge   + z * 0.7f));
+	TheSettingManager->SetSetting("Shaders.Lens.Main",                    "Strength",            ImMax(0.0f, b.lensStrength + z * 0.5f));
 	TheSettingManager->LoadSettings();
 }
 
@@ -242,6 +250,8 @@ static void RenderConfabulator() {
 	float bCA   = b.loaded ? b.chroma       :  1.0f;
 	float bFG   = b.loaded ? b.filmGrain    :  0.3f;
 	float bVD   = b.loaded ? b.vignetteDark :  1.2f;
+	float bLS   = b.loaded ? b.lensStrength :  0.4f;
+	float bLSm  = b.loaded ? b.lensSmudge   :  0.0f;
 
 	if (ImGui::BeginTable("##cfab", 3,
 		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchSame))
@@ -254,14 +264,17 @@ static void RenderConfabulator() {
 		struct Row { const char* la; float va; const char* lb; float vb; const char* lc; float vc; };
 		Row rows[] = {
 			{ "Saturation", bSat  + s_cfabX * 1.00f,
-			  "DoF Blur",   ImMax(0.f, bDof  + s_cfabY * 2.5f),
-			  "Chroma",     ImMax(0.f, bCA   + s_cfabZ * 2.0f) },
+			  "DoF Blur",   ImMax(0.f, bDof  + s_cfabY * 6.0f),
+			  "Chroma",     ImMax(0.f, bCA   + s_cfabZ * 5.0f) },
 			{ "CurveR",     bCR   + s_cfabX * 0.20f,
-			  "Sharpening", ImMax(0.f, bShrp - s_cfabY * 0.6f),
-			  "FilmGrain",  ImMax(0.f, bFG   + s_cfabZ * 0.5f) },
+			  "Sharpening", ImMax(0.f, bShrp - s_cfabY * 1.5f),
+			  "FilmGrain",  ImMax(0.f, bFG   + s_cfabZ * 1.3f) },
 			{ "CurveB",     bCB   - s_cfabX * 0.15f,
-			  "Bloom",      ImMax(0.f, bBlm  + s_cfabY * 1.5f),
-			  "Vignette",   ImMax(0.f, bVD   + s_cfabZ * 1.0f) },
+			  "Bloom",      ImMax(0.f, bBlm  + s_cfabY * 4.0f),
+			  "Vignette",   ImMax(0.f, bVD   + s_cfabZ * 2.5f) },
+			{ "CurveG",     (b.loaded ? b.curveG : 1.0f) + s_cfabX * 0.05f,
+			  "",           0.f,
+			  "LensSmudge", ImMax(0.f, bLSm  + s_cfabZ * 0.7f) },
 		};
 		for (const auto& r : rows) {
 			ImGui::TableNextRow();
