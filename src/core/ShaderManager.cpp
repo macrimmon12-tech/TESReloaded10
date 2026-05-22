@@ -433,7 +433,7 @@ ShaderCollection* ShaderManager::GetShaderCollection(const char* Name) {
 	if (!memcmp(Name, "GRASS", 5)) return Shaders.Grass;
 	if (!memcmp(Name, "ISHDR", 5) || !memcmp(Name, "HDR", 3)) return Shaders.Tonemapping; // tonemapping shaders have different names between New vegas and Oblivion
 	if (!memcmp(Name, "PAR", 3)) return Shaders.POM;
-	//if (!memcmp(Name, "SKIN", 4)) return Shaders.Skin; // temporarily disabled, the shaders are half broken
+	if (!memcmp(Name, "SKIN", 4)) return Shaders.Skin;
 	if (!memcmp(Name, "SKY", 3)) return Shaders.Sky;
 	if (strstr(BloodShaders, Name)) return Shaders.Blood;
 

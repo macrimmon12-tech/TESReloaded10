@@ -96,6 +96,9 @@ VS_OUTPUT main(VS_INPUT IN) {
     q17.xyz = (((t13.x * (t1.xyz - 1)) + 1) * r2.xyz) + (r0.xyz * saturate((1 - att2.x) - att14.x));			// partial precision
     r6.xyz = q17.xyz + AmbientColor.rgb;			// partial precision
 
+    OUT.color_0.rgb = r6.xyz * texel0.rgb;
+    OUT.color_0.a = texel0.a;
+
     return OUT;
 };
 

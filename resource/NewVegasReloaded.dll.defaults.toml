@@ -738,7 +738,7 @@ RimScalar = 0.5
 SpecularPower = 0.78
 
 [_Shaders.Skin.Status]
-Enabled = false                     # Not currently used. Replaces the skin shader.
+Enabled = true                      # Replaces the skin shader with NVR's SSS implementation.
 
 
 [_Shaders.Sky.Main]

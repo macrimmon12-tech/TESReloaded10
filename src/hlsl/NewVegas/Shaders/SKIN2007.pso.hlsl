@@ -116,6 +116,9 @@ VS_OUTPUT main(VS_INPUT IN) {
     r1.yzw = (const_5.wzyx * q19.x) + (r6.w * lerp(const_5.wzyx, r6.wzyx, 0.5));			// partial precision
     r8.xyz = ((saturate((1 - att1.x) - att46.x) * ((q21.x * r6.xyz) + r1.wzy)) + q16.xyz) + AmbientColor.rgb;			// partial precision
 
+    OUT.color_0.rgb = r8.xyz * texel0.rgb;
+    OUT.color_0.a = texel0.a;
+
     return OUT;
 };
 

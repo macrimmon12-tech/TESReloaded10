@@ -86,6 +86,9 @@ VS_OUTPUT main(VS_INPUT IN) {
     q14.xyz = (saturate((1 - att11.x) - att12.x) * r0.xyz) + ((shades(q2.xyz, IN.texcoord_1.xyz) * const_3.xyz) + r2.xyz);			// partial precision
     r4.xyz = q14.xyz + AmbientColor.rgb;			// partial precision
 
+    OUT.color_0.rgb = r4.xyz * texel0.rgb;
+    OUT.color_0.a = texel0.a;
+
     return OUT;
 };
 
