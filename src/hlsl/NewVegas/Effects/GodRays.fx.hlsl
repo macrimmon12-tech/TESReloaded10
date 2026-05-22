@@ -39,6 +39,8 @@ static const float stepLengthMult = TESR_GodRaysRay.y;
 static const float glareReduction = TESR_GodRaysRay.z;
 static const float godrayCurve = TESR_GodRaysRay.w;
 static const float sunHeight = 1 - shade(TESR_SunPosition.xyz, blue.xyz);
+static const float2 sunPos = projectPosition(TESR_ViewSpaceLightDir.xyz * farZ).xy;
+static const float heightAttenuation = TESR_GodRaysData.w ? lerp(0.2, 4.0, pows(sunHeight, 4)) : 1.0;
 
 struct VSOUT {
 	float4 vertPos : POSITION;
@@ -67,7 +69,7 @@ float4 SkyMask(VSOUT IN) : COLOR0 {
 
 	float glarePower = lerp(0.1, 8.0, sunset); // increase flare boost during sunrise/sunset
 
-	float depth = (readDepth(uv) / farZ) > 0.9; //only pixels belonging to the sky will register
+	float depth = tex2D(TESR_DepthBuffer, uv).x > 0.9; //only pixels belonging to the sky will register
 	float3 sunGlare = pows(dot(TESR_ViewSpaceLightDir.xyz, normalize(reconstructPosition(uv))), 180) * glarePower; // fake sunglare computed from light direction
 	float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
 	color = (color + sunGlare * sunColor) * depth * smoothstep(0, 0.01, sunHeight);
@@ -106,11 +108,8 @@ float4 RadialBlur(VSOUT IN, uniform float step) : COLOR0 {
 	uv /= scale; // restore uv scale to do calculations in [0, 1] space
 	uv -= 0.5 * TESR_ReciprocalResolution.xy;
 
-	// calculate vector from pixel to sun along which we'll sample
-	float2 sunPos = projectPosition(TESR_ViewSpaceLightDir.xyz * farZ).xy;
-
 	// vector from the given pixel to the sun position
-	float2 blurDirection = (sunPos.xy - uv) * float2(1.0f, raspect); // apply aspect ratio correction
+	float2 blurDirection = (sunPos - uv) * float2(1.0f, raspect); // apply aspect ratio correction
 	float distance = length(blurDirection); // distance from pixel to radial blur center
 
 	float2 dir = blurDirection/distance;
@@ -122,13 +121,12 @@ float4 RadialBlur(VSOUT IN, uniform float step) : COLOR0 {
 	float2 samplePos = uv;
 	float4 color = float4(0, 0, 0, 1);
 	float total = 1;
-	for (float i=0; i < samples; i++){
-		float length = min(stepSize * i, distance); // clamp sampling vector to the distance from the pixel to the sun
-		samplePos = saturate(uv + (dir * length / float2(1, raspect))); // apply aspect ratio correction
-
-		float doStep = (i <= maxStep && samplePos.x > 0 && samplePos.y > 0 && samplePos.x < 1 && samplePos.y < 1); // check if we haven't overshot the sun position or exited the screen
-		color += tex2D(TESR_RenderedBuffer, samplePos * scale) * doStep;
-		total += doStep;
+	for (int i = 0; i < samples; i++){
+		if (i > maxStep) break;
+		float stepDist = stepSize * i;
+		samplePos = saturate(uv + (dir * stepDist / float2(1, raspect))); // apply aspect ratio correction
+		color += tex2D(TESR_RenderedBuffer, samplePos * scale);
+		total += 1;
 	}
 	color /= total;
 
@@ -138,24 +136,14 @@ float4 RadialBlur(VSOUT IN, uniform float step) : COLOR0 {
 
 float4 Combine(VSOUT IN) : COLOR0
 {
-	float scale = 0.5; // godrays were rendered at smaller res
 	float4 color = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
 	float2 uv = IN.UVCoord;
 	float3 eyeDir = normalize(reconstructPosition(uv));
-	
-	// calculate vector from pixel to sun to get the distance
-	float2 sunPos = projectPosition(TESR_ViewSpaceLightDir.xyz * farZ).xy;
-	float2 blurDirection = (sunPos.xy - uv) * float2(1.0f, raspect); // apply aspect ratio correction
-	float distance = length(blurDirection);
 
 	uv *= scale;
 	float4 rays = tex2D(TESR_RenderedBuffer, uv);
 
-	// attentuate intensity with distance from sun to fade the edges and reduce sunglare
-	float heightAttenuation = TESR_GodRaysData.w?lerp(0.2, 4.0, pows(sunHeight, 4)):1.0; // if timeEnabled is on, godrays strength is reduced when the sun is high
-	float glareAttenuation = 1.0;
-	// float glareAttenuation = smoothstep(0, glareReduction, distance);
-	float attenuation = pow(compress(shade(TESR_ViewSpaceLightDir.xyz, eyeDir)), 2.5) * glareAttenuation * heightAttenuation * (sunHeight < 1);
+	float attenuation = pow(compress(shade(TESR_ViewSpaceLightDir.xyz, eyeDir)), 2.5) * heightAttenuation * (sunHeight < 1);
 
 	// calculate sun color
     float3 sunColor = GetSunColor(shade(TESR_SunDirection.xyz, blue.xyz), 1, TESR_SunAmount.x, TESR_SunColor.rgb, TESR_SunsetColor.rgb);
@@ -171,7 +159,8 @@ float4 Combine(VSOUT IN) : COLOR0
 	//uv /= TESR_ReciprocalResolution.xy;
 	//rays.rgb += (ditherMat[(uv.x)%4 ][ (uv.y)%4 ] / 255) * useDither;
 
-	color += max(rays, 0) * 5 * color + max(rays, 0) * 0.2;
+	float4 raysPos = max(rays, 0);
+	color += raysPos * 5 * color + raysPos * 0.2;
 	color = delinearize(color);
 	return float4(color.rgb, 1);
 }
