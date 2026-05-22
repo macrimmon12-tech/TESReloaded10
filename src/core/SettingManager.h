@@ -204,6 +204,10 @@ struct SettingsMainStruct {
 		UInt8	TraceShaders;
 	};
 
+	struct TransitionsStruct {
+		float TransitionCurvePower;
+	};
+
 	MainStruct					Main;
 	CullingProcessStruct		CullingProcess;
 	OcclusionCullingStruct		OcclusionCulling;
@@ -223,6 +227,7 @@ struct SettingsMainStruct {
 	DodgeStruct					Dodge;
 	FlyCamStruct				FlyCam;
 	DevelopStruct				Develop;
+	TransitionsStruct			Transitions;
 };
 
 typedef std::vector<UInt32> FormsList;

@@ -569,6 +569,8 @@ void SettingManager::LoadSettings() {
 	SettingsMain.Develop.DebugMode = GetSettingI("Main.Develop.Main", "DebugMode");
 	SettingsMain.Develop.TraceShaders = GetSettingI("Main.Develop.Main", "TraceShaders");
 
+	SettingsMain.Transitions.TransitionCurvePower = GetSettingF("Main.Transitions.Main", "TransitionCurvePower");
+
 
 	Config.FillSections(&List, "Weathers"); // get the list of weathers
 	for (StringList::iterator Iter = List.begin(); Iter != List.end(); ++Iter) {
