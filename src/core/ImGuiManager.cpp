@@ -85,6 +85,7 @@ static void SetOverlayVisible(bool visible) {
 	if (ImGuiManager::IsVisible() == visible) return;
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
+		PatchMouseVTable();
 		ClipCursor(nullptr);
 		BlockGameInput(true);
 		ImGui::GetIO().MouseDrawCursor = true;
