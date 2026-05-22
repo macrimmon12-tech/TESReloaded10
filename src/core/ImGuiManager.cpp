@@ -107,9 +107,13 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 	// via polling (waits for key release before unblocking DI).
 	if (Visible && msg == WM_KEYDOWN && wParam == VK_ESCAPE)
 		return TRUE;
-	// Eat WM_SYSKEYDOWN for Alt so Windows never activates the menu bar.
-	if (Visible && msg == WM_SYSKEYDOWN && wParam == VK_MENU)
+	// Close on Alt and eat the message so Windows never activates the menu bar.
+	// Must close here in WndProc rather than BuildUI — WM_ACTIVATE(WA_INACTIVE)
+	// fires before the next frame, so BuildUI never sees the Alt keypress.
+	if (Visible && msg == WM_SYSKEYDOWN && wParam == VK_MENU) {
+		SetOverlayVisible(false);
 		return TRUE;
+	}
 
 if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
 		return TRUE;
@@ -744,21 +748,13 @@ void ImGuiManager::BuildUI() {
 
 	if (!Visible) return;
 
-	// Wait for Escape or Alt release before closing so the game doesn't see them held.
+	// Wait for Escape release before closing so the game doesn't see it still held.
+	// Alt is handled directly in WndProc (WM_SYSKEYDOWN) so it fires before
+	// WM_ACTIVATE(WA_INACTIVE) can beat us to it.
 	static bool escapePending = false;
-	static bool altPending    = false;
-	if (ImGui::IsKeyPressed(ImGuiKey_Escape))   escapePending = true;
-	if (ImGui::IsKeyPressed(ImGuiKey_LeftAlt) ||
-	    ImGui::IsKeyPressed(ImGuiKey_RightAlt))  altPending    = true;
+	if (ImGui::IsKeyPressed(ImGuiKey_Escape)) escapePending = true;
 	if (escapePending && !ImGui::IsKeyDown(ImGuiKey_Escape)) {
 		escapePending = false;
-		SetOverlayVisible(false);
-		return;
-	}
-	if (altPending &&
-	    !ImGui::IsKeyDown(ImGuiKey_LeftAlt) &&
-	    !ImGui::IsKeyDown(ImGuiKey_RightAlt)) {
-		altPending = false;
 		SetOverlayVisible(false);
 		return;
 	}
