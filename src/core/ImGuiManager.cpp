@@ -107,6 +107,9 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 	// via polling (waits for key release before unblocking DI).
 	if (Visible && msg == WM_KEYDOWN && wParam == VK_ESCAPE)
 		return TRUE;
+	// Eat WM_SYSKEYDOWN for Alt so Windows never activates the menu bar.
+	if (Visible && msg == WM_SYSKEYDOWN && wParam == VK_MENU)
+		return TRUE;
 
 if (Visible && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
 		return TRUE;
@@ -741,11 +744,21 @@ void ImGuiManager::BuildUI() {
 
 	if (!Visible) return;
 
-	// Wait for Escape release before closing so the game doesn't see it still held.
+	// Wait for Escape or Alt release before closing so the game doesn't see them held.
 	static bool escapePending = false;
-	if (ImGui::IsKeyPressed(ImGuiKey_Escape)) escapePending = true;
+	static bool altPending    = false;
+	if (ImGui::IsKeyPressed(ImGuiKey_Escape))   escapePending = true;
+	if (ImGui::IsKeyPressed(ImGuiKey_LeftAlt) ||
+	    ImGui::IsKeyPressed(ImGuiKey_RightAlt))  altPending    = true;
 	if (escapePending && !ImGui::IsKeyDown(ImGuiKey_Escape)) {
 		escapePending = false;
+		SetOverlayVisible(false);
+		return;
+	}
+	if (altPending &&
+	    !ImGui::IsKeyDown(ImGuiKey_LeftAlt) &&
+	    !ImGui::IsKeyDown(ImGuiKey_RightAlt)) {
+		altPending = false;
 		SetOverlayVisible(false);
 		return;
 	}
