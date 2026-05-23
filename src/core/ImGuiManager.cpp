@@ -342,29 +342,29 @@ void ImGuiManager::NewFrame() {
 		BYTE dik = (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable;
 		int  vk  = DikToVk(dik);
 		if (vk) {
+			if (s_masterMod < 0)
+				s_masterMod = (int)TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
+
 			bool keyDown = (GetAsyncKeyState(vk) & 0x8000) != 0;
 
-			// Toggle overlay — bare key press, no modifier.
+			// Compute whether the FX modifier is currently held.
+			bool modHeld = false;
+			if      (s_masterMod == 1) modHeld = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+			else if (s_masterMod == 2) modHeld = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
+			else if (s_masterMod == 3) modHeld = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
+
+			// Open/close overlay — bare key only, never when FX modifier is held.
 			{
 				static bool prev = false;
-				if (keyDown && !prev && !Visible) SetOverlayVisible(true);
-				// Closing via toggle also handled in BuildUI (escapePending path)
-				// so only open here; close handled below when overlay is visible.
+				if (keyDown && !prev && !modHeld)
+					SetOverlayVisible(!Visible);
 				prev = keyDown;
 			}
 
-			// RenderEffects master switch — toggle key + configured modifier.
-			// s_masterMod is the authoritative value; TOML is persistence only.
-			if (s_masterMod < 0)
-				s_masterMod = (int)TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
-			BYTE mod = (BYTE)s_masterMod;
-			if (mod > 0) {
-				bool modDown = false;
-				if      (mod == 1) modDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-				else if (mod == 2) modDown = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
-				else if (mod == 3) modDown = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
+			// RenderEffects master switch — modifier + key only.
+			if (s_masterMod > 0) {
 				static bool prevMaster = false;
-				bool masterDown = modDown && keyDown;
+				bool masterDown = modHeld && keyDown;
 				if (masterDown && !prevMaster) {
 					bool cur = TheSettingManager->SettingsMain.Main.RenderEffects;
 					TheSettingManager->SetSetting("Main.Main.Misc", "RenderEffects", !cur);
@@ -372,24 +372,6 @@ void ImGuiManager::NewFrame() {
 				}
 				prevMaster = masterDown;
 			}
-		}
-	}
-
-	// Close overlay via toggle key (same GetAsyncKeyState path, bare press).
-	if (Visible && TheSettingManager) {
-		BYTE dik = (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable;
-		int  vk  = DikToVk(dik);
-		if (vk) {
-			static bool prevClose = false;
-			bool curClose = (GetAsyncKeyState(vk) & 0x8000) != 0;
-			// Only fire close when no modifier is held (modifier combo is master switch)
-			int  mod     = (s_masterMod >= 0) ? s_masterMod : (int)TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
-			bool modHeld = (mod == 1 && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) ||
-			               (mod == 2 && (GetAsyncKeyState(VK_MENU)    & 0x8000)) ||
-			               (mod == 3 && (GetAsyncKeyState(VK_SHIFT)   & 0x8000));
-			if (curClose && !prevClose && !modHeld)
-				SetOverlayVisible(false);
-			prevClose = curClose;
 		}
 	}
 
