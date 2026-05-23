@@ -264,6 +264,8 @@ static void HandleRawKeyboard(const RAWKEYBOARD& kb) {
 	if (kb.VKey == 0 || kb.VKey == 0xFF) return;
 	if (!ImGuiManager::IsVisible()) return;
 
+	bool isDown = (kb.Flags & RI_KEY_BREAK) == 0;
+
 	ImGuiIO& io = ImGui::GetIO();
 
 	ImGuiKey imKey = VkToImGuiKey(kb.VKey);
