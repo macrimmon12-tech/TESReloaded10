@@ -31,6 +31,7 @@ static float s_shaderStepSize       = 0.1f;
 static bool  s_colorStatesNeedReset = false;
 static bool  s_plusPressed          = false;
 static bool  s_minusPressed         = false;
+static int   s_masterMod            = -1; // -1 = not yet read from settings
 
 // Per-setting revert snapshot: section -> key -> value at overlay open time.
 // Populated lazily on first render of each setting; cleared on overlay open.
@@ -353,7 +354,10 @@ void ImGuiManager::NewFrame() {
 			}
 
 			// RenderEffects master switch — toggle key + configured modifier.
-			BYTE mod = TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
+			// s_masterMod is the authoritative value; TOML is persistence only.
+			if (s_masterMod < 0)
+				s_masterMod = (int)TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
+			BYTE mod = (BYTE)s_masterMod;
 			if (mod > 0) {
 				bool modDown = false;
 				if      (mod == 1) modDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -379,7 +383,7 @@ void ImGuiManager::NewFrame() {
 			static bool prevClose = false;
 			bool curClose = (GetAsyncKeyState(vk) & 0x8000) != 0;
 			// Only fire close when no modifier is held (modifier combo is master switch)
-			BYTE mod = TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
+			int  mod     = (s_masterMod >= 0) ? s_masterMod : (int)TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
 			bool modHeld = (mod == 1 && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) ||
 			               (mod == 2 && (GetAsyncKeyState(VK_MENU)    & 0x8000)) ||
 			               (mod == 3 && (GetAsyncKeyState(VK_SHIFT)   & 0x8000));
@@ -1026,14 +1030,26 @@ void ImGuiManager::BuildUI() {
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Revert all settings to values at session start");
 		ImGui::SameLine();
-		if (ImGui::Button("Disk", ImVec2(btnDisk, 0.0f))) {
-			TheSettingManager->RevertSettings();
-			s_snapshot.clear();
-			SelectedSection.clear();
-			s_colorStatesNeedReset = true;
-		}
+		if (ImGui::Button("Disk", ImVec2(btnDisk, 0.0f)))
+			ImGui::OpenPopup("##ConfirmDisk");
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Reload all settings from saved TOML file");
+		if (ImGui::BeginPopupModal("##ConfirmDisk", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::Text("Reload from disk? All unsaved changes will be lost.");
+			ImGui::Spacing();
+			if (ImGui::Button("Yes", ImVec2(80.0f, 0.0f))) {
+				TheSettingManager->RevertSettings();
+				s_snapshot.clear();
+				s_masterMod = -1; // re-read from TOML after reload
+				SelectedSection.clear();
+				s_colorStatesNeedReset = true;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(80.0f, 0.0f)))
+				ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
 		ImGui::SameLine();
 		if (ImGui::Button("Save Copy", ImVec2(btnCopy, 0.0f))) {
 			// Build timestamped path next to the DLL, e.g.:
@@ -1121,15 +1137,19 @@ void ImGuiManager::BuildUI() {
 			io.FontGlobalScale = ImMin(2.0f, io.FontGlobalScale + 0.1f);
 
 		// FX master switch modifier selector
+		// s_masterMod is the authoritative runtime value; TOML provides initial value
+		// and persistence (requires updated defaults.toml to be deployed).
 		ImGui::SameLine(0.0f, 20.0f);
 		ImGui::Text("FX key:");
 		static const char* kModLabels[] = { "Off", "Ctrl", "Alt", "Shift" };
-		BYTE curMod = TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
+		if (s_masterMod < 0)
+			s_masterMod = (int)TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
 		for (int i = 0; i < 4; i++) {
 			ImGui::SameLine();
-			bool active = (curMod == (BYTE)i);
+			bool active = (s_masterMod == i);
 			if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
 			if (ImGui::SmallButton(kModLabels[i])) {
+				s_masterMod = i;
 				TheSettingManager->SetSetting("Main.Menu.Keys", "MasterSwitchModifier", i);
 				TheSettingManager->LoadSettings();
 			}
