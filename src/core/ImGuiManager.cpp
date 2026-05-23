@@ -499,6 +499,12 @@ static const struct { int dik; const char* name; } kDIKTable[] = {
 	{ 0xD2, "Insert" }, { 0xD3, "Delete" },
 };
 
+static const char* DikToName(BYTE dik) {
+	for (auto& e : kDIKTable)
+		if (e.dik == (int)dik) return e.name;
+	return "Unknown";
+}
+
 static void RenderDIKPopup() {
 	if (!ImGui::BeginPopup("DIKReference")) return;
 	ImGui::Text("DirectInput Scancodes");
@@ -943,7 +949,7 @@ static void RenderMainMenuToast() {
 
 	std::string msg = std::string(PluginVersion::VersionString)
 		+ " loaded  |  press "
-		+ TheGameMenuManager->GetKeyName(TheSettingManager->SettingsMain.Menu.KeyEnable)
+		+ DikToName(TheSettingManager->SettingsMain.Menu.KeyEnable)
 		+ " to open settings";
 
 	ImVec2 displaySize = ImGui::GetIO().DisplaySize;
@@ -1012,7 +1018,7 @@ void ImGuiManager::BuildUI() {
 		ImGui::PopStyleColor();
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Toggle all NVR effects (hotkey: modifier + %s)",
-				TheGameMenuManager->GetKeyName(TheSettingManager->SettingsMain.Menu.KeyEnable));
+				DikToName(TheSettingManager->SettingsMain.Menu.KeyEnable));
 	}
 
 	ImGui::SameLine();
