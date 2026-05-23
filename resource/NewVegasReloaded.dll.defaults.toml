@@ -427,7 +427,7 @@ Strength = 1.0                        # AA blend strength (0.0 = off, 1.0 = full
 MaskPower = 0.5                       # Edge detection sensitivity. Higher = fewer edges AA'd.
 
 [_Shaders.DitherBuster.Status]
-Enabled = true                        # Reduces dithering artifacts via luma-edge anti-aliasing.
+Enabled = false                       # Reduces dithering artifacts via luma-edge anti-aliasing.
 
 [_Shaders.SMAA.Main]
 EdgeDetection = 0                     # Edge detection algorithm - 0:Luma (default), 1:Color, 2:Depth
