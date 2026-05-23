@@ -160,7 +160,20 @@ void ImGuiManager::Initialize() {
 
 	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-	io.IniFilename = nullptr;
+
+	// Derive INI path from DLL location: e.g. NewVegasReloaded.imgui.ini
+	// Static so the pointer remains valid for the lifetime of the ImGui context.
+	static char s_iniPath[MAX_PATH] = {};
+	if (s_iniPath[0] == '\0') {
+		HMODULE hMod = nullptr;
+		GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+			GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			(LPCSTR)&ImGuiManager::Initialize, &hMod);
+		GetModuleFileNameA(hMod, s_iniPath, MAX_PATH);
+		char* ext = strrchr(s_iniPath, '.');
+		if (ext) strcpy(ext, ".imgui.ini");
+	}
+	io.IniFilename = s_iniPath;
 
 	// Restore font scale from TextSize setting.
 	// Legacy pixel sizes (old menu system) are typically 8-24; treat anything
