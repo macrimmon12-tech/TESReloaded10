@@ -161,6 +161,7 @@ struct SettingsMainStruct {
 		UInt8	KeySubtract;
 		UInt8	KeySave;
 		UInt8	KeyEditing;
+		UInt8	MasterSwitchModifier;
 		int		PositionX;
 		int		PositionY;
 		int		TitleColumnSize;
