@@ -162,6 +162,14 @@ void ImGuiManager::Initialize() {
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	io.IniFilename = nullptr;
 
+	// Restore font scale from TextSize setting.
+	// Legacy pixel sizes (old menu system) are typically 8-24; treat anything
+	// below 50 as stale and default to 100 (1.0x).
+	if (TheSettingManager) {
+		int stored = (int)TheSettingManager->SettingsMain.Menu.TextSize;
+		io.FontGlobalScale = (stored >= 50) ? (stored / 100.0f) : 1.0f;
+	}
+
 	ImGui::StyleColorsDark();
 	ImGui::GetStyle().WindowRounding    = 6.0f;
 	ImGui::GetStyle().FrameRounding     = 3.0f;
@@ -1110,13 +1118,19 @@ void ImGuiManager::BuildUI() {
 		ImGui::SameLine(0.0f, 20.0f);
 		ImGui::Text("Text:");
 		ImGui::SameLine();
-		if (ImGui::SmallButton("A-"))
+		if (ImGui::SmallButton("A-")) {
 			io.FontGlobalScale = ImMax(0.5f, io.FontGlobalScale - 0.1f);
+			TheSettingManager->SetSetting("Main.Menu.Style", "TextSize", (int)(io.FontGlobalScale * 100.0f + 0.5f));
+			TheSettingManager->LoadSettings();
+		}
 		ImGui::SameLine();
 		ImGui::Text("%.0f%%", io.FontGlobalScale * 100.0f);
 		ImGui::SameLine();
-		if (ImGui::SmallButton("A+"))
+		if (ImGui::SmallButton("A+")) {
 			io.FontGlobalScale = ImMin(2.0f, io.FontGlobalScale + 0.1f);
+			TheSettingManager->SetSetting("Main.Menu.Style", "TextSize", (int)(io.FontGlobalScale * 100.0f + 0.5f));
+			TheSettingManager->LoadSettings();
+		}
 
 		// FX master switch modifier selector
 		// s_masterMod is the authoritative runtime value; TOML provides initial value
