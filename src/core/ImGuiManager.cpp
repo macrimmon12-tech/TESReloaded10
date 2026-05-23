@@ -238,29 +238,30 @@ static ImGuiKey VkToImGuiKey(USHORT vk) {
 	}
 }
 
+// Hardcoded DIK->VK for extended keys where MapVirtualKey returns wrong/zero.
+static int DikToVk(BYTE dik) {
+	switch (dik) {
+	case 0x9C: return VK_RETURN;   // DIK_NUMPADENTER
+	case 0x9D: return VK_RCONTROL; // DIK_RCONTROL
+	case 0xB5: return VK_DIVIDE;   // DIK_NUMPADSLASH
+	case 0xB8: return VK_RMENU;    // DIK_RALT
+	case 0xC5: return VK_PAUSE;    // DIK_PAUSE
+	case 0xC7: return VK_HOME;     // DIK_HOME
+	case 0xC8: return VK_UP;       // DIK_UP
+	case 0xC9: return VK_PRIOR;    // DIK_PGUP
+	case 0xCB: return VK_LEFT;     // DIK_LEFT
+	case 0xCD: return VK_RIGHT;    // DIK_RIGHT
+	case 0xCF: return VK_END;      // DIK_END
+	case 0xD0: return VK_DOWN;     // DIK_DOWN
+	case 0xD1: return VK_NEXT;     // DIK_PGDN
+	case 0xD2: return VK_INSERT;   // DIK_INSERT
+	case 0xD3: return VK_DELETE;   // DIK_DELETE
+	default:   return (int)MapVirtualKey(dik, MAPVK_VSC_TO_VK_EX);
+	}
+}
+
 static void HandleRawKeyboard(const RAWKEYBOARD& kb) {
 	if (kb.VKey == 0 || kb.VKey == 0xFF) return;
-
-	bool isDown = (kb.Flags & RI_KEY_BREAK) == 0;
-
-	// Reconstruct DIK from MakeCode + E0 flag — matches KeyEnable directly.
-	// E0-prefixed extended keys: DIK = MakeCode | 0x80 (e.g. End: 0x4F|0x80 = 0xCF).
-	BYTE dik = (kb.Flags & RI_KEY_E0) ? (BYTE)(kb.MakeCode | 0x80) : (BYTE)kb.MakeCode;
-
-	BYTE toggleDIK = TheSettingManager ? (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable : 0;
-	if (toggleDIK && dik == toggleDIK) {
-		// Close on key-up so DI is unblocked only after the key is released,
-		// preventing the game from picking up a spurious held keypress.
-		static bool toggleHeld = false;
-		if (isDown) {
-			toggleHeld = true;
-		} else if (toggleHeld) {
-			toggleHeld = false;
-			SetOverlayVisible(!ImGuiManager::IsVisible());
-		}
-		return;
-	}
-
 	if (!ImGuiManager::IsVisible()) return;
 
 	ImGuiIO& io = ImGui::GetIO();
@@ -304,6 +305,21 @@ void ImGuiManager::NewFrame() {
 	// Close if a game menu is active (inventory, pip-boy, etc.)
 	if (Visible && !InterfaceManager->IsActive(Menu::MenuType::kMenuType_None))
 		SetOverlayVisible(false);
+
+	// Toggle overlay via GetAsyncKeyState — reads hardware state directly,
+	// works under DXVK regardless of WM message or DI hook availability.
+	// DikToVk handles extended keys (END, arrows, etc.) that MapVirtualKey gets wrong.
+	if (TheSettingManager) {
+		BYTE dik = (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable;
+		int  vk  = DikToVk(dik);
+		if (vk) {
+			static bool prevToggle = false;
+			bool curToggle = (GetAsyncKeyState(vk) & 0x8000) != 0;
+			if (curToggle && !prevToggle)
+				SetOverlayVisible(!Visible);
+			prevToggle = curToggle;
+		}
+	}
 
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
