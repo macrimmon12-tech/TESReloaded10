@@ -85,6 +85,8 @@ static void SetOverlayVisible(bool visible) {
 	}
 }
 
+static void HandleRawKeyboard(const RAWKEYBOARD& kb);
+
 // ---- WndProc -----------------------------------------------------------------
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
