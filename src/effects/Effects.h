@@ -33,6 +33,7 @@
 #include "VolumetricFog.h"
 #include "WaterLens.h"
 #include "WetWorld.h"
+#include "DitherBuster.h"
 #include "SMAA.h"
 
 #include "Water.h"
