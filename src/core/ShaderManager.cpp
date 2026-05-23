@@ -781,11 +781,12 @@ void ShaderManager::RenderEffects(IDirect3DSurface9* RenderTarget) {
 	const bool anyPostEnabled =
 		Effects.Rain->Enabled || Effects.Snow->Enabled ||
 		Effects.BloomLegacy->Enabled || Effects.Coloring->Enabled ||
-		Effects.DepthOfField->Enabled || Effects.MotionBlur->Enabled ||
-		Effects.BloodLens->Enabled || Effects.WaterLens->Enabled ||
-		Effects.LowHF->Enabled || Effects.SMAA->Enabled ||
-		Effects.Sharpening->Enabled || Effects.Cinema->Enabled ||
-		Effects.ImageAdjust->Enabled || Effects.Debug->Enabled;
+		Effects.LUT->Enabled || Effects.DepthOfField->Enabled ||
+		Effects.MotionBlur->Enabled || Effects.BloodLens->Enabled ||
+		Effects.WaterLens->Enabled || Effects.LowHF->Enabled ||
+		Effects.SMAA->Enabled || Effects.Sharpening->Enabled ||
+		Effects.Cinema->Enabled || Effects.ImageAdjust->Enabled ||
+		Effects.Debug->Enabled;
 	if (!anyPostEnabled) return;
 
 	auto timer = TimeLogger();
