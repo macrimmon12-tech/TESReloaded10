@@ -37,6 +37,398 @@ static int   s_masterMod            = -1; // -1 = not yet read from settings
 // Populated lazily on first render of each setting; cleared on overlay open.
 static std::unordered_map<std::string, std::unordered_map<std::string, std::string>> s_snapshot;
 
+// ---- Confabulator -------------------------------------------------------
+
+static bool  s_cfabOpen         = false;
+static bool  s_cfabActive       = false;
+static float s_cfabX            = 0.0f;
+static float s_cfabY            = 0.0f;
+static float s_cfabZ            = 0.0f;
+static bool  s_cfabLFO          = false;
+static float s_cfabLFORate      = 0.04f;
+static float s_cfabLFOPhases[3] = { 0.0f, 2.094f, 4.189f };
+
+struct CfabSnapshot {
+	char  name[64];
+	float x, y, z;
+};
+static CfabSnapshot s_cfabSnaps[8]        = {};
+static int          s_cfabSnapCount       = 0;
+static char         s_cfabSnapNameBuf[64] = "snapshot";
+
+struct CfabBaselines {
+	float saturation   = -0.1f;
+	float curveR       =  0.9f;
+	float curveG       =  1.0f;
+	float curveB       =  1.0f;
+	float dofBlur      =  1.0f;
+	float sharpening   =  0.75f;
+	float bloom        =  1.0f;
+	float chroma       =  1.0f;
+	float filmGrain    =  0.3f;
+	float vignetteDark =  1.2f;
+	float vignetteRad  =  0.6f;
+	float lensStrength =  0.4f;
+	float lensSmudge   =  0.0f;
+	float tmSaturation =  1.0f;
+	float tmContrast   =  1.0f;
+	float godRaysMult  =  1.0f;
+	float fogAmount    =  0.4f;
+	bool  loaded       =  false;
+};
+static CfabBaselines s_cfabBase;
+
+struct CfabScales {
+	float saturation   = 1.00f;
+	float curveR       = 0.20f;
+	float curveG       = 0.05f;
+	float curveB       = 0.15f;
+	float tmSat        = 0.05f;
+	float tmContrast   = 0.03f;
+	float dofBlur      = 6.0f;
+	float sharpening   = 1.5f;
+	float bloom        = 4.0f;
+	float godRays      = 0.5f;
+	float chroma       = 5.0f;
+	float filmGrain    = 1.3f;
+	float vignetteDark = 2.5f;
+	float vignetteRad  = 0.5f;
+	float lensSmudge   = 0.7f;
+	float lensStrength = 0.5f;
+	float fog          = 0.3f;
+};
+static CfabScales s_cfabScales;
+
+static void CfabSaveBaselines() {
+	if (!TheSettingManager || s_cfabBase.loaded) return;
+	s_cfabBase.saturation   = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "Saturation");
+	s_cfabBase.curveR       = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "ColorCurveR");
+	s_cfabBase.curveG       = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "ColorCurveG");
+	s_cfabBase.curveB       = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "ColorCurveB");
+	s_cfabBase.dofBlur      = TheSettingManager->GetSettingF("Shaders.DepthOfField.FirstPersonView", "BaseBlurRadius");
+	s_cfabBase.sharpening   = TheSettingManager->GetSettingF("Shaders.Sharpening.Main",              "Strength");
+	s_cfabBase.bloom        = TheSettingManager->GetSettingF("Shaders.Bloom.Main",                   "Strength");
+	s_cfabBase.chroma       = TheSettingManager->GetSettingF("Shaders.Cinema.Main",                  "ChromaticAberration");
+	s_cfabBase.filmGrain    = TheSettingManager->GetSettingF("Shaders.Cinema.Main",                  "FilmGrainAmount");
+	s_cfabBase.vignetteDark = TheSettingManager->GetSettingF("Shaders.Cinema.Main",                  "VignetteDarkness");
+	s_cfabBase.vignetteRad  = TheSettingManager->GetSettingF("Shaders.Cinema.Main",                  "VignetteRadius");
+	s_cfabBase.lensStrength = TheSettingManager->GetSettingF("Shaders.Lens.Main",              "Strength");
+	s_cfabBase.lensSmudge   = TheSettingManager->GetSettingF("Shaders.Lens.Main",              "Smudginess");
+	s_cfabBase.tmSaturation = TheSettingManager->GetSettingF("Shaders.Tonemapping.Main",       "Saturation");
+	s_cfabBase.tmContrast   = TheSettingManager->GetSettingF("Shaders.Tonemapping.Main",       "TonemapContrast");
+	s_cfabBase.godRaysMult  = TheSettingManager->GetSettingF("Shaders.GodRays.Main",           "DayMultiplier");
+	s_cfabBase.fogAmount    = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Main",     "Amount");
+	s_cfabBase.loaded = true;
+}
+
+static void CfabRestoreBaselines() {
+	if (!TheSettingManager || !s_cfabBase.loaded) return;
+	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "Saturation",          s_cfabBase.saturation);
+	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveR",         s_cfabBase.curveR);
+	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveG",         s_cfabBase.curveG);
+	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveB",         s_cfabBase.curveB);
+	TheSettingManager->SetSetting("Shaders.DepthOfField.FirstPersonView", "BaseBlurRadius",      s_cfabBase.dofBlur);
+	TheSettingManager->SetSetting("Shaders.Sharpening.Main",              "Strength",            s_cfabBase.sharpening);
+	TheSettingManager->SetSetting("Shaders.Bloom.Main",                   "Strength",            s_cfabBase.bloom);
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "ChromaticAberration", s_cfabBase.chroma);
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "FilmGrainAmount",     s_cfabBase.filmGrain);
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteDarkness",    s_cfabBase.vignetteDark);
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteRadius",      s_cfabBase.vignetteRad);
+	TheSettingManager->SetSetting("Shaders.Lens.Main",            "Strength",        s_cfabBase.lensStrength);
+	TheSettingManager->SetSetting("Shaders.Lens.Main",            "Smudginess",      s_cfabBase.lensSmudge);
+	TheSettingManager->SetSetting("Shaders.Tonemapping.Main",     "Saturation",      s_cfabBase.tmSaturation);
+	TheSettingManager->SetSetting("Shaders.Tonemapping.Main",     "TonemapContrast", s_cfabBase.tmContrast);
+	TheSettingManager->SetSetting("Shaders.GodRays.Main",         "DayMultiplier",   s_cfabBase.godRaysMult);
+	TheSettingManager->SetSetting("Shaders.VolumetricFog.Main",   "Amount",          s_cfabBase.fogAmount);
+	TheSettingManager->LoadSettings();
+	s_cfabBase.loaded = false;
+}
+
+static void CfabDeactivateIfActive() {
+	if (!s_cfabActive) return;
+	s_cfabActive = false;
+	CfabRestoreBaselines();
+}
+
+static void CfabApply(float x, float y, float z) {
+	if (!TheSettingManager || !s_cfabBase.loaded) return;
+	const CfabBaselines& b  = s_cfabBase;
+	const CfabScales&    sc = s_cfabScales;
+	// X — Color Push
+	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "Saturation",          b.saturation    + x * sc.saturation);
+	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveR",         b.curveR        + x * sc.curveR);
+	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveG",         b.curveG        + x * sc.curveG);
+	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveB",         b.curveB        - x * sc.curveB);
+	TheSettingManager->SetSetting("Shaders.Tonemapping.Main",             "Saturation",          b.tmSaturation  + x * sc.tmSat);
+	TheSettingManager->SetSetting("Shaders.Tonemapping.Main",             "TonemapContrast",     b.tmContrast    + x * sc.tmContrast);
+	// Y — Focus/Dream
+	TheSettingManager->SetSetting("Shaders.DepthOfField.FirstPersonView", "BaseBlurRadius",      ImMax(0.0f, b.dofBlur     + y * sc.dofBlur));
+	TheSettingManager->SetSetting("Shaders.Sharpening.Main",              "Strength",            ImMax(0.0f, b.sharpening  - y * sc.sharpening));
+	TheSettingManager->SetSetting("Shaders.Bloom.Main",                   "Strength",            ImMax(0.0f, b.bloom       + y * sc.bloom));
+	TheSettingManager->SetSetting("Shaders.GodRays.Main",                 "DayMultiplier",       ImMax(0.0f, b.godRaysMult + y * sc.godRays));
+	// Z — Grime/Cinema
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "ChromaticAberration", ImMax(0.0f, b.chroma        + z * sc.chroma));
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "FilmGrainAmount",     ImMax(0.0f, b.filmGrain     + z * sc.filmGrain));
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteDarkness",    ImMax(0.0f, b.vignetteDark  + z * sc.vignetteDark));
+	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "VignetteRadius",      ImClamp(b.vignetteRad - z * sc.vignetteRad, 0.0f, 1.0f));
+	TheSettingManager->SetSetting("Shaders.Lens.Main",                    "Smudginess",          ImMax(0.0f, b.lensSmudge    + z * sc.lensSmudge));
+	TheSettingManager->SetSetting("Shaders.Lens.Main",                    "Strength",            ImMax(0.0f, b.lensStrength  + z * sc.lensStrength));
+	TheSettingManager->SetSetting("Shaders.VolumetricFog.Main",           "Amount",              ImMax(0.0f, b.fogAmount     + z * sc.fog));
+	TheSettingManager->LoadSettings();
+}
+
+static void RenderConfabulator() {
+	if (!s_cfabOpen) return;
+
+	ImGui::SetNextWindowSize(ImVec2(480.0f, 700.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(980.0f, 60.0f),   ImGuiCond_FirstUseEver);
+
+	ImGuiWindowFlags wflags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+	if (!ImGui::Begin("Salamandrastic Retro-Encabulator", &s_cfabOpen, wflags)) {
+		ImGui::End();
+		if (!s_cfabOpen) CfabDeactivateIfActive();
+		return;
+	}
+	if (!s_cfabOpen) { ImGui::End(); CfabDeactivateIfActive(); return; }
+
+	// LFO phase advance (only when active so phases don't creep while inactive)
+	if (s_cfabActive && s_cfabLFO) {
+		float dPhase = ImGui::GetIO().DeltaTime * s_cfabLFORate * 6.2832f;
+		s_cfabLFOPhases[0] += dPhase;
+		s_cfabLFOPhases[1] += dPhase;
+		s_cfabLFOPhases[2] += dPhase;
+		s_cfabX = sinf(s_cfabLFOPhases[0]);
+		s_cfabY = sinf(s_cfabLFOPhases[1]);
+		s_cfabZ = sinf(s_cfabLFOPhases[2]);
+	}
+
+	if (ImGui::Checkbox("Active", &s_cfabActive)) {
+		if (s_cfabActive) CfabSaveBaselines();
+		else              CfabRestoreBaselines();
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("overrides Coloring / Tonemapping / DoF / Bloom / GodRays / Cinema / Fog");
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	// ---------- XY pad ----------
+	const float padSize = 220.0f;
+	ImVec2 padTL = ImGui::GetCursorScreenPos();
+	ImVec2 padBR = ImVec2(padTL.x + padSize, padTL.y + padSize);
+
+	bool lfoLocked = s_cfabLFO && s_cfabActive;
+	if (lfoLocked) ImGui::BeginDisabled();
+	ImGui::InvisibleButton("##xypad", ImVec2(padSize, padSize));
+	if (ImGui::IsItemActive()) {
+		ImVec2 mp = ImGui::GetIO().MousePos;
+		s_cfabX = ImClamp(((mp.x - padTL.x) / padSize) * 2.0f - 1.0f, -1.0f, 1.0f);
+		s_cfabY = ImClamp(-((mp.y - padTL.y) / padSize) * 2.0f + 1.0f, -1.0f, 1.0f);
+	}
+	if (lfoLocked) ImGui::EndDisabled();
+
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilledMultiColor(padTL, padBR,
+		IM_COL32(15, 20, 55, 255),
+		IM_COL32(55, 25, 10, 255),
+		IM_COL32(40, 18,  5, 255),
+		IM_COL32( 5, 15, 35, 255));
+	dl->AddRect(padTL, padBR, IM_COL32(110, 110, 170, 220), 3.0f, 0, 1.5f);
+	float cx = padTL.x + padSize * 0.5f, cy = padTL.y + padSize * 0.5f;
+	dl->AddLine(ImVec2(padTL.x, cy), ImVec2(padBR.x, cy), IM_COL32(70, 70, 100, 160));
+	dl->AddLine(ImVec2(cx, padTL.y), ImVec2(cx, padBR.y), IM_COL32(70, 70, 100, 160));
+	ImU32 lc = IM_COL32(150, 150, 200, 200);
+	dl->AddText(ImVec2(padTL.x + 5, padTL.y + 4),  lc,                            "dream");
+	dl->AddText(ImVec2(padTL.x + 5, padBR.y - 17), lc,                            "crisp");
+	dl->AddText(ImVec2(padTL.x + 4, cy - 8),        IM_COL32(110, 150, 220, 200), "< cool");
+	dl->AddText(ImVec2(padBR.x - 44, cy - 8),       IM_COL32(220, 160,  90, 200), "warm >");
+	float dotX = padTL.x + (s_cfabX + 1.0f) * 0.5f * padSize;
+	float dotY = padTL.y + (1.0f - (s_cfabY + 1.0f) * 0.5f) * padSize;
+	dl->AddCircleFilled(ImVec2(dotX, dotY), 9.0f, IM_COL32(255, 200, 50, 240));
+	dl->AddCircle(ImVec2(dotX, dotY),       9.0f, IM_COL32(255, 255, 255, 180), 0, 1.5f);
+	dl->AddLine(ImVec2(dotX - 5, dotY), ImVec2(dotX + 5, dotY), IM_COL32(0, 0, 0, 180));
+	dl->AddLine(ImVec2(dotX, dotY - 5), ImVec2(dotX, dotY + 5), IM_COL32(0, 0, 0, 180));
+
+	ImGui::SameLine(0.0f, 8.0f);
+
+	// ---------- Z slider ----------
+	ImGui::BeginGroup();
+	ImGui::TextDisabled("grime");
+	if (lfoLocked) ImGui::BeginDisabled();
+	ImGui::VSliderFloat("##z", ImVec2(28.0f, padSize - 34.0f), &s_cfabZ, -1.0f, 1.0f, "");
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Z  %.2f\ngrime / cinema axis", s_cfabZ);
+	if (lfoLocked) ImGui::EndDisabled();
+	ImGui::TextDisabled("clean");
+	ImGui::EndGroup();
+
+	ImGui::Spacing();
+	ImGui::Text("X %+.2f   Y %+.2f   Z %+.2f", s_cfabX, s_cfabY, s_cfabZ);
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	// ---------- LFO controls ----------
+	ImGui::Checkbox("LFO Drift", &s_cfabLFO);
+	if (s_cfabLFO) {
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(120.0f);
+		ImGui::SliderFloat("##rate", &s_cfabLFORate, 0.002f, 0.25f, "%.3f Hz");
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Drift speed. Axes are 120 deg out of phase with each other.");
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Shuffle")) {
+			s_cfabLFOPhases[0] = (float)(rand() % 628) / 100.0f;
+			s_cfabLFOPhases[1] = (float)(rand() % 628) / 100.0f;
+			s_cfabLFOPhases[2] = (float)(rand() % 628) / 100.0f;
+		}
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Randomize phase offsets so axes fall out of sync.");
+	}
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	// ---------- Snapshots ----------
+	if (ImGui::CollapsingHeader("Snapshots")) {
+		ImGui::SetNextItemWidth(160.0f);
+		ImGui::InputText("##snapname", s_cfabSnapNameBuf, sizeof(s_cfabSnapNameBuf));
+		ImGui::SameLine();
+		bool canSave = s_cfabSnapCount < 8 && s_cfabSnapNameBuf[0] != '\0';
+		if (!canSave) ImGui::BeginDisabled();
+		if (ImGui::SmallButton("Save")) {
+			CfabSnapshot& sn = s_cfabSnaps[s_cfabSnapCount++];
+			strncpy_s(sn.name, s_cfabSnapNameBuf, sizeof(sn.name) - 1);
+			sn.x = s_cfabX; sn.y = s_cfabY; sn.z = s_cfabZ;
+		}
+		if (!canSave) ImGui::EndDisabled();
+		ImGui::Spacing();
+		for (int i = 0; i < s_cfabSnapCount; i++) {
+			ImGui::PushID(i);
+			ImGui::Text("%-18s  %+.2f %+.2f %+.2f",
+				s_cfabSnaps[i].name, s_cfabSnaps[i].x, s_cfabSnaps[i].y, s_cfabSnaps[i].z);
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Recall")) {
+				s_cfabX   = s_cfabSnaps[i].x;
+				s_cfabY   = s_cfabSnaps[i].y;
+				s_cfabZ   = s_cfabSnaps[i].z;
+				s_cfabLFO = false;
+			}
+			ImGui::SameLine();
+			if (ImGui::SmallButton("x")) {
+				for (int j = i; j < s_cfabSnapCount - 1; j++)
+					s_cfabSnaps[j] = s_cfabSnaps[j + 1];
+				s_cfabSnapCount--;
+			}
+			ImGui::PopID();
+		}
+		if (s_cfabSnapCount == 0) ImGui::TextDisabled("No snapshots saved.");
+		ImGui::Spacing();
+	}
+
+	// ---------- Scales ----------
+	if (ImGui::CollapsingHeader("Scales")) {
+		auto scaleRow = [](const char* label, float* val, float defVal) {
+			ImGui::PushID(label);
+			ImGui::SetNextItemWidth(70.0f);
+			ImGui::DragFloat("##s", val, 0.005f, 0.0f, 0.0f, "%.3f");
+			ImGui::SameLine();
+			if (ImGui::SmallButton("-")) *val = ImMax(0.0f, *val - s_shaderStepSize);
+			ImGui::SameLine();
+			if (ImGui::SmallButton("+")) *val += s_shaderStepSize;
+			ImGui::SameLine();
+			if (ImGui::SmallButton("=")) *val = defVal;
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("Reset to %.3f", defVal);
+			ImGui::SameLine();
+			ImGui::TextUnformatted(label);
+			ImGui::PopID();
+		};
+		ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Color Push (X)");
+		scaleRow("Saturation",    &s_cfabScales.saturation, 1.00f);
+		scaleRow("CurveR",        &s_cfabScales.curveR,     0.20f);
+		scaleRow("CurveG",        &s_cfabScales.curveG,     0.05f);
+		scaleRow("CurveB",        &s_cfabScales.curveB,     0.15f);
+		scaleRow("TM Saturation", &s_cfabScales.tmSat,      0.05f);
+		scaleRow("TM Contrast",   &s_cfabScales.tmContrast, 0.03f);
+		ImGui::Spacing();
+		ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Focus/Dream (Y)");
+		scaleRow("DoF Blur",   &s_cfabScales.dofBlur,    6.0f);
+		scaleRow("Sharpening", &s_cfabScales.sharpening, 1.5f);
+		scaleRow("Bloom",      &s_cfabScales.bloom,      4.0f);
+		scaleRow("GodRays",    &s_cfabScales.godRays,    0.5f);
+		ImGui::Spacing();
+		ImGui::TextColored(ImVec4(0.7f, 0.4f, 0.9f, 1.0f), "Grime/Cinema (Z)");
+		scaleRow("Chroma",       &s_cfabScales.chroma,       5.0f);
+		scaleRow("FilmGrain",    &s_cfabScales.filmGrain,    1.3f);
+		scaleRow("VignetteDark", &s_cfabScales.vignetteDark, 2.5f);
+		scaleRow("VignetteRad",  &s_cfabScales.vignetteRad,  0.5f);
+		scaleRow("LensSmudge",   &s_cfabScales.lensSmudge,   0.7f);
+		scaleRow("LensStrength", &s_cfabScales.lensStrength, 0.5f);
+		scaleRow("Fog",          &s_cfabScales.fog,          0.3f);
+		ImGui::Spacing();
+	}
+
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	// ---------- Live parameter readout ----------
+	const CfabBaselines& b  = s_cfabBase;
+	const CfabScales&    sc = s_cfabScales;
+	float bSat  = b.loaded ? b.saturation   : -0.1f;
+	float bCR   = b.loaded ? b.curveR       :  0.9f;
+	float bCB   = b.loaded ? b.curveB       :  1.0f;
+	float bDof  = b.loaded ? b.dofBlur      :  1.0f;
+	float bShrp = b.loaded ? b.sharpening   :  0.75f;
+	float bBlm  = b.loaded ? b.bloom        :  1.0f;
+	float bGR   = b.loaded ? b.godRaysMult  :  1.0f;
+	float bCA   = b.loaded ? b.chroma       :  1.0f;
+	float bFG   = b.loaded ? b.filmGrain    :  0.3f;
+	float bVD   = b.loaded ? b.vignetteDark :  1.2f;
+	float bLSm  = b.loaded ? b.lensSmudge   :  0.0f;
+	float bFog  = b.loaded ? b.fogAmount    :  0.4f;
+	float bTmS  = b.loaded ? b.tmSaturation :  1.0f;
+	float bTmC  = b.loaded ? b.tmContrast   :  1.0f;
+
+	if (ImGui::BeginTable("##cfab", 3,
+		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchSame))
+	{
+		ImGui::TableSetupColumn("Color Push  (X)");
+		ImGui::TableSetupColumn("Focus/Dream  (Y)");
+		ImGui::TableSetupColumn("Grime/Cinema  (Z)");
+		ImGui::TableHeadersRow();
+
+		struct Row { const char* la; float va; const char* lb; float vb; const char* lc; float vc; };
+		Row rows[] = {
+			{ "Saturation", bSat + s_cfabX * sc.saturation,
+			  "DoF Blur",   ImMax(0.f, bDof  + s_cfabY * sc.dofBlur),
+			  "Chroma",     ImMax(0.f, bCA   + s_cfabZ * sc.chroma) },
+			{ "CurveR",     bCR  + s_cfabX * sc.curveR,
+			  "Sharpening", ImMax(0.f, bShrp - s_cfabY * sc.sharpening),
+			  "FilmGrain",  ImMax(0.f, bFG   + s_cfabZ * sc.filmGrain) },
+			{ "CurveB",     bCB  - s_cfabX * sc.curveB,
+			  "Bloom",      ImMax(0.f, bBlm  + s_cfabY * sc.bloom),
+			  "Vignette",   ImMax(0.f, bVD   + s_cfabZ * sc.vignetteDark) },
+			{ "TM Sat",     bTmS + s_cfabX * sc.tmSat,
+			  "GodRays",    ImMax(0.f, bGR   + s_cfabY * sc.godRays),
+			  "LensSmudge", ImMax(0.f, bLSm  + s_cfabZ * sc.lensSmudge) },
+			{ "TM Contrast",bTmC + s_cfabX * sc.tmContrast,
+			  "",           0.f,
+			  "Fog",        ImMax(0.f, bFog  + s_cfabZ * sc.fog) },
+		};
+		for (const auto& r : rows) {
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0); ImGui::Text("%-10s %.3f", r.la, r.va);
+			ImGui::TableSetColumnIndex(1); if (r.lb[0]) ImGui::Text("%-10s %.3f", r.lb, r.vb);
+			ImGui::TableSetColumnIndex(2); ImGui::Text("%-10s %.3f", r.lc, r.vc);
+		}
+		ImGui::EndTable();
+	}
+
+	if (s_cfabActive) CfabApply(s_cfabX, s_cfabY, s_cfabZ);
+
+	ImGui::End();
+}
+
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
 	if (SUCCEEDED(hr) && cbData == sizeof(DIMOUSESTATE2) && ImGuiManager::IsVisible()) {
@@ -88,6 +480,7 @@ static void SetOverlayVisible(bool visible) {
 		ImGui::GetIO().MouseDrawCursor = true;
 		ImGui::GetIO().ClearInputKeys();
 	} else {
+		CfabDeactivateIfActive();
 		BlockGameInput(false);
 		ImGui::GetIO().MouseDrawCursor = false;
 	}
@@ -1132,7 +1525,6 @@ void ImGuiManager::BuildUI() {
 			if (ImGui::SmallButton(kLabels[i])) s_shaderStepSize = kSteps[i];
 			if (active) ImGui::PopStyleColor();
 		}
-
 		ImGuiIO& io = ImGui::GetIO();
 		ImGui::SameLine(0.0f, 20.0f);
 		ImGui::Text("Text:");
@@ -1170,6 +1562,12 @@ void ImGuiManager::BuildUI() {
 			}
 			if (active) ImGui::PopStyleColor();
 		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Retro-Encab.")) s_cfabOpen = !s_cfabOpen;
+		if (s_cfabActive) {
+			ImGui::SameLine();
+			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.7f, 1.0f), "[active]");
+		}
 	}
 
 	ImGui::Separator();
@@ -1189,4 +1587,5 @@ void ImGuiManager::BuildUI() {
 	ImGui::EndChild();
 
 	ImGui::End();
+	RenderConfabulator();
 }
