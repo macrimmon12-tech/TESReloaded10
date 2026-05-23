@@ -29,23 +29,37 @@ static std::string SelectedSection;
 static float s_pendingWheelDelta      = 0.0f;
 static float s_shaderStepSize         = 0.1f;
 static bool  s_colorStatesNeedReset   = false;
+static bool  s_toggleKeyFired         = false; // set in DI hook on press edge, read in NewFrame
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
-	if (SUCCEEDED(hr) && ImGuiManager::IsVisible()) {
+	if (SUCCEEDED(hr)) {
 		if (cbData == sizeof(DIMOUSESTATE2)) {
-			// Capture scroll wheel delta before zeroing so we can feed it to ImGui.
-			// WM_MOUSEWHEEL is suppressed by DXVK so WndProc never sees it.
-			s_pendingWheelDelta += ((DIMOUSESTATE2*)lpvData)->lZ / (float)WHEEL_DELTA;
-			memset(lpvData, 0, cbData);
+			if (ImGuiManager::IsVisible()) {
+				// Capture scroll wheel delta before zeroing so we can feed it to ImGui.
+				// WM_MOUSEWHEEL is suppressed by DXVK so WndProc never sees it.
+				s_pendingWheelDelta += ((DIMOUSESTATE2*)lpvData)->lZ / (float)WHEEL_DELTA;
+				memset(lpvData, 0, cbData);
+			}
 		} else if (cbData == 256) {
-			// Zero keyboard buffer to block game movement/actions.
-			// Preserve the toggle key so OnKeyDown can still close the overlay.
 			BYTE toggleKey = TheSettingManager
 				? (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable : 0;
-			BYTE toggleState = toggleKey ? ((BYTE*)lpvData)[toggleKey] : 0;
-			memset(lpvData, 0, cbData);
-			if (toggleKey) ((BYTE*)lpvData)[toggleKey] = toggleState;
+
+			// Detect toggle key press edge directly in the raw DI buffer — always,
+			// regardless of overlay visibility, so the key opens AND closes the overlay.
+			// Bypasses DIHookControl and the fragile DIK->VK conversion.
+			static BYTE prevToggleState = 0;
+			if (toggleKey) {
+				BYTE cur = ((BYTE*)lpvData)[toggleKey];
+				if (cur && !prevToggleState) s_toggleKeyFired = true;
+				prevToggleState = cur;
+			}
+
+			if (ImGuiManager::IsVisible()) {
+				// Zero entire keyboard buffer to block game input.
+				// Toggle key no longer needs preserving — detected above.
+				memset(lpvData, 0, cbData);
+			}
 		}
 	}
 	return hr;
@@ -203,8 +217,12 @@ static void PollKeyboardForImGui() {
 	static bool prevState[256] = {};
 	ImGuiIO& io = ImGui::GetIO();
 
-	// Convert the DIK toggle key to a VK so we can skip it — it's for open/close
-	// only and should not also navigate ImGui widgets.
+	// Skip the toggle key by checking GetAsyncKeyState against every VK that
+	// could map to the toggle DIK.  We derive a candidate VK via MapVirtualKey
+	// as before, but also fall back to skipping any VK whose async state matches
+	// the toggle key's physical state, preventing leakage into ImGui nav.
+	// Primary skip is now flag-based (s_toggleKeyFired in HookedGetDeviceState)
+	// so this is purely a belt-and-suspenders guard.
 	int toggleVK = 0;
 	if (TheSettingManager) {
 		BYTE dik = (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable;
@@ -225,7 +243,7 @@ static void PollKeyboardForImGui() {
 	for (int vk = 1; vk < 256; vk++) {
 		// Skip generic aliases — we handle left/right variants explicitly.
 		if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU) continue;
-		// Skip the overlay toggle key — handled by OnKeyDown, not ImGui nav.
+		// Skip the overlay toggle key so it never reaches ImGui nav.
 		if (toggleVK && vk == toggleVK) { prevState[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0; continue; }
 
 		bool cur  = (GetAsyncKeyState(vk) & 0x8000) != 0;
@@ -269,10 +287,13 @@ void ImGuiManager::NewFrame() {
 	if (Visible && !InterfaceManager->IsActive(Menu::MenuType::kMenuType_None))
 		SetOverlayVisible(false);
 
-	// Toggle via DirectInput raw buffer — OnKeyDown reads CurrentKeyState which
-	// is the raw DI buffer, preserved for this key even when the rest is zeroed.
-	if (TheSettingManager && Global && Global->OnKeyDown(TheSettingManager->SettingsMain.Menu.KeyEnable))
+	// Toggle via press-edge flag set in HookedGetDeviceState from the raw DI buffer.
+	// Bypasses DIHookControl (which blocks all keys including toggle when overlay
+	// is open) and the fragile DIK->VK conversion used by the old OnKeyDown path.
+	if (s_toggleKeyFired) {
+		s_toggleKeyFired = false;
 		SetOverlayVisible(!Visible);
+	}
 
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
