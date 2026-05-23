@@ -243,8 +243,17 @@ static void PollKeyboardForImGui() {
 	for (int vk = 1; vk < 256; vk++) {
 		// Skip generic aliases — we handle left/right variants explicitly.
 		if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU) continue;
-		// Skip the overlay toggle key so it never reaches ImGui nav.
-		if (toggleVK && vk == toggleVK) { prevState[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0; continue; }
+		// When the toggle key is pressed, inject Escape so the proven escapePending
+		// path closes the overlay — avoids needing a reliable DIK->VK mapping.
+		if (toggleVK && vk == toggleVK) {
+			bool cur = (GetAsyncKeyState(vk) & 0x8000) != 0;
+			if (cur && !prevState[vk])
+				io.AddKeyEvent(ImGuiKey_Escape, true);
+			else if (!cur && prevState[vk])
+				io.AddKeyEvent(ImGuiKey_Escape, false);
+			prevState[vk] = cur;
+			continue;
+		}
 
 		bool cur  = (GetAsyncKeyState(vk) & 0x8000) != 0;
 		bool prev = prevState[vk];
