@@ -32,6 +32,10 @@ static bool  s_colorStatesNeedReset = false;
 static bool  s_plusPressed          = false;
 static bool  s_minusPressed         = false;
 
+// Per-setting revert snapshot: section -> key -> value at overlay open time.
+// Populated lazily on first render of each setting; cleared on overlay open.
+static std::unordered_map<std::string, std::unordered_map<std::string, std::string>> s_snapshot;
+
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
 	if (SUCCEEDED(hr) && cbData == sizeof(DIMOUSESTATE2) && ImGuiManager::IsVisible()) {
@@ -76,6 +80,7 @@ static void SetOverlayVisible(bool visible) {
 	if (ImGuiManager::IsVisible() == visible) return;
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
+		s_snapshot.clear(); // Fresh snapshot each time overlay opens
 		PatchMouseVTable();
 		ClipCursor(nullptr);
 		BlockGameInput(true);
@@ -85,6 +90,28 @@ static void SetOverlayVisible(bool visible) {
 		BlockGameInput(false);
 		ImGui::GetIO().MouseDrawCursor = false;
 	}
+}
+
+// Restore all snapshotted values and sync shader states.
+static void RevertToSnapshot() {
+	for (auto& [section, keys] : s_snapshot)
+		for (auto& [key, value] : keys)
+			TheSettingManager->SetSettingS(const_cast<char*>(section.c_str()),
+			                               const_cast<char*>(key.c_str()),
+			                               const_cast<char*>(value.c_str()));
+	TheSettingManager->LoadSettings();
+	// Sync shader enabled flags (same as RevertSettings does)
+	StringList shaders;
+	TheSettingManager->FillMenuSections(&shaders, "Shaders");
+	for (const auto& name : shaders) {
+		bool want = TheSettingManager->GetMenuShaderEnabled(name.c_str());
+		EffectRecord* effect = TheShaderManager->GetEffectByName(name.c_str());
+		if (effect) { effect->Enabled = want; continue; }
+		ShaderCollection* shader = TheShaderManager->GetShaderCollectionByName(name.c_str());
+		if (shader) shader->Enabled = want;
+	}
+	s_colorStatesNeedReset = true;
+	SelectedSection.clear();
 }
 
 static void HandleRawKeyboard(const RAWKEYBOARD& kb);
@@ -310,19 +337,72 @@ void ImGuiManager::NewFrame() {
 	if (Visible && !InterfaceManager->IsActive(Menu::MenuType::kMenuType_None))
 		SetOverlayVisible(false);
 
-	// Toggle overlay via GetAsyncKeyState — reads hardware state directly,
-	// works under DXVK regardless of WM message or DI hook availability.
-	// DikToVk handles extended keys (END, arrows, etc.) that MapVirtualKey gets wrong.
 	if (TheSettingManager) {
 		BYTE dik = (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable;
 		int  vk  = DikToVk(dik);
 		if (vk) {
-			static bool prevToggle = false;
-			bool curToggle = (GetAsyncKeyState(vk) & 0x8000) != 0;
-			if (curToggle && !prevToggle)
-				SetOverlayVisible(!Visible);
-			prevToggle = curToggle;
+			bool keyDown = (GetAsyncKeyState(vk) & 0x8000) != 0;
+
+			// Toggle overlay — bare key press, no modifier.
+			{
+				static bool prev = false;
+				if (keyDown && !prev && !Visible) SetOverlayVisible(true);
+				// Closing via toggle also handled in BuildUI (escapePending path)
+				// so only open here; close handled below when overlay is visible.
+				prev = keyDown;
+			}
+
+			// RenderEffects master switch — toggle key + configured modifier.
+			BYTE mod = TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
+			if (mod > 0) {
+				bool modDown = false;
+				if      (mod == 1) modDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+				else if (mod == 2) modDown = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
+				else if (mod == 3) modDown = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
+				static bool prevMaster = false;
+				bool masterDown = modDown && keyDown;
+				if (masterDown && !prevMaster) {
+					bool cur = TheSettingManager->SettingsMain.Main.RenderEffects;
+					TheSettingManager->SetSetting("Main.Main.Misc", "RenderEffects", !cur);
+					TheSettingManager->LoadSettings();
+				}
+				prevMaster = masterDown;
+			}
 		}
+	}
+
+	// Close overlay via toggle key (same GetAsyncKeyState path, bare press).
+	if (Visible && TheSettingManager) {
+		BYTE dik = (BYTE)TheSettingManager->SettingsMain.Menu.KeyEnable;
+		int  vk  = DikToVk(dik);
+		if (vk) {
+			static bool prevClose = false;
+			bool curClose = (GetAsyncKeyState(vk) & 0x8000) != 0;
+			// Only fire close when no modifier is held (modifier combo is master switch)
+			BYTE mod = TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
+			bool modHeld = (mod == 1 && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) ||
+			               (mod == 2 && (GetAsyncKeyState(VK_MENU)    & 0x8000)) ||
+			               (mod == 3 && (GetAsyncKeyState(VK_SHIFT)   & 0x8000));
+			if (curClose && !prevClose && !modHeld)
+				SetOverlayVisible(false);
+			prevClose = curClose;
+		}
+	}
+
+	// Shader toggle hotkey: Insert key when a shader panel is open.
+	if (Visible && !SelectedSection.empty() && SelectedSection.find("Shaders.") == 0) {
+		static bool prevInsert = false;
+		bool curInsert = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
+		if (curInsert && !prevInsert) {
+			size_t dot1 = SelectedSection.find('.');
+			size_t dot2 = SelectedSection.find('.', dot1 + 1);
+			if (dot1 != std::string::npos && dot2 != std::string::npos) {
+				std::string shaderName = SelectedSection.substr(dot1 + 1, dot2 - dot1 - 1);
+				TheShaderManager->SwitchShaderStatus(shaderName.c_str());
+				TheSettingManager->LoadSettings();
+			}
+		}
+		prevInsert = curInsert;
 	}
 
 	ImGui_ImplDX9_NewFrame();
@@ -476,8 +556,32 @@ static void RenderColorTriple(
 	std::string label = prefix;
 	while (!label.empty() && label.back() == '_') label.pop_back();
 
+	// Lazy snapshot for R/G/B
+	auto snapColor = [&](SettingManager::Configuration::ConfigNode& n) -> std::string& {
+		auto& sec = s_snapshot[n.Section];
+		auto  it  = sec.find(n.Key);
+		if (it == sec.end()) it = sec.emplace(n.Key, n.Value).first;
+		return it->second;
+	};
+	std::string& snapR = snapColor(nodeR);
+	std::string& snapG = snapColor(nodeG);
+	std::string& snapB = snapColor(nodeB);
+	bool colorDirty = snapR != nodeR.Value || snapG != nodeG.Value || snapB != nodeB.Value;
+
 	ImGui::PushID(prefix.c_str());
+
 	ImGui::TextUnformatted(label.c_str());
+	ImGui::SameLine();
+	if (!colorDirty) ImGui::BeginDisabled();
+	if (ImGui::SmallButton("~")) {
+		TheSettingManager->SetSettingS(nodeR.Section, nodeR.Key, const_cast<char*>(snapR.c_str()));
+		TheSettingManager->SetSettingS(nodeG.Section, nodeG.Key, const_cast<char*>(snapG.c_str()));
+		TheSettingManager->SetSettingS(nodeB.Section, nodeB.Key, const_cast<char*>(snapB.c_str()));
+		TheSettingManager->LoadSettings();
+		s_colorStatesNeedReset = true;
+	}
+	if (!colorDirty) ImGui::EndDisabled();
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 
 	bool changed = false;
 	if (ImGui::ColorPicker3("##col", cs.col,
@@ -517,6 +621,25 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 
 	ImGui::PushID(node.Key);
 
+	// Lazy snapshot: record value on first encounter after overlay opens.
+	auto& sectionSnap = s_snapshot[node.Section];
+	auto  snapIt      = sectionSnap.find(node.Key);
+	if (snapIt == sectionSnap.end())
+		snapIt = sectionSnap.emplace(node.Key, node.Value).first;
+	bool isDirty = snapIt->second != std::string(node.Value);
+
+	auto RevertBtn = [&]() {
+		ImGui::SameLine();
+		if (!isDirty) ImGui::BeginDisabled();
+		if (ImGui::SmallButton("~")) {
+			TheSettingManager->SetSettingS(node.Section, node.Key,
+			                               const_cast<char*>(snapIt->second.c_str()));
+			TheSettingManager->LoadSettings();
+		}
+		if (!isDirty) ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
+	};
+
 	switch (node.Type) {
 	case NodeType::Boolean: {
 		bool val = (strcmp(node.Value, "1") == 0 || _stricmp(node.Value, "true") == 0);
@@ -524,6 +647,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
+		RevertBtn();
 		break;
 	}
 	case NodeType::Float: {
@@ -533,7 +657,6 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			TheSettingManager->LoadSettings();
 		}
 		bool hovered = ImGui::IsItemHovered();
-		// Keyboard +/- increments the hovered field by the global step size.
 		if (hovered && (s_plusPressed || s_minusPressed)) {
 			val += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
@@ -553,6 +676,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 				TheSettingManager->LoadSettings();
 			}
 		}
+		RevertBtn();
 		if (hovered && !node.Description.empty()) {
 			ImGui::BeginTooltip();
 			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
@@ -569,12 +693,10 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
+		RevertBtn();
 		break;
 	}
 	default: {
-		// A local buf reset from node.Value each frame causes ImGui to detect an
-		// external buffer change and reset the in-progress edit every frame.
-		// Persist a string per widget ID; only refresh from node.Value when idle.
 		static std::unordered_map<ImGuiID, std::string> sBufs;
 		ImGuiID id = ImGui::GetID(node.Key);
 		std::string& persistent = sBufs[id];
@@ -584,7 +706,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 		strncpy_s(buf, persistent.c_str(), sizeof(buf) - 1);
 		buf[sizeof(buf) - 1] = '\0';
 		if (ImGui::InputText(node.Key, buf, sizeof(buf)))
-			persistent = buf; // keep in sync while ImGui writes back each frame
+			persistent = buf;
 		bool hovered = ImGui::IsItemHovered();
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
 			TheSettingManager->SetSettingS(node.Section, node.Key, buf);
@@ -596,6 +718,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 				ImGui::OpenPopup("DIKReference");
 			RenderDIKPopup();
 		}
+		RevertBtn();
 		if (hovered && !node.Description.empty()) {
 			ImGui::BeginTooltip();
 			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
@@ -636,6 +759,29 @@ static void RenderContent() {
 	bool isShader = (SelectedSection.find("Shaders") == 0);
 
 	ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.45f, 1.0f), "%s", SelectedSection.c_str());
+
+	// Shader enable toggle in content header
+	if (isShader) {
+		size_t dot1 = SelectedSection.find('.');
+		size_t dot2 = SelectedSection.find('.', dot1 + 1);
+		if (dot1 != std::string::npos && dot2 != std::string::npos) {
+			std::string shaderName = SelectedSection.substr(dot1 + 1, dot2 - dot1 - 1);
+			bool enabled = TheSettingManager->GetMenuShaderEnabled(shaderName.c_str());
+			bool forced  = TheSettingManager->IsShaderForced(shaderName.c_str());
+			ImGui::SameLine();
+			ImGui::BeginDisabled(forced);
+			ImGui::PushStyleColor(ImGuiCol_Button, enabled
+				? ImVec4(0.15f, 0.55f, 0.15f, 1.0f)
+				: ImVec4(0.40f, 0.15f, 0.15f, 1.0f));
+			if (ImGui::SmallButton(enabled ? "Enabled [Ins]" : "Disabled [Ins]")) {
+				TheShaderManager->SwitchShaderStatus(shaderName.c_str());
+				TheSettingManager->LoadSettings();
+			}
+			ImGui::PopStyleColor();
+			ImGui::EndDisabled();
+		}
+	}
+
 	ImGui::Separator();
 	ImGui::Spacing();
 
@@ -846,23 +992,48 @@ void ImGuiManager::BuildUI() {
 		return;
 	}
 
-	// Toolbar row
+	// Toolbar row 1: FX toggle | title/status | Revert / Disk / Save Copy / Save
+	{
+		bool renderFX = TheSettingManager->SettingsMain.Main.RenderEffects;
+		ImGui::PushStyleColor(ImGuiCol_Button, renderFX
+			? ImVec4(0.15f, 0.50f, 0.15f, 1.0f)
+			: ImVec4(0.45f, 0.15f, 0.15f, 1.0f));
+		if (ImGui::Button(renderFX ? "FX ON" : "FX OFF")) {
+			TheSettingManager->SetSetting("Main.Main.Misc", "RenderEffects", !renderFX);
+			TheSettingManager->LoadSettings();
+		}
+		ImGui::PopStyleColor();
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Toggle all NVR effects (hotkey: modifier + %s)",
+				TheGameMenuManager->GetKeyName(TheSettingManager->SettingsMain.Menu.KeyEnable));
+	}
+
+	ImGui::SameLine();
 	if (TheSettingManager->hasUnsavedChanges)
 		ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "/!\\ Unsaved changes");
 	else
 		ImGui::TextDisabled("New Vegas Reloaded  %s", PluginVersion::VersionString);
 
 	{
-		const float btnRevert = 54.0f, btnCopy = 72.0f, btnSave = 54.0f;
+		const float btnRevert = 54.0f, btnDisk = 38.0f, btnCopy = 72.0f, btnSave = 48.0f;
 		const float spacing   = ImGui::GetStyle().ItemSpacing.x;
-		const float totalW    = btnRevert + btnCopy + btnSave + spacing * 2.0f;
+		const float totalW    = btnRevert + btnDisk + btnCopy + btnSave + spacing * 3.0f;
 		ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - totalW);
 
 		if (ImGui::Button("Revert", ImVec2(btnRevert, 0.0f))) {
+			RevertToSnapshot();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Revert all settings to values at session start");
+		ImGui::SameLine();
+		if (ImGui::Button("Disk", ImVec2(btnDisk, 0.0f))) {
 			TheSettingManager->RevertSettings();
+			s_snapshot.clear();
 			SelectedSection.clear();
 			s_colorStatesNeedReset = true;
 		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Reload all settings from saved TOML file");
 		ImGui::SameLine();
 		if (ImGui::Button("Save Copy", ImVec2(btnCopy, 0.0f))) {
 			// Build timestamped path next to the DLL, e.g.:
@@ -948,6 +1119,22 @@ void ImGuiManager::BuildUI() {
 		ImGui::SameLine();
 		if (ImGui::SmallButton("A+"))
 			io.FontGlobalScale = ImMin(2.0f, io.FontGlobalScale + 0.1f);
+
+		// FX master switch modifier selector
+		ImGui::SameLine(0.0f, 20.0f);
+		ImGui::Text("FX key:");
+		static const char* kModLabels[] = { "Off", "Ctrl", "Alt", "Shift" };
+		BYTE curMod = TheSettingManager->SettingsMain.Menu.MasterSwitchModifier;
+		for (int i = 0; i < 4; i++) {
+			ImGui::SameLine();
+			bool active = (curMod == (BYTE)i);
+			if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
+			if (ImGui::SmallButton(kModLabels[i])) {
+				TheSettingManager->SetSetting("Main.Menu.Keys", "MasterSwitchModifier", i);
+				TheSettingManager->LoadSettings();
+			}
+			if (active) ImGui::PopStyleColor();
+		}
 	}
 
 	ImGui::Separator();

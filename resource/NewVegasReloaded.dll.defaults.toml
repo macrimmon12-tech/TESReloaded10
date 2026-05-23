@@ -79,6 +79,7 @@ KeySave = 28                # Keycode for the hotkey to save changes done in the
 KeySubtract = 74            # Keycode for decrement value shortcut in menu.
 KeyUp = 200                 # Keycode for the hotkey to navigate up in the main menu.
 EntryUseNumpad = true       # Wether to use the numpad numbers or the other numbers. Start entry with "=" or numpad "Enter"
+MasterSwitchModifier = 2    # Modifier for RenderEffects hotkey (toggle key + modifier): 0=off, 1=ctrl, 2=alt, 3=shift
 
 [_Main.Menu.Style]
 ItemColumnSize = 300                    # Custom size for menu columns.
