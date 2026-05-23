@@ -29,6 +29,8 @@ static std::string SelectedSection;
 static float s_pendingWheelDelta    = 0.0f;
 static float s_shaderStepSize       = 0.1f;
 static bool  s_colorStatesNeedReset = false;
+static bool  s_plusPressed          = false;
+static bool  s_minusPressed         = false;
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
@@ -336,6 +338,17 @@ void ImGuiManager::NewFrame() {
 			io.AddMouseWheelEvent(0.0f, s_pendingWheelDelta);
 			s_pendingWheelDelta = 0.0f;
 		}
+
+		// Detect +/- key edges for hover-to-increment — covers numpad and main row.
+		static bool prevPlus = false, prevMinus = false;
+		bool curPlus  = (GetAsyncKeyState(VK_ADD)      & 0x8000) != 0
+		             || (GetAsyncKeyState(VK_OEM_PLUS)  & 0x8000) != 0;
+		bool curMinus = (GetAsyncKeyState(VK_SUBTRACT)  & 0x8000) != 0
+		             || (GetAsyncKeyState(VK_OEM_MINUS) & 0x8000) != 0;
+		s_plusPressed  = curPlus  && !prevPlus;
+		s_minusPressed = curMinus && !prevMinus;
+		prevPlus  = curPlus;
+		prevMinus = curMinus;
 	}
 }
 
@@ -350,7 +363,7 @@ void ImGuiManager::Render() {
 // ---- Menu UI -----------------------------------------------------------------
 
 static bool ShouldHideSection(const std::string& name) {
-	return name == "WeatherMode";
+	return name == "WeatherMode" || name == "Status";
 }
 
 static bool ShouldHideKey(const char* key) {
@@ -476,6 +489,10 @@ static void RenderColorTriple(
 	ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
 	if (ImGui::DragFloat("##intensity", &cs.scale, 0.01f, 0.0f, 0.0f, "%.4f"))
 		changed = true;
+	if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
+		cs.scale += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
+		changed = true;
+	}
 
 	if (changed) {
 		TheSettingManager->SetSetting(nodeR.Section, nodeR.Key, cs.col[0] * cs.scale);
@@ -516,6 +533,12 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			TheSettingManager->LoadSettings();
 		}
 		bool hovered = ImGui::IsItemHovered();
+		// Keyboard +/- increments the hovered field by the global step size.
+		if (hovered && (s_plusPressed || s_minusPressed)) {
+			val += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
+			TheSettingManager->SetSetting(node.Section, node.Key, val);
+			TheSettingManager->LoadSettings();
+		}
 		if (isShader) {
 			ImGui::SameLine();
 			if (ImGui::SmallButton("-")) {
@@ -901,7 +924,7 @@ void ImGuiManager::BuildUI() {
 		}
 	}
 
-	// Step size selector — always visible, applies to shader +/- buttons
+	// Toolbar row 2: step size selector + text scale
 	{
 		ImGui::Text("Step:");
 		static const float kSteps[]  = { 0.001f, 0.01f, 0.1f, 1.0f };
@@ -913,6 +936,18 @@ void ImGuiManager::BuildUI() {
 			if (ImGui::SmallButton(kLabels[i])) s_shaderStepSize = kSteps[i];
 			if (active) ImGui::PopStyleColor();
 		}
+
+		ImGuiIO& io = ImGui::GetIO();
+		ImGui::SameLine(0.0f, 20.0f);
+		ImGui::Text("Text:");
+		ImGui::SameLine();
+		if (ImGui::SmallButton("A-"))
+			io.FontGlobalScale = ImMax(0.5f, io.FontGlobalScale - 0.1f);
+		ImGui::SameLine();
+		ImGui::Text("%.0f%%", io.FontGlobalScale * 100.0f);
+		ImGui::SameLine();
+		if (ImGui::SmallButton("A+"))
+			io.FontGlobalScale = ImMin(2.0f, io.FontGlobalScale + 0.1f);
 	}
 
 	ImGui::Separator();
