@@ -832,7 +832,7 @@ void ImGuiManager::NewFrame() {
 		std::lock_guard<std::mutex> lk(s_kbMutex);
 		if (Visible) {
 			ImGuiIO& io = ImGui::GetIO();
-			for (auto& e : s_kbKeyQueue)  io.AddKeyEvent(e.key, e.down);
+			for (auto& e : s_kbKeyQueue)  io.AddKeyEvent(e.first, e.second);
 			for (auto  c : s_kbCharQueue) io.AddInputCharacterUTF16(c);
 		}
 		s_kbKeyQueue.clear();
