@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iomanip>
 #include <ctime>
+#include <mutex>
 #include <unordered_set>
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -32,6 +33,20 @@ static bool  s_colorStatesNeedReset = false;
 static bool  s_plusPressed          = false;
 static bool  s_minusPressed         = false;
 static int   s_masterMod            = -1; // -1 = not yet read from settings
+
+// Thread-safe keyboard event queue: HandleRawKeyboard (main thread) pushes here;
+// NewFrame (render thread) drains here before ImGui::NewFrame().
+// Direct ImGuiIO writes from the main thread race with the render thread, so we
+// buffer and inject from the render thread instead.
+static std::mutex                          s_kbMutex;
+static std::vector<std::pair<ImGuiKey,bool>> s_kbKeyQueue;
+static std::vector<ImWchar16>              s_kbCharQueue;
+
+static void FlushKbQueue() {
+	std::lock_guard<std::mutex> lk(s_kbMutex);
+	s_kbKeyQueue.clear();
+	s_kbCharQueue.clear();
+}
 
 // Per-setting revert snapshot: section -> key -> value at overlay open time.
 // Populated lazily on first render of each setting; cleared on overlay open.
@@ -474,6 +489,7 @@ static void SetOverlayVisible(bool visible) {
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
 		s_snapshot.clear(); // Fresh snapshot each time overlay opens
+		FlushKbQueue();     // Discard any events queued before the overlay opened
 		PatchMouseVTable();
 		ClipCursor(nullptr);
 		BlockGameInput(true);
@@ -481,6 +497,7 @@ static void SetOverlayVisible(bool visible) {
 		ImGui::GetIO().ClearInputKeys();
 	} else {
 		CfabDeactivateIfActive();
+		FlushKbQueue();     // Discard events queued during this session
 		BlockGameInput(false);
 		ImGui::GetIO().MouseDrawCursor = false;
 	}
@@ -710,12 +727,11 @@ static void HandleRawKeyboard(const RAWKEYBOARD& kb) {
 
 	bool isDown = (kb.Flags & RI_KEY_BREAK) == 0;
 
-	ImGuiIO& io = ImGui::GetIO();
-
 	ImGuiKey imKey = VkToImGuiKey(kb.VKey);
-	if (imKey != ImGuiKey_None)
-		io.AddKeyEvent(imKey, isDown);
 
+	// Build character output now (ToUnicode is fine on the main thread).
+	WCHAR buf[4] = {};
+	int n = 0;
 	if (isDown) {
 		// Build modifier state from GetAsyncKeyState — accurate under DXVK
 		// where WM_KEYDOWN is suppressed and GetKeyboardState may be stale.
@@ -725,11 +741,16 @@ static void HandleRawKeyboard(const RAWKEYBOARD& kb) {
 		ks[VK_CONTROL] = abit(VK_CONTROL);
 		ks[VK_MENU]    = abit(VK_MENU);
 		ks[VK_CAPITAL] = (GetKeyState(VK_CAPITAL) & 1) ? 0x01 : 0;
-		WCHAR buf[4] = {};
-		int n = ToUnicode(kb.VKey, kb.MakeCode, ks, buf, 4, 0);
-		for (int i = 0; i < n; i++)
-			io.AddInputCharacterUTF16(buf[i]);
+		n = ToUnicode(kb.VKey, kb.MakeCode, ks, buf, 4, 0);
 	}
+
+	// Push to the queue — render thread drains this in NewFrame before
+	// calling ImGui::NewFrame(), keeping all ImGuiIO writes on one thread.
+	std::lock_guard<std::mutex> lk(s_kbMutex);
+	if (imKey != ImGuiKey_None)
+		s_kbKeyQueue.push_back({ imKey, isDown });
+	for (int i = 0; i < n; i++)
+		s_kbCharQueue.push_back((ImWchar16)buf[i]);
 }
 
 // ---- Frame -------------------------------------------------------------------
@@ -803,6 +824,19 @@ void ImGuiManager::NewFrame() {
 			}
 		}
 		prevInsert = curInsert;
+	}
+
+	// Drain keyboard queue from the main thread — inject on the render thread
+	// so all ImGuiIO writes happen from one thread. Discard if overlay closed.
+	{
+		std::lock_guard<std::mutex> lk(s_kbMutex);
+		if (Visible) {
+			ImGuiIO& io = ImGui::GetIO();
+			for (auto& e : s_kbKeyQueue)  io.AddKeyEvent(e.key, e.down);
+			for (auto  c : s_kbCharQueue) io.AddInputCharacterUTF16(c);
+		}
+		s_kbKeyQueue.clear();
+		s_kbCharQueue.clear();
 	}
 
 	ImGui_ImplDX9_NewFrame();
