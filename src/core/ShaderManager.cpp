@@ -170,9 +170,10 @@ template <typename T> void ShaderManager::RegisterShaderCollection(T** Pointer)
 {
 	T* collection = new T();
 	*Pointer = collection;
-	
+
 	ShaderNames[collection->Name] = (ShaderCollection**)Pointer;
 	collection->RegisterConstants();
+	collection->UpdateSettings();
 }
 
 

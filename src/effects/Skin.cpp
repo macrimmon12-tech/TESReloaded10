@@ -5,7 +5,16 @@ void SkinShaders::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_SkinColor", &Constants.SkinColor);
 }
 
-void SkinShaders::UpdateConstants() {}
+void SkinShaders::UpdateConstants() {
+	for (auto ps : PixelShaderList) {
+		ShaderRecordPixel* rec = ps->GetShaderRecord(ShaderRecordType::Default);
+		if (!rec) continue;
+		for (UInt32 c = 0; c < rec->FloatShaderValuesCount; c++) {
+			ShaderFloatValue& sv = rec->FloatShaderValues[c];
+			if (sv.Value) rec->SetShaderConstantF(sv.RegisterIndex, sv.Value, sv.RegisterCount);
+		}
+	}
+}
 
 void SkinShaders::UpdateSettings() {
 	Constants.SkinData.x = TheSettingManager->GetSettingF("Shaders.Skin.Main", "Attenuation");
