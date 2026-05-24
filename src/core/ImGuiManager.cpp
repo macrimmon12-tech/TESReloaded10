@@ -33,6 +33,10 @@ static bool  s_plusPressed          = false;
 static bool  s_minusPressed         = false;
 static int   s_masterMod            = -1; // -1 = not yet read from settings
 
+// Keyboard state snapshot for edge-detection polling in NewFrame.
+// Initialized to current key states when overlay opens so held keys don't misfire.
+static BYTE s_prevKeyState[256] = {};
+
 // Per-setting revert snapshot: section -> key -> value at overlay open time.
 // Populated lazily on first render of each setting; cleared on overlay open.
 static std::unordered_map<std::string, std::unordered_map<std::string, std::string>> s_snapshot;
@@ -473,7 +477,10 @@ static void SetOverlayVisible(bool visible) {
 	if (ImGuiManager::IsVisible() == visible) return;
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
-		s_snapshot.clear(); // Fresh snapshot each time overlay opens
+		s_snapshot.clear();
+		// Snapshot current held keys so they don't register as new presses
+		for (int vk = 0; vk < 256; vk++)
+			s_prevKeyState[vk] = (GetAsyncKeyState(vk) & 0x8000) ? 0x80 : 0;
 		PatchMouseVTable();
 		ClipCursor(nullptr);
 		BlockGameInput(true);
@@ -508,22 +515,11 @@ static void RevertToSnapshot() {
 	SelectedSection.clear();
 }
 
-static void HandleRawKeyboard(const RAWKEYBOARD& kb);
-
 // ---- WndProc -----------------------------------------------------------------
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
 		SetOverlayVisible(false);
-
-	if (msg == WM_INPUT) {
-		RAWINPUT raw = {};
-		UINT size = sizeof(raw);
-		GetRawInputData((HRAWINPUT)lParam, RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER));
-		if (raw.header.dwType == RIM_TYPEKEYBOARD)
-			HandleRawKeyboard(raw.data.keyboard);
-		// Fall through so DefWindowProc can clean up the raw input buffer.
-	}
 
 	// Eat WM_SYSKEYDOWN for Alt so Windows never activates the system menu.
 	if (Visible && msg == WM_SYSKEYDOWN && wParam == VK_MENU)
@@ -587,16 +583,6 @@ void ImGuiManager::Initialize() {
 	OriginalWndProc = (WNDPROC)SetWindowLong(hwnd, GWL_WNDPROC, (LONG)(LONG_PTR)WndProc);
 	PatchMouseVTable();
 
-	// Register for Raw Input keyboard — delivers WM_INPUT even under DXVK where
-	// WM_KEYDOWN is suppressed.  No RIDEV_NOLEGACY so legacy WM messages keep
-	// flowing (WndProc still needs to eat WM_SYSKEYDOWN for Alt).
-	RAWINPUTDEVICE rid = {};
-	rid.usUsagePage = 0x01; // HID_USAGE_PAGE_GENERIC
-	rid.usUsage     = 0x06; // HID_USAGE_GENERIC_KEYBOARD
-	rid.dwFlags     = 0;
-	rid.hwndTarget  = hwnd;
-	RegisterRawInputDevices(&rid, 1, sizeof(rid));
-
 	Initialized = true;
 	Logger::Log("ImGuiManager: Initialized");
 }
@@ -604,12 +590,6 @@ void ImGuiManager::Initialize() {
 void ImGuiManager::Shutdown() {
 	if (!Initialized) return;
 	SetOverlayVisible(false);
-	RAWINPUTDEVICE rid = {};
-	rid.usUsagePage = 0x01;
-	rid.usUsage     = 0x06;
-	rid.dwFlags     = RIDEV_REMOVE;
-	rid.hwndTarget  = nullptr;
-	RegisterRawInputDevices(&rid, 1, sizeof(rid));
 	SetWindowLong(GameWindow, GWL_WNDPROC, (LONG)(LONG_PTR)OriginalWndProc);
 	ImGui_ImplDX9_Shutdown();
 	ImGui_ImplWin32_Shutdown();
@@ -617,11 +597,6 @@ void ImGuiManager::Shutdown() {
 	Initialized = false;
 	Logger::Log("ImGuiManager: Shutdown");
 }
-
-// ---- Raw Input keyboard handler ---------------------------------------------
-// WM_KEYDOWN is suppressed by DXVK; WM_INPUT is not.  We register for raw
-// keyboard input in Initialize() and handle it here.  This gives us correct
-// VKeys for ALL keys (including extended keys like END) without MapVirtualKey.
 
 static ImGuiKey VkToImGuiKey(USHORT vk) {
 	switch (vk) {
@@ -704,34 +679,6 @@ static int DikToVk(BYTE dik) {
 	}
 }
 
-static void HandleRawKeyboard(const RAWKEYBOARD& kb) {
-	if (kb.VKey == 0 || kb.VKey == 0xFF) return;
-	if (!ImGuiManager::IsVisible()) return;
-
-	bool isDown = (kb.Flags & RI_KEY_BREAK) == 0;
-
-	ImGuiIO& io = ImGui::GetIO();
-
-	ImGuiKey imKey = VkToImGuiKey(kb.VKey);
-	if (imKey != ImGuiKey_None)
-		io.AddKeyEvent(imKey, isDown);
-
-	if (isDown) {
-		// Build modifier state from GetAsyncKeyState — accurate under DXVK
-		// where WM_KEYDOWN is suppressed and GetKeyboardState may be stale.
-		BYTE ks[256] = {};
-		auto abit = [](int vk) -> BYTE { return (GetAsyncKeyState(vk) & 0x8000) ? 0x80 : 0; };
-		ks[VK_SHIFT]   = abit(VK_SHIFT);
-		ks[VK_CONTROL] = abit(VK_CONTROL);
-		ks[VK_MENU]    = abit(VK_MENU);
-		ks[VK_CAPITAL] = (GetKeyState(VK_CAPITAL) & 1) ? 0x01 : 0;
-		WCHAR buf[4] = {};
-		int n = ToUnicode(kb.VKey, kb.MakeCode, ks, buf, 4, 0);
-		for (int i = 0; i < n; i++)
-			io.AddInputCharacterUTF16(buf[i]);
-	}
-}
-
 // ---- Frame -------------------------------------------------------------------
 
 void ImGuiManager::NewFrame() {
@@ -803,6 +750,34 @@ void ImGuiManager::NewFrame() {
 			}
 		}
 		prevInsert = curInsert;
+	}
+
+	// Poll keyboard via GetAsyncKeyState — same thread as all other input injection.
+	// WM_INPUT is unreliable under DXVK; GetAsyncKeyState works from any thread.
+	if (Visible) {
+		ImGuiIO& io = ImGui::GetIO();
+		for (int vk = 1; vk < 256; vk++) {
+			bool cur = (GetAsyncKeyState(vk) & 0x8000) != 0;
+			bool was = (s_prevKeyState[vk] & 0x80) != 0;
+			if (cur != was) {
+				ImGuiKey imKey = VkToImGuiKey((USHORT)vk);
+				if (imKey != ImGuiKey_None)
+					io.AddKeyEvent(imKey, cur);
+				if (cur) {
+					WCHAR buf[4] = {};
+					BYTE ks[256] = {};
+					ks[VK_SHIFT]   = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) ? 0x80 : 0;
+					ks[VK_CONTROL] = (GetAsyncKeyState(VK_CONTROL) & 0x8000) ? 0x80 : 0;
+					ks[VK_MENU]    = (GetAsyncKeyState(VK_MENU)    & 0x8000) ? 0x80 : 0;
+					ks[VK_CAPITAL] = (GetKeyState(VK_CAPITAL) & 1) ? 0x01 : 0;
+					ks[vk]         = 0x80;
+					int n = ToUnicode(vk, MapVirtualKey(vk, MAPVK_VK_TO_VSC), ks, buf, 4, 0);
+					for (int i = 0; i < n; i++)
+						io.AddInputCharacterUTF16((ImWchar16)buf[i]);
+				}
+				s_prevKeyState[vk] = cur ? 0x80 : 0;
+			}
+		}
 	}
 
 	ImGui_ImplDX9_NewFrame();

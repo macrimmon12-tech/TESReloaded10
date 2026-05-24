@@ -16,20 +16,18 @@ FNV is commonly run under **DXVK** (Vulkan translation layer). DXVK suppresses
 `WM_KEYDOWN` and `WM_MOUSEWHEEL` before they reach any subclassed WndProc.
 **Do not rely on WM messages for keyboard or scroll wheel input.**
 
-`WM_INPUT` (Raw Input) is also unreliable for toggle/open-close detection because
-FNV's render loop runs on a different thread from the window message pump — messages
-may never be dispatched to the WndProc from the render thread. Raw Input is fine as a
-secondary path for ImGui key events when the overlay is already open, but must not be
-the only path for anything critical.
+`WM_INPUT` (Raw Input) is also unreliable — DXVK's message pump may not dispatch
+`WM_INPUT` to the subclassed WndProc at all. **Do not use WM_INPUT for any keyboard input.**
 
 ### What works instead
 | Input | Solution |
 |---|---|
-| Keyboard characters (text fields) | Raw Input (`WM_INPUT` → `HandleRawKeyboard`) → `ToUnicode` → `io.AddInputCharacterUTF16` |
-| Keyboard nav keys (backspace, arrows in fields, etc.) | Raw Input → `VkToImGuiKey` → `io.AddKeyEvent` |
+| Keyboard (all — text, nav, characters) | `GetAsyncKeyState` polled for VK 1–255 in `NewFrame`, edge-detect against `s_prevKeyState`, inject via `io.AddKeyEvent` + `ToUnicode` → `io.AddInputCharacterUTF16` |
 | Scroll wheel | Read `DIMOUSESTATE2::lZ` from the DI mouse buffer *before* zeroing it in `HookedGetDeviceState`, accumulate in `s_pendingWheelDelta`, inject via `io.AddMouseWheelEvent` in `NewFrame` |
 | Mouse buttons | `GetAsyncKeyState(VK_LBUTTON/RBUTTON/MBUTTON)` → `io.AddMouseButtonEvent` each frame |
 | Toggle key open/close | `GetAsyncKeyState(DikToVk(KeyEnable))` polled in `NewFrame` every render frame. `DikToVk` has a hardcoded table for extended keys that `MapVirtualKey` gets wrong (END, HOME, arrows, etc.) |
+
+**Rule**: everything goes through `GetAsyncKeyState` polled on the render thread. No WM messages, no cross-thread queues.
 
 ### DIK → VK conversion
 `MapVirtualKey(dik, MAPVK_VSC_TO_VK_EX)` **fails silently** for E0-prefixed extended keys
@@ -47,7 +45,7 @@ a separate code path that does not require nav to be enabled.
 - `ImGui_ImplWin32_WndProcHandler` for keyboard/scroll (WM messages never arrive)
 - `WM_KEYDOWN` + `ToUnicode` in WndProc
 - Any `WM_MOUSEWHEEL` handler in WndProc
-- `WM_INPUT` for toggle key detection (render thread / message thread mismatch)
+- `WM_INPUT` for keyboard input (may never be dispatched to WndProc under DXVK)
 - `MapVirtualKey` for extended DIK scancodes (returns 0 or wrong VK)
 
 WM_ACTIVATE and other non-input system messages still arrive normally.
