@@ -69,7 +69,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     float4 baseColor = getBaseColor(IN.BaseUV, FaceGenMap0, FaceGenMap1, BaseMap);
     baseColor.rgb = ApplyVertexColor(baseColor.rgb, IN.color_0, Toggles);
 
-    clip(AmbientColor.a >= 1 ? -1 : (baseColor.a - Toggles.w));
+    clip(AmbientColor.a >= 1 ? 0 : (baseColor.a - Toggles.w));
 
     float3 pointLightDirection = normalize(IN.texcoord_2);
     float atten1 = tex2D(AttenuationMap, IN.texcoord_4.xy).x;

@@ -57,7 +57,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     float4 baseColor = getBaseColor(IN.BaseUV, FaceGenMap0, FaceGenMap1, BaseMap);
     baseColor.rgb = ApplyVertexColor(baseColor.rgb, IN.color_0, Toggles);
 
-    clip(AmbientColor.a >= 1 ? -1 : (baseColor.a - Toggles.w));
+    clip(AmbientColor.a >= 1 ? 0 : (baseColor.a - Toggles.w));
 
     float3 sunColor = PSLightColor[0].rgb;
     float3 diffuse = WrapDiffuse(lightDirection, normal) * sunColor * TESR_SkinData.x;
