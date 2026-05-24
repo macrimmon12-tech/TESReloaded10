@@ -45,7 +45,11 @@ float4 getBaseColor(float2 uv, sampler2D FaceGenMap0Buffer, sampler2D FaceGenMap
     float3 faceGenMap0 = tex2D(FaceGenMap0Buffer, uv).rgb;
     float3 faceGenMap1 = tex2D(FaceGenMap1Buffer, uv).rgb;
     float4 baseTexture = tex2D(BaseColorBuffer, uv);
-    return float4(2.0 * ((expand(faceGenMap0) + baseTexture.rgb) * (2.0 * faceGenMap1)), baseTexture.a);
+    // Vanilla formula (2 * ((expand(m0) + base) * (2 * m1))) amplifies the detail map by up to 4x,
+    // producing severe splotching. FaceGenMap1 neutral is ~0.25 (4 * 0.25 = 1.0 = identity on base).
+    // FaceGenMap0 detail contribution is scaled down to keep it a subtle overlay.
+    float3 blended = saturate((baseTexture.rgb + expand(faceGenMap0) * 0.25) * (4.0 * faceGenMap1));
+    return float4(blended, baseTexture.a);
 }
 
 // Point light contribution with SSS tint from TESR_SkinColor.
