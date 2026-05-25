@@ -486,6 +486,12 @@ static void SetOverlayVisible(bool visible) {
 		BlockGameInput(true);
 		ImGui::GetIO().MouseDrawCursor = true;
 		ImGui::GetIO().ClearInputKeys();
+		// Prime mouse position immediately — ClearInputMouse() on focus-loss sets
+		// MousePos to -FLT_MAX, and recovery normally depends on WM_MOUSEMOVE arriving.
+		// If the user opens the overlay before moving the mouse the cursor stays invisible.
+		POINT pt;
+		if (::GetCursorPos(&pt) && ::ScreenToClient(ImGuiManager::GameWindow, &pt))
+			ImGui::GetIO().AddMousePosEvent((float)pt.x, (float)pt.y);
 	} else {
 		CfabDeactivateIfActive();
 		BlockGameInput(false);
