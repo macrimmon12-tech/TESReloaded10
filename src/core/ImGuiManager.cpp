@@ -486,12 +486,18 @@ static void SetOverlayVisible(bool visible) {
 		BlockGameInput(true);
 		ImGui::GetIO().MouseDrawCursor = true;
 		ImGui::GetIO().ClearInputKeys();
-		// Prime mouse position immediately — ClearInputMouse() on focus-loss sets
-		// MousePos to -FLT_MAX, and recovery normally depends on WM_MOUSEMOVE arriving.
-		// If the user opens the overlay before moving the mouse the cursor stays invisible.
-		POINT pt;
-		if (::GetCursorPos(&pt) && ::ScreenToClient(TheRenderManager->m_kWndFocus, &pt))
-			ImGui::GetIO().AddMousePosEvent((float)pt.x, (float)pt.y);
+		// Prime mouse position — but only if the cursor is actually within the client
+		// rect. After alt-tab from another monitor, GetCursorPos returns an off-screen
+		// position that ScreenToClient maps to large negative coords; injecting that
+		// locks the ImGui cursor in place until the next WM_MOUSEMOVE overrides it.
+		{
+			POINT pt;
+			RECT  cr;
+			HWND  hwnd = TheRenderManager->m_kWndFocus;
+			if (::GetCursorPos(&pt) && ::ScreenToClient(hwnd, &pt) && ::GetClientRect(hwnd, &cr))
+				if (pt.x >= cr.left && pt.x < cr.right && pt.y >= cr.top && pt.y < cr.bottom)
+					ImGui::GetIO().AddMousePosEvent((float)pt.x, (float)pt.y);
+		}
 	} else {
 		CfabDeactivateIfActive();
 		BlockGameInput(false);
