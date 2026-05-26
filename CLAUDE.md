@@ -50,6 +50,24 @@ a separate code path that does not require nav to be enabled.
 
 WM_ACTIVATE and other non-input system messages still arrive normally.
 
+## Mouse cursor position — click-to-refocus quirk
+When the user **clicks** the game window to refocus (rather than Alt+Tab), the OS
+generates a `WM_MOUSEMOVE`. The ImGui Win32 backend handles this by calling
+`TrackMouseEvent`, which sets its internal `bd->MouseTrackedArea = 1`. Once that
+flag is set, `ImGui_ImplWin32_UpdateMouseData` **suppresses** its `GetCursorPos`
+fallback path. No further `WM_MOUSEMOVE` arrives because the game registers raw
+input with `RIDEV_NOLEGACY`, which eats legacy mouse messages. Result: cursor
+position freezes wherever it was when the click landed.
+
+**Fix** (`NewFrame`, after `ImGui_ImplWin32_NewFrame`): inject our own
+`io.AddMousePosEvent` from `GetCursorPos` + `ScreenToClient`. Last write wins in
+ImGui's event queue, so it overrides whatever stale position `UpdateMouseData` left.
+A bounds-check ensures we only inject when the cursor is inside the client rect.
+
+Multi-monitor alt-tab fix is complementary: `SetOverlayVisible(true)` warps the OS
+cursor to the window center via `SetCursorPos` if it is outside the client rect.
+This runs once on open; the per-frame injection above keeps it correct thereafter.
+
 ## Input blocking when overlay is open
 - **Mouse movement**: vtable hook on `IDirectInputDevice8::GetDeviceState` (slot 9), zeros `DIMOUSESTATE2` buffer. Mouse device only — keyboard device has a separate vtable under DXVK.
 - **Keyboard actions**: `DIHookControl::SetKeyDisableState` via xNVSE for codes 0–265 (`BlockGameInput`).
