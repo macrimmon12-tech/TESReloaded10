@@ -801,6 +801,24 @@ void ImGuiManager::NewFrame() {
 
 	ImGui_ImplDX9_NewFrame();
 	ImGui_ImplWin32_NewFrame();
+
+	// Override ImGui_ImplWin32_UpdateMouseData's position — it suppresses the
+	// GetCursorPos fallback when MouseTrackedArea==1 (set by WM_MOUSEMOVE, which
+	// fires on click-to-refocus but not again due to RIDEV_NOLEGACY).  Injecting
+	// last wins in the event queue, restoring correct cursor position.
+	if (Visible) {
+		HWND  hwnd = TheRenderManager->m_kWndFocus;
+		POINT pt;
+		RECT  cr;
+		if (::GetCursorPos(&pt) && ::GetClientRect(hwnd, &cr)) {
+			POINT ptClient = pt;
+			::ScreenToClient(hwnd, &ptClient);
+			if (ptClient.x >= cr.left && ptClient.x < cr.right &&
+			    ptClient.y >= cr.top  && ptClient.y < cr.bottom)
+				ImGui::GetIO().AddMousePosEvent((float)ptClient.x, (float)ptClient.y);
+		}
+	}
+
 	ImGui::NewFrame();
 
 	if (Visible) {
