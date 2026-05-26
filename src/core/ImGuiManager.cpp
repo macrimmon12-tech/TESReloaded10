@@ -103,6 +103,12 @@ struct CfabScales {
 };
 static CfabScales s_cfabScales;
 
+// ---- Dev Tools panel -------------------------------------------------------
+static bool  s_devOpen        = false;
+static float s_savedTimeScale = -1.0f; // session snapshot; -1 = not yet taken
+static bool  s_devTimestop    = false;
+static float s_tsBeforeStop   = 30.0f;
+
 static void CfabSaveBaselines() {
 	if (!TheSettingManager || s_cfabBase.loaded) return;
 	s_cfabBase.saturation   = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "Saturation");
@@ -433,6 +439,114 @@ static void RenderConfabulator() {
 	ImGui::End();
 }
 
+// ---- Dev Tools panel -------------------------------------------------------
+
+static void DevPanelCleanup() {
+	if (!s_devTimestop) return;
+	TimeGlobals* tg = TimeGlobals::Get();
+	if (tg && tg->TimeScale) tg->TimeScale->data = s_tsBeforeStop;
+	s_devTimestop = false;
+}
+
+static void RenderDevPanel() {
+	if (!s_devOpen) return;
+
+	TimeGlobals* tg = TimeGlobals::Get();
+
+	// Snapshot TimeScale once per NVR session (survives panel open/close)
+	if (s_savedTimeScale < 0.0f && tg && tg->TimeScale)
+		s_savedTimeScale = tg->TimeScale->data;
+
+	ImGui::SetNextWindowSize(ImVec2(420.0f, 310.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(100.0f, 380.0f),  ImGuiCond_FirstUseEver);
+
+	if (!ImGui::Begin("NVR Dev Tools", &s_devOpen)) {
+		ImGui::End();
+		if (!s_devOpen) DevPanelCleanup();
+		return;
+	}
+	if (!s_devOpen) { ImGui::End(); DevPanelCleanup(); return; }
+
+	ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.1f, 1.0f),
+		"WARNING: For testing saves only.");
+	ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.1f, 1.0f),
+		"TimeScale and freecam changes can break active scripts and quests.");
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	if (ImGui::CollapsingHeader("Time & World", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (!tg || !tg->GameHour || !tg->TimeScale) {
+			ImGui::TextDisabled("Time globals unavailable.");
+		} else {
+			// Time of Day
+			float hour = fmodf(tg->GameHour->data, 24.0f);
+			if (s_devTimestop) ImGui::BeginDisabled();
+			bool hourChanged = ImGui::SliderFloat("Time of Day", &hour, 0.0f, 23.99f, "%.2f h");
+			if (s_devTimestop) ImGui::EndDisabled();
+			if (!s_devTimestop && hourChanged) tg->GameHour->data = hour;
+
+			// TimeScale — show pre-stop value when frozen so slider reads accurately
+			float ts = s_devTimestop ? s_tsBeforeStop : tg->TimeScale->data;
+			if (s_devTimestop) ImGui::BeginDisabled();
+			bool tsChanged = ImGui::SliderFloat("TimeScale", &ts, 1.0f, 200.0f, "%.1f");
+			if (s_devTimestop) ImGui::EndDisabled();
+			if (!s_devTimestop && tsChanged) tg->TimeScale->data = ts;
+
+			if (s_devTimestop)
+				ImGui::TextDisabled("  Disable Timestop to adjust sliders.");
+
+			ImGui::Spacing();
+
+			// Restore buttons — operate on s_tsBeforeStop when timestop is active
+			float effectiveTS = s_devTimestop ? s_tsBeforeStop : tg->TimeScale->data;
+
+			bool atSession = (s_savedTimeScale >= 0.0f && fabsf(effectiveTS - s_savedTimeScale) < 0.05f);
+			if (atSession) ImGui::BeginDisabled();
+			char sessionLbl[64];
+			snprintf(sessionLbl, sizeof(sessionLbl), "Restore: %.1f###RestoreSession",
+				s_savedTimeScale >= 0.0f ? s_savedTimeScale : 30.0f);
+			if (ImGui::Button(sessionLbl) && s_savedTimeScale >= 0.0f) {
+				if (s_devTimestop) s_tsBeforeStop = s_savedTimeScale;
+				else               tg->TimeScale->data = s_savedTimeScale;
+			}
+			if (atSession) ImGui::EndDisabled();
+
+			ImGui::SameLine();
+
+			bool atVanilla = fabsf(effectiveTS - 30.0f) < 0.05f;
+			if (atVanilla) ImGui::BeginDisabled();
+			if (ImGui::Button("Vanilla (30)")) {
+				if (s_devTimestop) s_tsBeforeStop = 30.0f;
+				else               tg->TimeScale->data = 30.0f;
+			}
+			if (atVanilla) ImGui::EndDisabled();
+
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			// FreeCam
+			bool flyCam = Global && Global->FlyCam != 0;
+			if (ImGui::Checkbox("FreeCam", &flyCam) && Global)
+				Global->FlyCam = flyCam ? 1 : 0;
+
+			ImGui::SameLine(0.0f, 20.0f);
+
+			// Timestop: saves/restores TimeScale; time sliders disabled while active
+			if (ImGui::Checkbox("Timestop  (tfc 1)", &s_devTimestop)) {
+				if (s_devTimestop) {
+					s_tsBeforeStop = tg->TimeScale->data;
+					tg->TimeScale->data = 0.001f;
+				} else {
+					tg->TimeScale->data = s_tsBeforeStop;
+				}
+			}
+		}
+	}
+
+	ImGui::End();
+}
+
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
 	if (SUCCEEDED(hr) && cbData == sizeof(DIMOUSESTATE2) && ImGuiManager::IsVisible()) {
@@ -517,6 +631,7 @@ static void SetOverlayVisible(bool visible) {
 		}
 	} else {
 		CfabDeactivateIfActive();
+		DevPanelCleanup();
 		BlockGameInput(false);
 		ImGui::GetIO().MouseDrawCursor = false;
 	}
@@ -1590,6 +1705,15 @@ void ImGuiManager::BuildUI() {
 			ImGui::SameLine();
 			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.7f, 1.0f), "[active]");
 		}
+		ImGui::SameLine(0.0f, 20.0f);
+		if (ImGui::SmallButton("Dev Tools")) {
+			s_devOpen = !s_devOpen;
+			if (!s_devOpen) DevPanelCleanup();
+		}
+		if (s_devTimestop) {
+			ImGui::SameLine();
+			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[timestop]");
+		}
 	}
 
 	ImGui::Separator();
@@ -1610,4 +1734,5 @@ void ImGuiManager::BuildUI() {
 
 	ImGui::End();
 	RenderConfabulator();
+	RenderDevPanel();
 }
