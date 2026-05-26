@@ -218,6 +218,12 @@ namespace TogglePlayerControlsAlt
 	};
 }
 
+struct NVSEConsoleInterface {
+	enum { kVersion = 1 };
+	UInt32 version;
+	void (*RunScriptLine)(const char* buf, TESObjectREFR* obj);
+};
+
 struct NVSETogglePlayerControlsInterface
 {
 	void   (__fastcall* DisablePlayerControlsAlt)(UInt32 flagsToAdd, const char* modName);

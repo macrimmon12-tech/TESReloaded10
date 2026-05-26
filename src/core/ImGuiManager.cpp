@@ -106,8 +106,7 @@ static CfabScales s_cfabScales;
 // ---- Dev Tools panel -------------------------------------------------------
 static bool  s_devOpen        = false;
 static float s_savedTimeScale = -1.0f; // session snapshot; -1 = not yet taken
-static bool  s_devTimestop    = false;
-static float s_tsBeforeStop   = 30.0f;
+static bool  s_devFreecamOn   = false;
 
 static void CfabSaveBaselines() {
 	if (!TheSettingManager || s_cfabBase.loaded) return;
@@ -441,11 +440,15 @@ static void RenderConfabulator() {
 
 // ---- Dev Tools panel -------------------------------------------------------
 
+static void RunConsoleCommand(const char* cmd) {
+	if (g_ConsoleInterface) g_ConsoleInterface->RunScriptLine(cmd, nullptr);
+}
+
 static void DevPanelCleanup() {
-	if (!s_devTimestop) return;
-	TimeGlobals* tg = TimeGlobals::Get();
-	if (tg && tg->TimeScale) tg->TimeScale->data = s_tsBeforeStop;
-	s_devTimestop = false;
+	if (s_devFreecamOn) {
+		RunConsoleCommand("tfc"); // toggle off
+		s_devFreecamOn = false;
+	}
 }
 
 static void RenderDevPanel() {
@@ -457,7 +460,7 @@ static void RenderDevPanel() {
 	if (s_savedTimeScale < 0.0f && tg && tg->TimeScale)
 		s_savedTimeScale = tg->TimeScale->data;
 
-	ImGui::SetNextWindowSize(ImVec2(420.0f, 310.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(420.0f, 270.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowPos(ImVec2(100.0f, 380.0f),  ImGuiCond_FirstUseEver);
 
 	if (!ImGui::Begin("NVR Dev Tools", &s_devOpen)) {
@@ -480,67 +483,41 @@ static void RenderDevPanel() {
 		} else {
 			// Time of Day
 			float hour = fmodf(tg->GameHour->data, 24.0f);
-			if (s_devTimestop) ImGui::BeginDisabled();
-			bool hourChanged = ImGui::SliderFloat("Time of Day", &hour, 0.0f, 23.99f, "%.2f h");
-			if (s_devTimestop) ImGui::EndDisabled();
-			if (!s_devTimestop && hourChanged) tg->GameHour->data = hour;
+			if (ImGui::SliderFloat("Time of Day", &hour, 0.0f, 23.99f, "%.2f h"))
+				tg->GameHour->data = hour;
 
-			// TimeScale — show pre-stop value when frozen so slider reads accurately
-			float ts = s_devTimestop ? s_tsBeforeStop : tg->TimeScale->data;
-			if (s_devTimestop) ImGui::BeginDisabled();
-			bool tsChanged = ImGui::SliderFloat("TimeScale", &ts, 1.0f, 200.0f, "%.1f");
-			if (s_devTimestop) ImGui::EndDisabled();
-			if (!s_devTimestop && tsChanged) tg->TimeScale->data = ts;
-
-			if (s_devTimestop)
-				ImGui::TextDisabled("  Disable Timestop to adjust sliders.");
+			// TimeScale
+			float ts = tg->TimeScale->data;
+			if (ImGui::SliderFloat("TimeScale", &ts, 1.0f, 200.0f, "%.1f"))
+				tg->TimeScale->data = ts;
 
 			ImGui::Spacing();
 
-			// Restore buttons — operate on s_tsBeforeStop when timestop is active
-			float effectiveTS = s_devTimestop ? s_tsBeforeStop : tg->TimeScale->data;
-
-			bool atSession = (s_savedTimeScale >= 0.0f && fabsf(effectiveTS - s_savedTimeScale) < 0.05f);
+			// Restore buttons
+			bool atSession = (s_savedTimeScale >= 0.0f && fabsf(tg->TimeScale->data - s_savedTimeScale) < 0.05f);
 			if (atSession) ImGui::BeginDisabled();
 			char sessionLbl[64];
 			snprintf(sessionLbl, sizeof(sessionLbl), "Restore: %.1f###RestoreSession",
 				s_savedTimeScale >= 0.0f ? s_savedTimeScale : 30.0f);
-			if (ImGui::Button(sessionLbl) && s_savedTimeScale >= 0.0f) {
-				if (s_devTimestop) s_tsBeforeStop = s_savedTimeScale;
-				else               tg->TimeScale->data = s_savedTimeScale;
-			}
+			if (ImGui::Button(sessionLbl) && s_savedTimeScale >= 0.0f)
+				tg->TimeScale->data = s_savedTimeScale;
 			if (atSession) ImGui::EndDisabled();
 
 			ImGui::SameLine();
 
-			bool atVanilla = fabsf(effectiveTS - 30.0f) < 0.05f;
+			bool atVanilla = fabsf(tg->TimeScale->data - 30.0f) < 0.05f;
 			if (atVanilla) ImGui::BeginDisabled();
-			if (ImGui::Button("Vanilla (30)")) {
-				if (s_devTimestop) s_tsBeforeStop = 30.0f;
-				else               tg->TimeScale->data = 30.0f;
-			}
+			if (ImGui::Button("Vanilla (30)"))
+				tg->TimeScale->data = 30.0f;
 			if (atVanilla) ImGui::EndDisabled();
 
 			ImGui::Spacing();
 			ImGui::Separator();
 			ImGui::Spacing();
 
-			// FreeCam
-			bool flyCam = Global && Global->FlyCam != 0;
-			if (ImGui::Checkbox("FreeCam", &flyCam) && Global)
-				Global->FlyCam = flyCam ? 1 : 0;
-
-			ImGui::SameLine(0.0f, 20.0f);
-
-			// Timestop: saves/restores TimeScale; time sliders disabled while active
-			if (ImGui::Checkbox("Timestop  (tfc 1)", &s_devTimestop)) {
-				if (s_devTimestop) {
-					s_tsBeforeStop = tg->TimeScale->data;
-					tg->TimeScale->data = 0.001f;
-				} else {
-					tg->TimeScale->data = s_tsBeforeStop;
-				}
-			}
+			// FreeCam + Timestop via tfc console command
+			if (ImGui::Checkbox("FreeCam + Timestop  (tfc 1)", &s_devFreecamOn))
+				RunConsoleCommand(s_devFreecamOn ? "tfc 1" : "tfc");
 		}
 	}
 
@@ -1710,9 +1687,9 @@ void ImGuiManager::BuildUI() {
 			s_devOpen = !s_devOpen;
 			if (!s_devOpen) DevPanelCleanup();
 		}
-		if (s_devTimestop) {
+		if (s_devFreecamOn) {
 			ImGui::SameLine();
-			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[timestop]");
+			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[freecam]");
 		}
 	}
 

@@ -106,7 +106,8 @@ extern "C" {
 			if (nvseData)
 				g_DIHookCtrl = (DIHookControl*)nvseData->GetSingleton(NVSEDataInterface::kNVSEData_DIHookControl);
 
-			g_PlayerControls = (NVSETogglePlayerControlsInterface*)Interface->QueryInterface(kInterface_PlayerControls);
+			g_PlayerControls   = (NVSETogglePlayerControlsInterface*)Interface->QueryInterface(kInterface_PlayerControls);
+			g_ConsoleInterface = (NVSEConsoleInterface*)Interface->QueryInterface(kInterface_Console);
 
 			SettingManager::Initialize();
 			TheSettingManager->LoadSettings();

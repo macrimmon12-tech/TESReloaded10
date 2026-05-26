@@ -1,5 +1,6 @@
-DIHookControl*                       g_DIHookCtrl     = NULL;
-NVSETogglePlayerControlsInterface*   g_PlayerControls = NULL;
+DIHookControl*                       g_DIHookCtrl       = NULL;
+NVSETogglePlayerControlsInterface*   g_PlayerControls   = NULL;
+NVSEConsoleInterface*                g_ConsoleInterface = NULL;
 
 CommandManager*		TheCommandManager	= NULL;
 SettingManager*		TheSettingManager	= NULL;

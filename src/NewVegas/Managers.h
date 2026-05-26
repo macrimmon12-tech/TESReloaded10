@@ -14,6 +14,7 @@ class BinkManager;		extern BinkManager*			TheBinkManager;
 
 class DIHookControl;                         extern DIHookControl*                        g_DIHookCtrl;
 struct NVSETogglePlayerControlsInterface;    extern NVSETogglePlayerControlsInterface*     g_PlayerControls;
+struct NVSEConsoleInterface;                 extern NVSEConsoleInterface*                  g_ConsoleInterface;
 
 class Main;					extern Main*					Global;
 class TES;					extern TES*						Tes;
