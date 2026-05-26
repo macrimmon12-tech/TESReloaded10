@@ -463,10 +463,20 @@ static void PatchMouseVTable() {
 // ---- xNVSE input block (mouse buttons / wheel via DIHookControl) -------------
 
 static void BlockGameInput(bool block) {
-	if (g_DIHookCtrl) {
-		// Block keyboard (0-255) and mouse buttons/wheel (256+) so the game
-		// doesn't process input while the overlay is open.
-		for (UInt32 code = 0; code < kMaxMacros; code++)
+	if (!g_DIHookCtrl) return;
+	// Exclude modifier keys (Shift, Ctrl, Alt) from blocking.  xNVSE tracks
+	// tap/hold state continuously; a disable→re-enable cycle breaks the state
+	// machine for mods that bind actions to these keys (e.g. sprint on Shift).
+	// Not blocking them is safe — the overlay doesn't need to suppress sprinting.
+	static const UInt32 kModifiers[] = {
+		0x2A, 0x36,        // DIK_LSHIFT, DIK_RSHIFT
+		0x1D, 0x9D,        // DIK_LCONTROL, DIK_RCONTROL
+		0x38, 0xB8,        // DIK_LMENU, DIK_RMENU
+	};
+	for (UInt32 code = 0; code < kMaxMacros; code++) {
+		bool isMod = false;
+		for (UInt32 m : kModifiers) if (code == m) { isMod = true; break; }
+		if (!isMod)
 			g_DIHookCtrl->SetKeyDisableState(code, block, DIHookControl::kDisable_User);
 	}
 }
