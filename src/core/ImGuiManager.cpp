@@ -107,6 +107,8 @@ static CfabScales s_cfabScales;
 static bool  s_devOpen        = false;
 static float s_savedTimeScale = -1.0f; // session snapshot; -1 = not yet taken
 static bool  s_devFreecamOn   = false;
+static bool  s_devMenusHidden = false;
+static bool  s_screenshotMode = false;
 
 static void CfabSaveBaselines() {
 	if (!TheSettingManager || s_cfabBase.loaded) return;
@@ -186,6 +188,19 @@ static void CfabApply(float x, float y, float z) {
 	TheSettingManager->LoadSettings();
 }
 
+static void CfabUpdate() {
+	if (s_cfabActive && s_cfabLFO) {
+		float dPhase = ImGui::GetIO().DeltaTime * s_cfabLFORate * 6.2832f;
+		s_cfabLFOPhases[0] += dPhase;
+		s_cfabLFOPhases[1] += dPhase;
+		s_cfabLFOPhases[2] += dPhase;
+		s_cfabX = sinf(s_cfabLFOPhases[0]);
+		s_cfabY = sinf(s_cfabLFOPhases[1]);
+		s_cfabZ = sinf(s_cfabLFOPhases[2]);
+	}
+	if (s_cfabActive) CfabApply(s_cfabX, s_cfabY, s_cfabZ);
+}
+
 static void RenderConfabulator() {
 	if (!s_cfabOpen) return;
 
@@ -199,17 +214,6 @@ static void RenderConfabulator() {
 		return;
 	}
 	if (!s_cfabOpen) { ImGui::End(); CfabDeactivateIfActive(); return; }
-
-	// LFO phase advance (only when active so phases don't creep while inactive)
-	if (s_cfabActive && s_cfabLFO) {
-		float dPhase = ImGui::GetIO().DeltaTime * s_cfabLFORate * 6.2832f;
-		s_cfabLFOPhases[0] += dPhase;
-		s_cfabLFOPhases[1] += dPhase;
-		s_cfabLFOPhases[2] += dPhase;
-		s_cfabX = sinf(s_cfabLFOPhases[0]);
-		s_cfabY = sinf(s_cfabLFOPhases[1]);
-		s_cfabZ = sinf(s_cfabLFOPhases[2]);
-	}
 
 	if (ImGui::Checkbox("Active", &s_cfabActive)) {
 		if (s_cfabActive) CfabSaveBaselines();
@@ -433,8 +437,6 @@ static void RenderConfabulator() {
 		ImGui::EndTable();
 	}
 
-	if (s_cfabActive) CfabApply(s_cfabX, s_cfabY, s_cfabZ);
-
 	ImGui::End();
 }
 
@@ -445,8 +447,12 @@ static void RunConsoleCommand(const char* cmd) {
 }
 
 static void DevPanelCleanup() {
+	if (s_devMenusHidden) {
+		RunConsoleCommand("tm");
+		s_devMenusHidden = false;
+	}
 	if (s_devFreecamOn) {
-		RunConsoleCommand("tfc"); // toggle off
+		RunConsoleCommand("tfc");
 		s_devFreecamOn = false;
 	}
 }
@@ -515,10 +521,45 @@ static void RenderDevPanel() {
 			ImGui::Separator();
 			ImGui::Spacing();
 
+			// Game Speed (sgtm) — reads raw game address, writes via console command
+			{
+				float sgtm = *(float*)0x11AC3A0;
+				float sgtmEdit = sgtm;
+				ImGui::SetNextItemWidth(200.0f);
+				if (ImGui::SliderFloat("Game Speed", &sgtmEdit, 0.05f, 4.0f, "%.3fx")) {
+					char cmd[64];
+					snprintf(cmd, sizeof(cmd), "sgtm %.4f", sgtmEdit);
+					RunConsoleCommand(cmd);
+				}
+				ImGui::SameLine();
+				bool atNormal = fabsf(sgtm - 1.0f) < 0.005f;
+				if (atNormal) ImGui::BeginDisabled();
+				if (ImGui::SmallButton("Reset (1x)"))
+					RunConsoleCommand("sgtm 1.0");
+				if (atNormal) ImGui::EndDisabled();
+			}
+
+			ImGui::Spacing();
+
 			// FreeCam + Timestop via tfc console command
 			if (ImGui::Checkbox("FreeCam + Timestop  (tfc 1)", &s_devFreecamOn))
 				RunConsoleCommand(s_devFreecamOn ? "tfc 1" : "tfc");
 		}
+	}
+
+	ImGui::Spacing();
+
+	if (ImGui::CollapsingHeader("Display")) {
+		if (ImGui::Checkbox("Hide Game HUD  (tm)", &s_devMenusHidden))
+			RunConsoleCommand("tm");
+
+		ImGui::Spacing();
+
+		if (ImGui::Button("Hide UI for Screenshot")) {
+			s_screenshotMode = true;
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("(Press NVR key to restore)");
 	}
 
 	ImGui::End();
@@ -526,7 +567,7 @@ static void RenderDevPanel() {
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
-	if (SUCCEEDED(hr) && cbData == sizeof(DIMOUSESTATE2) && ImGuiManager::IsVisible()) {
+	if (SUCCEEDED(hr) && cbData == sizeof(DIMOUSESTATE2) && ImGuiManager::IsVisible() && !s_screenshotMode) {
 		// Capture scroll wheel delta before zeroing — WM_MOUSEWHEEL is suppressed by DXVK.
 		s_pendingWheelDelta += ((DIMOUSESTATE2*)lpvData)->lZ / (float)WHEEL_DELTA;
 		memset(lpvData, 0, cbData);
@@ -607,6 +648,7 @@ static void SetOverlayVisible(bool visible) {
 			}
 		}
 	} else {
+		s_screenshotMode = false;
 		CfabDeactivateIfActive();
 		DevPanelCleanup();
 		BlockGameInput(false);
@@ -836,10 +878,15 @@ void ImGuiManager::NewFrame() {
 			else if (s_masterMod == 3) modHeld = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
 
 			// Open/close overlay — bare key only, never when FX modifier is held.
+			// While in screenshot mode the key exits screenshot mode instead of closing.
 			{
 				static bool prev = false;
-				if (keyDown && !prev && !modHeld)
-					SetOverlayVisible(!Visible);
+				if (keyDown && !prev && !modHeld) {
+					if (s_screenshotMode)
+						s_screenshotMode = false;
+					else
+						SetOverlayVisible(!Visible);
+				}
 				prev = keyDown;
 			}
 
@@ -854,6 +901,21 @@ void ImGuiManager::NewFrame() {
 				}
 				prevMaster = masterDown;
 			}
+		}
+	}
+
+	// Screenshot mode — unblock/reblock game input and cursor on flag transition.
+	if (Visible) {
+		static bool prevSS = false;
+		if (s_screenshotMode != prevSS) {
+			if (s_screenshotMode) {
+				BlockGameInput(false);
+				ImGui::GetIO().MouseDrawCursor = false;
+			} else {
+				BlockGameInput(true);
+				ImGui::GetIO().MouseDrawCursor = true;
+			}
+			prevSS = s_screenshotMode;
 		}
 	}
 
@@ -1481,6 +1543,9 @@ void ImGuiManager::BuildUI() {
 	}
 
 	if (!Visible) return;
+
+	CfabUpdate();
+	if (s_screenshotMode) return;
 
 	// Wait for Escape or Alt release before closing so the game doesn't see them held.
 	static bool escapePending = false;
