@@ -3,6 +3,7 @@
 typedef UInt32	PluginHandle;	// treat this as an opaque type
 
 class CommandInfo;
+class TESObjectREFR;
 
 class PluginInterface {
 public:
