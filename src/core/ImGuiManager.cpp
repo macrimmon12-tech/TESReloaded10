@@ -490,7 +490,7 @@ static void SetOverlayVisible(bool visible) {
 		// MousePos to -FLT_MAX, and recovery normally depends on WM_MOUSEMOVE arriving.
 		// If the user opens the overlay before moving the mouse the cursor stays invisible.
 		POINT pt;
-		if (::GetCursorPos(&pt) && ::ScreenToClient(ImGuiManager::GameWindow, &pt))
+		if (::GetCursorPos(&pt) && ::ScreenToClient(TheRenderManager->m_kWndFocus, &pt))
 			ImGui::GetIO().AddMousePosEvent((float)pt.x, (float)pt.y);
 	} else {
 		CfabDeactivateIfActive();
