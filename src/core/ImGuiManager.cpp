@@ -486,7 +486,6 @@ static void SetOverlayVisible(bool visible) {
 		BlockGameInput(true);
 		ImGui::GetIO().MouseDrawCursor = true;
 		ImGui::GetIO().ClearInputKeys();
-		ImGui::GetIO().ClearInputMouse();
 	} else {
 		CfabDeactivateIfActive();
 		BlockGameInput(false);
@@ -519,9 +518,6 @@ static void RevertToSnapshot() {
 // ---- WndProc -----------------------------------------------------------------
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
-		SetOverlayVisible(false);
-
 	// Eat WM_SYSKEYDOWN for Alt so Windows never activates the system menu.
 	if (Visible && msg == WM_SYSKEYDOWN && wParam == VK_MENU)
 		return TRUE;
