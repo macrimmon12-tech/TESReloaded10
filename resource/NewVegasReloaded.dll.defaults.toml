@@ -243,7 +243,7 @@ NightLUT        = ''                   # Filename of the night LUT.
 InteriorLUT     = ''                   # Filename of the interior LUT.
 Strength        = 1.0                  # Overall LUT blend strength (0.0 = no effect, 1.0 = full).
 PreTonemapping  = false                # Apply LUT before game tonemapping (HDR input). Requires HDR LUTs or HDRCompat mode.
-HDRCompat       = false                # Normalize HDR input to LUT range using max-channel scale (allows SDR LUTs in pre-tonemapping mode, approximate).
+HDRCompat       = true                 # Normalize HDR input to LUT range using max-channel scale. Disable if using a converted float16 DDS HDR LUT.
 
 [_Shaders.LUT.Status]
 Enabled = false                        #
