@@ -753,6 +753,8 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	Effects.Bloom->RenderBloomBuffer(RenderTarget);
 
 	Effects.Lens->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
+	if (Effects.LUT->Settings.PreTonemapping)
+		Effects.LUT->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 
 	timer.LogTime("ShaderManager::RenderEffectsPreTonemapping");
 }
@@ -794,7 +796,8 @@ void ShaderManager::RenderEffects(IDirect3DSurface9* RenderTarget) {
 
 	// screenspace coloring/blurring effects get rendered last
 	Effects.Coloring->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
-	Effects.LUT->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
+	if (!Effects.LUT->Settings.PreTonemapping)
+		Effects.LUT->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.DepthOfField->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.MotionBlur->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 

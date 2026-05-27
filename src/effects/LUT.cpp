@@ -80,7 +80,9 @@ void LUTEffect::RegisterTextures()
 
 void LUTEffect::UpdateSettings()
 {
-	Settings.Strength = TheSettingManager->GetSettingF("Shaders.LUT.Main", "Strength");
+	Settings.Strength        = TheSettingManager->GetSettingF("Shaders.LUT.Main", "Strength");
+	Settings.PreTonemapping  = TheSettingManager->GetSettingI("Shaders.LUT.Main", "PreTonemapping");
+	Settings.HDRCompat       = TheSettingManager->GetSettingI("Shaders.LUT.Main", "HDRCompat");
 }
 
 void LUTEffect::UpdateConstants()
@@ -95,4 +97,5 @@ void LUTEffect::UpdateConstants()
 		Constants.Blend.x = 0.0f;
 		Constants.Blend.y = 1.0f;
 	}
+	Constants.Blend.z = Settings.HDRCompat ? 1.0f : 0.0f;
 }

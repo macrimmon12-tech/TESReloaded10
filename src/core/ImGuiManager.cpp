@@ -1412,6 +1412,13 @@ static void RenderContent() {
 	if (SelectedSection == "Shaders.LUT.Main") {
 		LUTEffect* lut = TheShaderManager->Effects.LUT;
 		if (lut) {
+			if (lut->Settings.PreTonemapping) {
+				if (lut->Settings.HDRCompat)
+					ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "HDR Compat: SDR LUTs normalized to HDR range (approximate).");
+				else
+					ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f), "Pre-tonemapping mode: use HDR LUTs (float16 DDS converted from .CUBE).");
+				ImGui::Spacing();
+			}
 			if (lut->LUTFiles.empty()) {
 				ImGui::TextDisabled("No LUTs found in Data/Textures/NewVegasReloaded/LUTs/");
 			} else {
@@ -1458,6 +1465,12 @@ static void RenderContent() {
 		std::string key(s.Key);
 		if (handled.count(key)) continue;
 		if (ShouldHideKey(s.Key)) continue;
+
+		// Hide HDRCompat when PreTonemapping is off — it's meaningless in post-tonemapping mode
+		if (strcmp(s.Key, "HDRCompat") == 0 && SelectedSection == "Shaders.LUT.Main") {
+			LUTEffect* lut = TheShaderManager->Effects.LUT;
+			if (lut && !lut->Settings.PreTonemapping) continue;
+		}
 
 		// RGB triple → color picker (shader sections only)
 		if (isShader && key.size() > 1 && key.back() == 'R') {

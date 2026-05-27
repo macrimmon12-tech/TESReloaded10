@@ -53,16 +53,24 @@ float3 SampleLUT(sampler2D lut, float3 color, float N)
 
 float4 LUTPass(VSOUT IN) : COLOR0
 {
-	float3 color    = tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb;
-	float  N        = TESR_LUTData.x;
-	float  strength = TESR_LUTData.y;
+	float3 color     = tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb;
+	float  N         = TESR_LUTData.x;
+	float  strength  = TESR_LUTData.y;
+	float  hdrCompat = TESR_LUTBlend.z; // 0=off, 1=max-channel normalization for SDR LUTs on HDR input
 
-	float3 dayColor      = SampleLUT(TESR_LUTDayBuffer,      color, N);
-	float3 nightColor    = SampleLUT(TESR_LUTNightBuffer,    color, N);
-	float3 interiorColor = SampleLUT(TESR_LUTInteriorBuffer, color, N);
+	// HDR compat: normalize so the brightest channel = 1.0 before sampling the LUT,
+	// then restore the scale afterwards. For SDR pixels (all channels <= 1) scale=1, no change.
+	float  scale    = max(max(color.r, color.g), max(color.b, 1.0));
+	float3 lutInput = color / lerp(1.0, scale, hdrCompat);
+
+	float3 dayColor      = SampleLUT(TESR_LUTDayBuffer,      lutInput, N);
+	float3 nightColor    = SampleLUT(TESR_LUTNightBuffer,    lutInput, N);
+	float3 interiorColor = SampleLUT(TESR_LUTInteriorBuffer, lutInput, N);
 
 	float3 exteriorColor = lerp(nightColor, dayColor, TESR_LUTBlend.x);
 	float3 graded        = lerp(exteriorColor, interiorColor, TESR_LUTBlend.y);
+
+	graded *= lerp(1.0, scale, hdrCompat); // restore HDR luminance scale if hdrCompat active
 
 	return float4(lerp(color, graded, strength), 1.0f);
 }
