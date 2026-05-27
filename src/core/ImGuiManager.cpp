@@ -1463,7 +1463,8 @@ static void RenderContent() {
 		if (isShader && key.size() > 1 && key.back() == 'R') {
 			std::string pfx = key.substr(0, key.size() - 1);
 			std::string kG = pfx + "G", kB = pfx + "B";
-			if (keyIdx.count(kG) && keyIdx.count(kB)) {
+			bool isColorCurve = (pfx == "ColorCurve" && strstr(s.Section, "_Shaders.Coloring") != nullptr);
+			if (!isColorCurve && keyIdx.count(kG) && keyIdx.count(kB)) {
 				handled.insert(key);
 				handled.insert(kG);
 				handled.insert(kB);
