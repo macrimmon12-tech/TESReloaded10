@@ -1165,7 +1165,25 @@ static void RenderColorTriple(
 	if (!colorDirty) ImGui::EndDisabled();
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 
+	// R field rendered here (G and B are rendered by the outer loop before detection fires)
 	bool changed = false;
+	{
+		float rawR = cs.col[0] * cs.scale;
+		bool rChanged = ImGui::DragFloat(nodeR.Key, &rawR, 0.001f, 0.0f, 0.0f, "%.4f");
+		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
+			rawR += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
+			rChanged = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("-##r")) { rawR -= s_shaderStepSize; rChanged = true; }
+		ImGui::SameLine();
+		if (ImGui::SmallButton("+##r")) { rawR += s_shaderStepSize; rChanged = true; }
+		if (rChanged && cs.scale > 0.0f) {
+			cs.col[0] = rawR / cs.scale;
+			changed = true;
+		}
+	}
+
 	if (ImGui::ColorPicker3("##col", cs.col,
 		ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoSidePreview))
 		changed = true;
@@ -1271,8 +1289,31 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 	}
 	case NodeType::Integer: {
 		int val = atoi(node.Value);
-		if (ImGui::DragInt(node.Key, &val, 1.0f)) {
-			TheSettingManager->SetSetting(node.Section, node.Key, val);
+		int newVal = val;
+		if (strcmp(node.Key, "TonemappingMode") == 0) {
+			static const char* kNames[] = {
+				"0 - None (vanilla)", "1 - VTLottes", "2 - NVRLottes",
+				"3 - Reinhard", "4 - Reinhard Jodie", "5 - ACES Filmic",
+				"6 - ACES Fitted", "7 - Uncharted 2", "8 - Uchimura (GT)",
+				"9 - AGX", "10 - DICE",
+			};
+			static const int kCount = (int)(sizeof(kNames) / sizeof(kNames[0]));
+			int clamped = ImClamp(val, 0, kCount - 1);
+			if (ImGui::BeginCombo(node.Key, kNames[clamped])) {
+				for (int i = 0; i < kCount; i++) {
+					bool sel = (clamped == i);
+					if (ImGui::Selectable(kNames[i], sel)) newVal = i;
+					if (sel) ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed))
+				newVal = ImClamp(clamped + (s_plusPressed ? 1 : -1), 0, kCount - 1);
+		} else {
+			if (ImGui::DragInt(node.Key, &newVal, 1.0f)) {}
+		}
+		if (newVal != val) {
+			TheSettingManager->SetSetting(node.Section, node.Key, newVal);
 			TheSettingManager->LoadSettings();
 		}
 		RevertBtn();
@@ -1376,17 +1417,22 @@ static void RenderContent() {
 			} else {
 				auto renderPicker = [&](const char* label, int& idx, int slot) {
 					ImGui::PushID(label);
+					ImGui::BeginGroup();
 					ImGui::Text("%s", label);
 					ImGui::SameLine();
-					if (ImGui::ArrowButton("##prev", ImGuiDir_Left)) {
-						idx = ((idx - 1) + (int)lut->LUTFiles.size()) % (int)lut->LUTFiles.size();
-						lut->LoadLUT(slot, lut->LUTFiles[idx].c_str());
-					}
+					int delta = 0;
+					if (ImGui::ArrowButton("##prev", ImGuiDir_Left)) delta = -1;
 					ImGui::SameLine();
+					float nameStartX = ImGui::GetCursorPosX();
 					ImGui::TextUnformatted(lut->LUTFiles[idx].c_str());
-					ImGui::SameLine();
-					if (ImGui::ArrowButton("##next", ImGuiDir_Right)) {
-						idx = (idx + 1) % (int)lut->LUTFiles.size();
+					ImGui::SameLine(nameStartX + 220.0f);
+					if (ImGui::ArrowButton("##next", ImGuiDir_Right)) delta = 1;
+					ImGui::EndGroup();
+					if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed))
+						delta = s_plusPressed ? 1 : -1;
+					if (delta != 0) {
+						int n = (int)lut->LUTFiles.size();
+						idx = ((idx + delta) % n + n) % n;
 						lut->LoadLUT(slot, lut->LUTFiles[idx].c_str());
 					}
 					ImGui::PopID();
@@ -1417,7 +1463,8 @@ static void RenderContent() {
 		if (isShader && key.size() > 1 && key.back() == 'R') {
 			std::string pfx = key.substr(0, key.size() - 1);
 			std::string kG = pfx + "G", kB = pfx + "B";
-			if (keyIdx.count(kG) && keyIdx.count(kB)) {
+			bool isColorCurve = (pfx == "ColorCurve" && strstr(s.Section, "Shaders.Coloring") != nullptr);
+			if (!isColorCurve && keyIdx.count(kG) && keyIdx.count(kB)) {
 				handled.insert(key);
 				handled.insert(kG);
 				handled.insert(kB);
