@@ -1449,6 +1449,7 @@ static void RenderContent() {
 				handled.insert(key);
 				handled.insert(kG);
 				handled.insert(kB);
+				RenderSetting(s, isShader);
 				RenderColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
 				continue;
 			}
