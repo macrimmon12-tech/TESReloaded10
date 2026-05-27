@@ -45,3 +45,4 @@
 #include "../NewVegas/Hooks/Render.h"
 #include "../NewVegas/Hooks/Shadows.h"
 #include "../NewVegas/Hooks/FlyCam.h"
+#include "../Core/ReShadeIntegration.h"
