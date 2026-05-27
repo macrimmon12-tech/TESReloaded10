@@ -1441,16 +1441,21 @@ static void RenderContent() {
 		if (handled.count(key)) continue;
 		if (ShouldHideKey(s.Key)) continue;
 
-		// RGB triple → color picker (shader sections only)
-		if (isShader && key.size() > 1 && key.back() == 'R') {
-			std::string pfx = key.substr(0, key.size() - 1);
-			std::string kG = pfx + "G", kB = pfx + "B";
-			if (keyIdx.count(kG) && keyIdx.count(kB)) {
-				handled.insert(key);
-				handled.insert(kG);
-				handled.insert(kB);
-				RenderColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
-				continue;
+		// RGB triple → color picker (shader sections only).
+		// Keys arrive in alphabetical order (B < G < R) so trigger on any suffix,
+		// not just 'R', to avoid B and G rendering individually before R is seen.
+		if (isShader && key.size() > 1) {
+			char suf = key.back();
+			if (suf == 'R' || suf == 'G' || suf == 'B') {
+				std::string pfx = key.substr(0, key.size() - 1);
+				std::string kR = pfx + "R", kG = pfx + "G", kB = pfx + "B";
+				if (keyIdx.count(kR) && keyIdx.count(kG) && keyIdx.count(kB)) {
+					handled.insert(kR);
+					handled.insert(kG);
+					handled.insert(kB);
+					RenderColorTriple(settings[keyIdx[kR]], settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
+					continue;
+				}
 			}
 		}
 
