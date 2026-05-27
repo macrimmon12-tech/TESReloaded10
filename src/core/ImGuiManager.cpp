@@ -1165,7 +1165,25 @@ static void RenderColorTriple(
 	if (!colorDirty) ImGui::EndDisabled();
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 
+	// R field rendered here (G and B are rendered by the outer loop before detection fires)
 	bool changed = false;
+	{
+		float rawR = cs.col[0] * cs.scale;
+		bool rChanged = ImGui::DragFloat(nodeR.Key, &rawR, 0.001f, 0.0f, 0.0f, "%.4f");
+		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
+			rawR += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
+			rChanged = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("-##r")) { rawR -= s_shaderStepSize; rChanged = true; }
+		ImGui::SameLine();
+		if (ImGui::SmallButton("+##r")) { rawR += s_shaderStepSize; rChanged = true; }
+		if (rChanged && cs.scale > 0.0f) {
+			cs.col[0] = rawR / cs.scale;
+			changed = true;
+		}
+	}
+
 	if (ImGui::ColorPicker3("##col", cs.col,
 		ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoSidePreview))
 		changed = true;
