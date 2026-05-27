@@ -103,6 +103,13 @@ struct CfabScales {
 };
 static CfabScales s_cfabScales;
 
+// ---- Dev Tools panel -------------------------------------------------------
+static bool  s_devOpen        = false;
+static float s_savedTimeScale = -1.0f; // session snapshot; -1 = not yet taken
+static bool  s_devFreecamOn   = false;
+static bool  s_devMenusHidden = false;
+static bool  s_screenshotMode = false;
+
 static void CfabSaveBaselines() {
 	if (!TheSettingManager || s_cfabBase.loaded) return;
 	s_cfabBase.saturation   = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "Saturation");
@@ -181,6 +188,19 @@ static void CfabApply(float x, float y, float z) {
 	TheSettingManager->LoadSettings();
 }
 
+static void CfabUpdate() {
+	if (s_cfabActive && s_cfabLFO) {
+		float dPhase = ImGui::GetIO().DeltaTime * s_cfabLFORate * 6.2832f;
+		s_cfabLFOPhases[0] += dPhase;
+		s_cfabLFOPhases[1] += dPhase;
+		s_cfabLFOPhases[2] += dPhase;
+		s_cfabX = sinf(s_cfabLFOPhases[0]);
+		s_cfabY = sinf(s_cfabLFOPhases[1]);
+		s_cfabZ = sinf(s_cfabLFOPhases[2]);
+	}
+	if (s_cfabActive) CfabApply(s_cfabX, s_cfabY, s_cfabZ);
+}
+
 static void RenderConfabulator() {
 	if (!s_cfabOpen) return;
 
@@ -194,17 +214,6 @@ static void RenderConfabulator() {
 		return;
 	}
 	if (!s_cfabOpen) { ImGui::End(); CfabDeactivateIfActive(); return; }
-
-	// LFO phase advance (only when active so phases don't creep while inactive)
-	if (s_cfabActive && s_cfabLFO) {
-		float dPhase = ImGui::GetIO().DeltaTime * s_cfabLFORate * 6.2832f;
-		s_cfabLFOPhases[0] += dPhase;
-		s_cfabLFOPhases[1] += dPhase;
-		s_cfabLFOPhases[2] += dPhase;
-		s_cfabX = sinf(s_cfabLFOPhases[0]);
-		s_cfabY = sinf(s_cfabLFOPhases[1]);
-		s_cfabZ = sinf(s_cfabLFOPhases[2]);
-	}
 
 	if (ImGui::Checkbox("Active", &s_cfabActive)) {
 		if (s_cfabActive) CfabSaveBaselines();
@@ -428,14 +437,137 @@ static void RenderConfabulator() {
 		ImGui::EndTable();
 	}
 
-	if (s_cfabActive) CfabApply(s_cfabX, s_cfabY, s_cfabZ);
+	ImGui::End();
+}
+
+// ---- Dev Tools panel -------------------------------------------------------
+
+static void RunConsoleCommand(const char* cmd) {
+	if (g_ConsoleInterface) g_ConsoleInterface->RunScriptLine(cmd, nullptr);
+}
+
+static void DevPanelCleanup() {
+	if (s_devMenusHidden) {
+		RunConsoleCommand("tm");
+		s_devMenusHidden = false;
+	}
+	if (s_devFreecamOn) {
+		RunConsoleCommand("tfc");
+		s_devFreecamOn = false;
+	}
+}
+
+static void RenderDevPanel() {
+	if (!s_devOpen) return;
+
+	TimeGlobals* tg = TimeGlobals::Get();
+
+	// Snapshot TimeScale once per NVR session (survives panel open/close)
+	if (s_savedTimeScale < 0.0f && tg && tg->TimeScale)
+		s_savedTimeScale = tg->TimeScale->data;
+
+	ImGui::SetNextWindowSize(ImVec2(420.0f, 270.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(100.0f, 380.0f),  ImGuiCond_FirstUseEver);
+
+	if (!ImGui::Begin("NVR Dev Tools", &s_devOpen)) {
+		ImGui::End();
+		if (!s_devOpen) DevPanelCleanup();
+		return;
+	}
+	if (!s_devOpen) { ImGui::End(); DevPanelCleanup(); return; }
+
+	ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.1f, 1.0f),
+		"WARNING: For testing saves only.");
+	ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.1f, 1.0f),
+		"TimeScale and freecam changes can break active scripts and quests.");
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	if (ImGui::CollapsingHeader("Time & World", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (!tg || !tg->GameHour || !tg->TimeScale) {
+			ImGui::TextDisabled("Time globals unavailable.");
+		} else {
+			// Time of Day
+			float hour = fmodf(tg->GameHour->data, 24.0f);
+			if (ImGui::SliderFloat("Time of Day", &hour, 0.0f, 23.99f, "%.2f h"))
+				tg->GameHour->data = hour;
+
+			// TimeScale
+			float ts = tg->TimeScale->data;
+			if (ImGui::SliderFloat("TimeScale", &ts, 1.0f, 200.0f, "%.1f"))
+				tg->TimeScale->data = ts;
+
+			ImGui::Spacing();
+
+			// Restore buttons
+			bool atSession = (s_savedTimeScale >= 0.0f && fabsf(tg->TimeScale->data - s_savedTimeScale) < 0.05f);
+			if (atSession) ImGui::BeginDisabled();
+			char sessionLbl[64];
+			snprintf(sessionLbl, sizeof(sessionLbl), "Restore: %.1f###RestoreSession",
+				s_savedTimeScale >= 0.0f ? s_savedTimeScale : 30.0f);
+			if (ImGui::Button(sessionLbl) && s_savedTimeScale >= 0.0f)
+				tg->TimeScale->data = s_savedTimeScale;
+			if (atSession) ImGui::EndDisabled();
+
+			ImGui::SameLine();
+
+			bool atVanilla = fabsf(tg->TimeScale->data - 30.0f) < 0.05f;
+			if (atVanilla) ImGui::BeginDisabled();
+			if (ImGui::Button("Vanilla (30)"))
+				tg->TimeScale->data = 30.0f;
+			if (atVanilla) ImGui::EndDisabled();
+
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			// Game Speed (sgtm) — reads raw game address, writes via console command
+			{
+				float sgtm = *(float*)0x11AC3A0;
+				float sgtmEdit = sgtm;
+				ImGui::SetNextItemWidth(200.0f);
+				if (ImGui::SliderFloat("Game Speed", &sgtmEdit, 0.05f, 4.0f, "%.3fx")) {
+					char cmd[64];
+					snprintf(cmd, sizeof(cmd), "sgtm %.4f", sgtmEdit);
+					RunConsoleCommand(cmd);
+				}
+				ImGui::SameLine();
+				bool atNormal = fabsf(sgtm - 1.0f) < 0.005f;
+				if (atNormal) ImGui::BeginDisabled();
+				if (ImGui::SmallButton("Reset (1x)"))
+					RunConsoleCommand("sgtm 1.0");
+				if (atNormal) ImGui::EndDisabled();
+			}
+
+			ImGui::Spacing();
+
+			// FreeCam + Timestop via tfc console command
+			if (ImGui::Checkbox("FreeCam + Timestop  (tfc 1)", &s_devFreecamOn))
+				RunConsoleCommand(s_devFreecamOn ? "tfc 1" : "tfc");
+		}
+	}
+
+	ImGui::Spacing();
+
+	if (ImGui::CollapsingHeader("Display")) {
+		if (ImGui::Checkbox("Hide Game HUD  (tm)", &s_devMenusHidden))
+			RunConsoleCommand("tm");
+
+		ImGui::Spacing();
+
+		if (ImGui::Button("Hide UI for Screenshot")) {
+			s_screenshotMode = true;
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("(Press NVR key to restore)");
+	}
 
 	ImGui::End();
 }
 
 static HRESULT WINAPI HookedGetDeviceState(IDirectInputDevice8* device, DWORD cbData, LPVOID lpvData) {
 	HRESULT hr = OriginalGetDeviceState(device, cbData, lpvData);
-	if (SUCCEEDED(hr) && cbData == sizeof(DIMOUSESTATE2) && ImGuiManager::IsVisible()) {
+	if (SUCCEEDED(hr) && cbData == sizeof(DIMOUSESTATE2) && ImGuiManager::IsVisible() && !s_screenshotMode) {
 		// Capture scroll wheel delta before zeroing — WM_MOUSEWHEEL is suppressed by DXVK.
 		s_pendingWheelDelta += ((DIMOUSESTATE2*)lpvData)->lZ / (float)WHEEL_DELTA;
 		memset(lpvData, 0, cbData);
@@ -516,7 +648,9 @@ static void SetOverlayVisible(bool visible) {
 			}
 		}
 	} else {
+		s_screenshotMode = false;
 		CfabDeactivateIfActive();
+		DevPanelCleanup();
 		BlockGameInput(false);
 		ImGui::GetIO().MouseDrawCursor = false;
 	}
@@ -744,10 +878,15 @@ void ImGuiManager::NewFrame() {
 			else if (s_masterMod == 3) modHeld = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
 
 			// Open/close overlay — bare key only, never when FX modifier is held.
+			// While in screenshot mode the key exits screenshot mode instead of closing.
 			{
 				static bool prev = false;
-				if (keyDown && !prev && !modHeld)
-					SetOverlayVisible(!Visible);
+				if (keyDown && !prev && !modHeld) {
+					if (s_screenshotMode)
+						s_screenshotMode = false;
+					else
+						SetOverlayVisible(!Visible);
+				}
 				prev = keyDown;
 			}
 
@@ -762,6 +901,21 @@ void ImGuiManager::NewFrame() {
 				}
 				prevMaster = masterDown;
 			}
+		}
+	}
+
+	// Screenshot mode — unblock/reblock game input and cursor on flag transition.
+	if (Visible) {
+		static bool prevSS = false;
+		if (s_screenshotMode != prevSS) {
+			if (s_screenshotMode) {
+				BlockGameInput(false);
+				ImGui::GetIO().MouseDrawCursor = false;
+			} else {
+				BlockGameInput(true);
+				ImGui::GetIO().MouseDrawCursor = true;
+			}
+			prevSS = s_screenshotMode;
 		}
 	}
 
@@ -1390,6 +1544,9 @@ void ImGuiManager::BuildUI() {
 
 	if (!Visible) return;
 
+	CfabUpdate();
+	if (s_screenshotMode) return;
+
 	// Wait for Escape or Alt release before closing so the game doesn't see them held.
 	static bool escapePending = false;
 	static bool altPending    = false;
@@ -1590,6 +1747,15 @@ void ImGuiManager::BuildUI() {
 			ImGui::SameLine();
 			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.7f, 1.0f), "[active]");
 		}
+		ImGui::SameLine(0.0f, 20.0f);
+		if (ImGui::SmallButton("Dev Tools")) {
+			s_devOpen = !s_devOpen;
+			if (!s_devOpen) DevPanelCleanup();
+		}
+		if (s_devFreecamOn) {
+			ImGui::SameLine();
+			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[freecam]");
+		}
 	}
 
 	ImGui::Separator();
@@ -1610,4 +1776,5 @@ void ImGuiManager::BuildUI() {
 
 	ImGui::End();
 	RenderConfabulator();
+	RenderDevPanel();
 }

@@ -3,6 +3,7 @@
 typedef UInt32	PluginHandle;	// treat this as an opaque type
 
 class CommandInfo;
+class TESObjectREFR;
 
 class PluginInterface {
 public:
@@ -217,6 +218,12 @@ namespace TogglePlayerControlsAlt
 		ByVanillaOnly,
 	};
 }
+
+struct NVSEConsoleInterface {
+	enum { kVersion = 1 };
+	UInt32 version;
+	void (*RunScriptLine)(const char* buf, TESObjectREFR* obj);
+};
 
 struct NVSETogglePlayerControlsInterface
 {
