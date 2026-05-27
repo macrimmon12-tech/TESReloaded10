@@ -73,10 +73,10 @@ float3 getWaveTexture(PS_INPUT IN, float distance, float4 waveParams) {
     float choppiness = waveParams.x;
     float speed = TESR_GameTime.x * 0.002 * waveParams.z;
     float steepness = saturate(choppiness) * 0.4;
-    float baseWavelength = 8.0 / max(waveWidth, 0.01);
+    float baseWavelength = 0.5 / max(waveWidth, 0.01);
 
     // Four Gerstner waves: tiling-free primary structure replacing the two large-scale texture samples
-    float kA = 0.28;
+    float kA = 0.4;
     float3 n = float3(0, 0, 0);
     n += GerstnerNormal(texPos, float2( 1.0,  2.0), baseWavelength,        kA,        steepness, speed * 1.00);
     n += GerstnerNormal(texPos, float2(-2.0,  3.0), baseWavelength * 0.71, kA * 0.85, steepness, speed * 1.25);
@@ -86,7 +86,7 @@ float3 getWaveTexture(PS_INPUT IN, float distance, float4 waveParams) {
     float3 primaryNormal = normalize(float3(n.xy, 1.0 + n.z));
 
     // Single micro-detail texture sample for high-frequency surface ripples
-    float3 microDetail = expand(tex2D(TESR_samplerWater, texPos * 4.0 * waveWidth + normalize(float2(1, 3)) * speed)).xyz * 0.3;
+    float3 microDetail = expand(tex2D(TESR_samplerWater, texPos * 4.0 * waveWidth + normalize(float2(1, 3)) * speed)).xyz * 0.5;
 
     float3 waveTexture = float3(primaryNormal.xy + microDetail.xy, primaryNormal.z);
     waveTexture.z *= 1.0 / max(choppiness, 0.000001);
