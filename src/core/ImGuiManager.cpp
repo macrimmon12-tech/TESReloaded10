@@ -1436,23 +1436,6 @@ static void RenderContent() {
 
 	std::unordered_set<std::string> handled;
 
-	// Pre-mark G and B siblings of complete triples as handled so they are
-	// skipped before their R key is reached (TOML orders keys alphabetically:
-	// B < G < R, so B and G would otherwise render as individual fields first).
-	if (isShader) {
-		for (auto& s : settings) {
-			std::string key(s.Key);
-			if (key.size() > 1 && key.back() == 'R') {
-				std::string pfx = key.substr(0, key.size() - 1);
-				std::string kG = pfx + "G", kB = pfx + "B";
-				if (keyIdx.count(kG) && keyIdx.count(kB)) {
-					handled.insert(kG);
-					handled.insert(kB);
-				}
-			}
-		}
-	}
-
 	for (auto& s : settings) {
 		std::string key(s.Key);
 		if (handled.count(key)) continue;
@@ -1464,6 +1447,8 @@ static void RenderContent() {
 			std::string kG = pfx + "G", kB = pfx + "B";
 			if (keyIdx.count(kG) && keyIdx.count(kB)) {
 				handled.insert(key);
+				handled.insert(kG);
+				handled.insert(kB);
 				RenderColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
 				continue;
 			}
