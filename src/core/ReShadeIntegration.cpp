@@ -30,6 +30,7 @@ using namespace reshade::api;
 // ── module state ─────────────────────────────────────────────────────────────
 
 static HMODULE          s_hModule         = nullptr;
+static HMODULE          s_reshadeModule   = nullptr;
 static bool             s_registered      = false;
 static bool             s_gaveUp          = false;
 static int              s_retryFrame      = 0;
@@ -169,14 +170,54 @@ static void DiagnoseModules() {
 }
 
 // ── lazy registration ─────────────────────────────────────────────────────────
-// Called from RenderEffects() each frame until it succeeds. Keeps retrying
-// because Vulkan ReShade (global layer) enters the process module list only
-// after DXVK's vkCreateInstance fires, which may be after Initialize() runs.
+// Called from RenderEffects() each frame until it succeeds.
+//
+// We bypass reshade::register_addon() and call ReShadeRegisterAddon directly,
+// probing API versions downward from our compiled version. This works around
+// ReShade's silent version-check rejection (api_version > its version → false)
+// without requiring our headers to exactly match the installed ReShade release.
+// The core event types we use (opaque pointers, resource_view = uint64_t) are
+// stable across nearby API versions, so a version delta is safe in practice.
 
 static bool TryRegister() {
-    if (!reshade::register_addon(s_hModule))
-        return false;
+    // Find the ReShade module.
+    HMODULE reshadeModule = nullptr;
+    {
+        HMODULE modules[1024]; DWORD num = 0;
+        if (!K32EnumProcessModules(GetCurrentProcess(), modules, sizeof(modules), &num))
+            return false;
+        for (DWORD i = 0; i < num / sizeof(HMODULE); ++i) {
+            if (GetProcAddress(modules[i], "ReShadeRegisterAddon") &&
+                GetProcAddress(modules[i], "ReShadeUnregisterAddon")) {
+                reshadeModule = modules[i];
+                break;
+            }
+        }
+    }
+    if (!reshadeModule) return false;
 
+    // Call ReShadeRegisterAddon directly, probing downward from our compiled
+    // RESHADE_API_VERSION until the installed DLL accepts one.
+    auto fnRegister = reinterpret_cast<bool(WINAPI*)(HMODULE, uint32_t)>(
+        GetProcAddress(reshadeModule, "ReShadeRegisterAddon"));
+
+    uint32_t acceptedVersion = 0;
+    for (uint32_t v = RESHADE_API_VERSION; v >= 1 && !acceptedVersion; --v)
+        if (fnRegister(s_hModule, v)) acceptedVersion = v;
+
+    if (!acceptedVersion) {
+        Logger::Log("ReShadeIntegration: ReShadeRegisterAddon rejected all API versions 1..%u", RESHADE_API_VERSION);
+        return false;
+    }
+
+    if (acceptedVersion != RESHADE_API_VERSION)
+        Logger::Log("ReShadeIntegration: WARNING - negotiated API version %u (headers v%u)",
+            acceptedVersion, RESHADE_API_VERSION);
+
+    s_reshadeModule = reshadeModule;
+
+    // register_event uses reshade.hpp's get_reshade_module_handle() which does
+    // its own K32EnumProcessModules scan and will find reshadeModule normally.
     reshade::register_event<addon_event::reshade_begin_effects>(OnBeginEffects);
     reshade::register_event<addon_event::reshade_finish_effects>(OnFinishEffects);
     reshade::register_event<addon_event::bind_render_targets_and_depth_stencil>(OnBindRenderTargets);
@@ -190,7 +231,10 @@ static bool TryRegister() {
 
     if (FAILED(hr)) {
         Logger::Log("ReShadeIntegration: CreateTexture R32F failed (hr=0x%08X) - depth integration disabled", hr);
-        reshade::unregister_addon(s_hModule);
+        auto fnUnreg = reinterpret_cast<void(WINAPI*)(HMODULE)>(
+            GetProcAddress(reshadeModule, "ReShadeUnregisterAddon"));
+        if (fnUnreg) fnUnreg(s_hModule);
+        s_reshadeModule = nullptr;
         return false;
     }
 
@@ -210,7 +254,10 @@ static bool TryRegister() {
             errors->Release();
         }
         Logger::Log("ReShadeIntegration: shader compile failed (hr=0x%08X) - depth integration disabled", hr);
-        reshade::unregister_addon(s_hModule);
+        auto fnUnreg = reinterpret_cast<void(WINAPI*)(HMODULE)>(
+            GetProcAddress(reshadeModule, "ReShadeUnregisterAddon"));
+        if (fnUnreg) fnUnreg(s_hModule);
+        s_reshadeModule = nullptr;
         if (s_depthSurface) { s_depthSurface->Release(); s_depthSurface = nullptr; }
         if (s_depthTexture) { s_depthTexture->Release(); s_depthTexture = nullptr; }
         return false;
@@ -218,7 +265,7 @@ static bool TryRegister() {
 
     if (errors) errors->Release();
     s_registered = true;
-    Logger::Log("ReShadeIntegration: registered as ReShade addon - depth integration active");
+    Logger::Log("ReShadeIntegration: registered with API v%u - depth integration active", acceptedVersion);
     return true;
 }
 
@@ -239,8 +286,11 @@ void ReShadeIntegration::Shutdown() {
     if (s_depthSurface)    { s_depthSurface->Release();    s_depthSurface    = nullptr; }
     if (s_depthTexture)    { s_depthTexture->Release();    s_depthTexture    = nullptr; }
 
-    if (s_registered) {
-        reshade::unregister_addon(s_hModule);
+    if (s_registered && s_reshadeModule) {
+        auto fnUnreg = reinterpret_cast<void(WINAPI*)(HMODULE)>(
+            GetProcAddress(s_reshadeModule, "ReShadeUnregisterAddon"));
+        if (fnUnreg) fnUnreg(s_hModule);
+        s_reshadeModule = nullptr;
         s_registered = false;
     }
 }
