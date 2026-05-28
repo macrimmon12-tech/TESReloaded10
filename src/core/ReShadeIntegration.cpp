@@ -1,6 +1,5 @@
 // ReShadeIntegration.cpp
-// Registers NVR as a ReShade addon so ReShade effects fire at the correct pipeline
-// point (after NVR post-process, before UI) with a correctly unified depth buffer.
+// Registers NVR as a ReShade addon and supplies a unified depth buffer.
 //
 // Framework.h is force-included by the project, supplying all NVR types.
 // reshade.hpp is included here only, so ReShade types stay out of the wider codebase.
@@ -10,15 +9,16 @@
 // channel to an R32F surface and hand it to ReShade via update_texture_bindings("DEPTH"),
 // giving RTGI/RTAO correct, unified depth under both native D3D9 and DXVK.
 //
-// Registration is deferred: RenderEffects() retries register_addon() each frame until
-// ReShade's module appears in the process (Vulkan ReShade loads later than Initialize()).
+// Registration is deferred: RenderEffects() retries each frame until ReShade's module
+// appears (Vulkan ReShade loads as a global layer after NVR's Initialize() runs).
+// register_addon is called directly (bypassing reshade.hpp's wrapper) with version
+// probing so we work against release builds whose RESHADE_API_VERSION < our headers.
 
 // Prevent assert macro redefinition (Framework.h redefines assert to static_assert).
 #ifdef assert
 #undef assert
 #endif
-// Prevent reshade_overlay.hpp from activating its ImGui version check — we only
-// need the core addon and effect_runtime API, not the overlay helpers.
+// Prevent reshade_overlay.hpp from activating its ImGui version check.
 #ifdef IMGUI_VERSION_NUM
 #undef IMGUI_VERSION_NUM
 #endif
@@ -35,14 +35,6 @@ static bool             s_registered      = false;
 static bool             s_gaveUp          = false;
 static int              s_retryFrame      = 0;
 
-static effect_runtime*  s_runtime         = nullptr;
-static command_list*    s_cmdList         = nullptr;
-static resource_view    s_sceneRTV        = {};
-static resource_view    s_sceneRTVsrgb    = {};
-static bool             s_validPass       = false;
-
-static std::vector<std::string> s_savedTechniques;
-
 static IDirect3DTexture9*  s_depthTexture    = nullptr;
 static IDirect3DSurface9*  s_depthSurface    = nullptr;
 static ID3DXEffect*        s_depthCopyEffect = nullptr;
@@ -50,7 +42,6 @@ static ID3DXEffect*        s_depthCopyEffect = nullptr;
 // ── depth copy shader ─────────────────────────────────────────────────────────
 // Reads the G channel (.y) of the G32R32F CombineDepth output, which stores
 // projection-space depth remapped to main-camera near/far for all pixels.
-// This is what ReShade expects for GetLinearizedDepth() to work correctly.
 
 static const char kDepthCopyFX[] = R"(
 sampler2D CombinedDepth : register(s0) = sampler_state {
@@ -80,65 +71,21 @@ technique T0 {
 }
 )";
 
-// ── ReShade event callbacks ───────────────────────────────────────────────────
+// ── ReShade event callback ────────────────────────────────────────────────────
+// Fires right before ReShade renders its effect pipeline each frame.
+// We update the DEPTH texture binding with our unified depth so RTGI/RTAO
+// shaders sample the correct depth for both world and viewmodel pixels.
 
 static void OnBeginEffects(
-    effect_runtime* runtime, command_list* cmd_list,
-    resource_view rtv, resource_view rtv_srgb)
-{
-    s_runtime      = runtime;
-    s_cmdList      = cmd_list;
-    s_sceneRTV     = rtv;
-    s_sceneRTVsrgb = rtv_srgb;
-    s_savedTechniques.clear();
-
-    if (s_validPass) return;
-
-    // Suppress all techniques so they don't fire at ReShade's normal present-time slot.
-    runtime->enumerate_techniques(nullptr,
-        [](effect_runtime* rt, effect_technique tech) {
-            char name[256];
-            rt->get_technique_name(tech, name);
-            if (rt->get_technique_state(tech)) {
-                s_savedTechniques.emplace_back(name);
-                rt->set_technique_state(tech, false);
-            }
-        });
-}
-
-static void OnFinishEffects(
     effect_runtime* runtime, command_list* /*cmd_list*/,
     resource_view /*rtv*/, resource_view /*rtv_srgb*/)
 {
-    if (s_validPass) {
-        s_validPass = false;
-        return;
-    }
-
-    // Restore techniques that were active before suppression.
-    runtime->enumerate_techniques(nullptr,
-        [](effect_runtime* rt, effect_technique tech) {
-            char name[256];
-            rt->get_technique_name(tech, name);
-            bool restore = std::find(
-                s_savedTechniques.begin(), s_savedTechniques.end(), name)
-                != s_savedTechniques.end();
-            rt->set_technique_state(tech, restore);
-        });
-}
-
-static void OnBindRenderTargets(
-    command_list* /*cmd_list*/,
-    uint32_t count, const resource_view* rtvs,
-    resource_view /*dsv*/)
-{
-    if (count > 0)
-        s_sceneRTV = rtvs[0];
+    if (!s_depthTexture) return;
+    const resource_view depthRV = { reinterpret_cast<uint64_t>(s_depthTexture) };
+    runtime->update_texture_bindings("DEPTH", depthRV, depthRV);
 }
 
 // ── diagnostic ───────────────────────────────────────────────────────────────
-// Dumps all loaded modules to the log, flagging any that look like ReShade or
-// that export the addon registration symbols. Call once on detection failure.
 
 static void DiagnoseModules() {
     HMODULE modules[1024]; DWORD num = 0;
@@ -157,27 +104,17 @@ static void DiagnoseModules() {
         bool hasReg   = GetProcAddress(modules[i], "ReShadeRegisterAddon")   != nullptr;
         bool hasUnreg = GetProcAddress(modules[i], "ReShadeUnregisterAddon") != nullptr;
 
-        // Log any module that has the exports OR "reshade" in its path.
         char lower[MAX_PATH] = {};
         for (int j = 0; path[j] && j < MAX_PATH - 1; ++j)
             lower[j] = static_cast<char>(tolower(static_cast<unsigned char>(path[j])));
 
-        if (hasReg || hasUnreg || strstr(lower, "reshade")) {
+        if (hasReg || hasUnreg || strstr(lower, "reshade"))
             Logger::Log("ReShadeIntegration:   [%u] %s  RegisterAddon=%s UnregisterAddon=%s",
                 i, path, hasReg ? "YES" : "no", hasUnreg ? "YES" : "no");
-        }
     }
 }
 
 // ── lazy registration ─────────────────────────────────────────────────────────
-// Called from RenderEffects() each frame until it succeeds.
-//
-// We bypass reshade::register_addon() and call ReShadeRegisterAddon directly,
-// probing API versions downward from our compiled version. This works around
-// ReShade's silent version-check rejection (api_version > its version → false)
-// without requiring our headers to exactly match the installed ReShade release.
-// The core event types we use (opaque pointers, resource_view = uint64_t) are
-// stable across nearby API versions, so a version delta is safe in practice.
 
 static bool TryRegister() {
     // Find the ReShade module.
@@ -216,11 +153,7 @@ static bool TryRegister() {
 
     s_reshadeModule = reshadeModule;
 
-    // register_event uses reshade.hpp's get_reshade_module_handle() which does
-    // its own K32EnumProcessModules scan and will find reshadeModule normally.
     reshade::register_event<addon_event::reshade_begin_effects>(OnBeginEffects);
-    reshade::register_event<addon_event::reshade_finish_effects>(OnFinishEffects);
-    reshade::register_event<addon_event::bind_render_targets_and_depth_stencil>(OnBindRenderTargets);
 
     IDirect3DDevice9* Device = TheRenderManager->device;
 
@@ -301,7 +234,6 @@ void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
 
         ++s_retryFrame;
 
-        // Give up after ~5 seconds (300 frames). Dump module list, log once, stop.
         if (s_retryFrame > 300) {
             DiagnoseModules();
             Logger::Log("ReShadeIntegration: ReShade not detected after 300 frames - integration disabled");
@@ -312,21 +244,17 @@ void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
         if (!TryRegister()) return;
     }
 
-    if (!s_runtime || !s_cmdList)
-        return;
-    if (!s_depthTexture || !s_depthSurface || !s_depthCopyEffect)
-        return;
-    if (!TheTextureManager->CombinedDepthTexture)
-        return;
+    if (!s_depthTexture || !s_depthSurface || !s_depthCopyEffect) return;
+    if (!TheTextureManager->CombinedDepthTexture) return;
 
     IDirect3DDevice9* Device = TheRenderManager->device;
 
-    // Save and override render target for the depth copy pass.
+    // Copy the G channel of CombineDepth's G32R32F output into our R32F texture.
+    // OnBeginEffects will bind this to ReShade's DEPTH semantic before effects fire.
     IDirect3DSurface9* savedRT = nullptr;
     Device->GetRenderTarget(0, &savedRT);
     Device->SetRenderTarget(0, s_depthSurface);
 
-    // Bind CombineDepth output (G32R32F) to sampler 0 and run the copy pass.
     Device->SetTexture(0, TheTextureManager->CombinedDepthTexture);
     Device->SetStreamSource(0, TheShaderManager->FrameVertex, 0, sizeof(FrameVS));
     Device->SetFVF(FrameFVF);
@@ -338,15 +266,6 @@ void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
     s_depthCopyEffect->EndPass();
     s_depthCopyEffect->End();
 
-    // Restore the scene render target before handing off to ReShade.
     Device->SetRenderTarget(0, savedRT);
     if (savedRT) savedRT->Release();
-
-    // Override ReShade's depth binding with our unified R32F depth.
-    const resource_view depthRV = { reinterpret_cast<uint64_t>(s_depthTexture) };
-    s_runtime->update_texture_bindings("DEPTH", depthRV, depthRV);
-
-    // Fire ReShade effects at this pipeline point (post-NVR, pre-UI).
-    s_validPass = true;
-    s_runtime->render_effects(s_cmdList, s_sceneRTV, s_sceneRTVsrgb);
 }
