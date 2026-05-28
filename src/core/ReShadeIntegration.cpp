@@ -9,6 +9,9 @@
 // camera space for all pixels (world + viewmodel, viewmodel remapped). We copy that
 // channel to an R32F surface and hand it to ReShade via update_texture_bindings("DEPTH"),
 // giving RTGI/RTAO correct, unified depth under both native D3D9 and DXVK.
+//
+// Registration is deferred: RenderEffects() retries register_addon() each frame until
+// ReShade's module appears in the process (Vulkan ReShade loads later than Initialize()).
 
 // Prevent assert macro redefinition (Framework.h redefines assert to static_assert).
 #ifdef assert
@@ -26,8 +29,11 @@ using namespace reshade::api;
 
 // ── module state ─────────────────────────────────────────────────────────────
 
-static bool             s_registered      = false;
 static HMODULE          s_hModule         = nullptr;
+static bool             s_registered      = false;
+static bool             s_gaveUp          = false;
+static int              s_retryFrame      = 0;
+
 static effect_runtime*  s_runtime         = nullptr;
 static command_list*    s_cmdList         = nullptr;
 static resource_view    s_sceneRTV        = {};
@@ -129,22 +135,14 @@ static void OnBindRenderTargets(
         s_sceneRTV = rtvs[0];
 }
 
-// ── public interface ──────────────────────────────────────────────────────────
+// ── lazy registration ─────────────────────────────────────────────────────────
+// Called from RenderEffects() each frame until it succeeds. Keeps retrying
+// because Vulkan ReShade (global layer) enters the process module list only
+// after DXVK's vkCreateInstance fires, which may be after Initialize() runs.
 
-void ReShadeIntegration::Initialize() {
-    GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCWSTR>(&ReShadeIntegration::Initialize),
-        &s_hModule);
-
-    if (!reshade::register_addon(s_hModule)) {
-        Logger::Log("ReShadeIntegration: ReShade not present, integration disabled");
-        return;
-    }
-
-    s_registered = true;
-    Logger::Log("ReShadeIntegration: registered as ReShade addon");
+static bool TryRegister() {
+    if (!reshade::register_addon(s_hModule))
+        return false;
 
     reshade::register_event<addon_event::reshade_begin_effects>(OnBeginEffects);
     reshade::register_event<addon_event::reshade_finish_effects>(OnFinishEffects);
@@ -159,8 +157,8 @@ void ReShadeIntegration::Initialize() {
 
     if (FAILED(hr)) {
         Logger::Log("ReShadeIntegration: CreateTexture R32F failed (hr=0x%08X) - depth integration disabled", hr);
-        Shutdown();
-        return;
+        reshade::unregister_addon(s_hModule);
+        return false;
     }
 
     s_depthTexture->GetSurfaceLevel(0, &s_depthSurface);
@@ -179,12 +177,28 @@ void ReShadeIntegration::Initialize() {
             errors->Release();
         }
         Logger::Log("ReShadeIntegration: shader compile failed (hr=0x%08X) - depth integration disabled", hr);
-        Shutdown();
-        return;
+        reshade::unregister_addon(s_hModule);
+        if (s_depthSurface) { s_depthSurface->Release(); s_depthSurface = nullptr; }
+        if (s_depthTexture) { s_depthTexture->Release(); s_depthTexture = nullptr; }
+        return false;
     }
 
     if (errors) errors->Release();
-    Logger::Log("ReShadeIntegration: initialized - depth integration active");
+    s_registered = true;
+    Logger::Log("ReShadeIntegration: registered as ReShade addon - depth integration active");
+    return true;
+}
+
+// ── public interface ──────────────────────────────────────────────────────────
+
+void ReShadeIntegration::Initialize() {
+    GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(&ReShadeIntegration::Initialize),
+        &s_hModule);
+
+    Logger::Log("ReShadeIntegration: deferred registration scheduled");
 }
 
 void ReShadeIntegration::Shutdown() {
@@ -199,7 +213,22 @@ void ReShadeIntegration::Shutdown() {
 }
 
 void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
-    if (!s_registered || !s_runtime || !s_cmdList)
+    if (!s_registered) {
+        if (s_gaveUp) return;
+
+        ++s_retryFrame;
+
+        // Give up after ~5 seconds (300 frames). Log once, then stop scanning.
+        if (s_retryFrame > 300) {
+            Logger::Log("ReShadeIntegration: ReShade not detected after 300 frames - integration disabled");
+            s_gaveUp = true;
+            return;
+        }
+
+        if (!TryRegister()) return;
+    }
+
+    if (!s_runtime || !s_cmdList)
         return;
     if (!s_depthTexture || !s_depthSurface || !s_depthCopyEffect)
         return;
