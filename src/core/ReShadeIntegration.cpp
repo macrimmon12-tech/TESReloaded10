@@ -312,7 +312,7 @@ void ReShadeIntegration::Shutdown() {
     }
 }
 
-void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
+void ReShadeIntegration::RenderEffects(IDirect3DSurface9* renderTarget) {
     if (!s_registered) {
         if (s_gaveUp) return;
 
@@ -345,7 +345,9 @@ void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
         if (!TheTextureManager->DepthSurface) return;
 
         // Save state.
+        IDirect3DSurface9* savedRT = nullptr;
         IDirect3DSurface9* savedDS = nullptr;
+        Device->GetRenderTarget(0, &savedRT);
         Device->GetDepthStencilSurface(&savedDS);
 
         DWORD savedZE, savedZW, savedZF, savedCWE;
@@ -354,7 +356,10 @@ void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
         Device->GetRenderState(D3DRS_ZFUNC,           &savedZF);
         Device->GetRenderState(D3DRS_COLORWRITEENABLE,&savedCWE);
 
-        // Set up for depth-only write.
+        // Use the frame output surface as the colour RT to guarantee that its
+        // dimensions match the depth stencil.  ColorWriteEnable=0 ensures
+        // nothing is written to it.
+        Device->SetRenderTarget(0, renderTarget);
         Device->SetDepthStencilSurface(TheTextureManager->DepthSurface);
         Device->SetRenderState(D3DRS_ZENABLE,          TRUE);
         Device->SetRenderState(D3DRS_ZWRITEENABLE,     TRUE);
@@ -372,13 +377,22 @@ void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
         s_depthWriteEffect->EndPass();
         s_depthWriteEffect->End();
 
+        static bool s_loggedDepthWrite = false;
+        if (!s_loggedDepthWrite) {
+            Logger::Log("ReShadeIntegration: DXVK depth write executed (DepthSurface=%p CombinedDepth=%p)",
+                TheTextureManager->DepthSurface, TheTextureManager->CombinedDepthTexture);
+            s_loggedDepthWrite = true;
+        }
+
         // Restore state.
         Device->SetRenderState(D3DRS_COLORWRITEENABLE, savedCWE);
         Device->SetRenderState(D3DRS_ZFUNC,            savedZF);
         Device->SetRenderState(D3DRS_ZWRITEENABLE,     savedZW);
         Device->SetRenderState(D3DRS_ZENABLE,          savedZE);
         Device->SetDepthStencilSurface(savedDS);
+        Device->SetRenderTarget(0, savedRT);
         if (savedDS) savedDS->Release();
+        if (savedRT) savedRT->Release();
 
     } else {
         // ── Native D3D9 path ─────────────────────────────────────────────────
