@@ -135,6 +135,39 @@ static void OnBindRenderTargets(
         s_sceneRTV = rtvs[0];
 }
 
+// ── diagnostic ───────────────────────────────────────────────────────────────
+// Dumps all loaded modules to the log, flagging any that look like ReShade or
+// that export the addon registration symbols. Call once on detection failure.
+
+static void DiagnoseModules() {
+    HMODULE modules[1024]; DWORD num = 0;
+    if (!K32EnumProcessModules(GetCurrentProcess(), modules, sizeof(modules), &num)) {
+        Logger::Log("ReShadeIntegration: K32EnumProcessModules failed (err=%u)", GetLastError());
+        return;
+    }
+
+    DWORD count = num / sizeof(HMODULE);
+    Logger::Log("ReShadeIntegration: scanning %u loaded modules for ReShade", count);
+
+    for (DWORD i = 0; i < count; ++i) {
+        char path[MAX_PATH] = {};
+        GetModuleFileNameA(modules[i], path, MAX_PATH);
+
+        bool hasReg   = GetProcAddress(modules[i], "ReShadeRegisterAddon")   != nullptr;
+        bool hasUnreg = GetProcAddress(modules[i], "ReShadeUnregisterAddon") != nullptr;
+
+        // Log any module that has the exports OR "reshade" in its path.
+        char lower[MAX_PATH] = {};
+        for (int j = 0; path[j] && j < MAX_PATH - 1; ++j)
+            lower[j] = static_cast<char>(tolower(static_cast<unsigned char>(path[j])));
+
+        if (hasReg || hasUnreg || strstr(lower, "reshade")) {
+            Logger::Log("ReShadeIntegration:   [%u] %s  RegisterAddon=%s UnregisterAddon=%s",
+                i, path, hasReg ? "YES" : "no", hasUnreg ? "YES" : "no");
+        }
+    }
+}
+
 // ── lazy registration ─────────────────────────────────────────────────────────
 // Called from RenderEffects() each frame until it succeeds. Keeps retrying
 // because Vulkan ReShade (global layer) enters the process module list only
@@ -218,8 +251,9 @@ void ReShadeIntegration::RenderEffects(IDirect3DSurface9* /*renderTarget*/) {
 
         ++s_retryFrame;
 
-        // Give up after ~5 seconds (300 frames). Log once, then stop scanning.
+        // Give up after ~5 seconds (300 frames). Dump module list, log once, stop.
         if (s_retryFrame > 300) {
+            DiagnoseModules();
             Logger::Log("ReShadeIntegration: ReShade not detected after 300 frames - integration disabled");
             s_gaveUp = true;
             return;
