@@ -12,6 +12,8 @@ public:
 
 	struct LUTSettingsStruct {
 		float Strength;
+		bool  PreTonemapping;
+		bool  HDRCompat;
 	};
 
 	LUTStruct          Constants;

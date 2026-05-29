@@ -238,10 +238,12 @@ Strength = 0.5
 Enabled = false                        #
 
 [_Shaders.LUT.Main]
-DayLUT      = ''                       # Filename of the day LUT (PNG in Data/Textures/NewVegasReloaded/LUTs/).
-NightLUT    = ''                       # Filename of the night LUT.
-InteriorLUT = ''                       # Filename of the interior LUT.
-Strength    = 1.0                      # Overall LUT blend strength (0.0 = no effect, 1.0 = full).
+DayLUT          = ''                   # Filename of the day LUT (PNG/DDS in Data/Textures/NewVegasReloaded/LUTs/).
+NightLUT        = ''                   # Filename of the night LUT.
+InteriorLUT     = ''                   # Filename of the interior LUT.
+Strength        = 1.0                  # Overall LUT blend strength (0.0 = no effect, 1.0 = full).
+PreTonemapping  = false                # Apply LUT before game tonemapping (HDR input). Requires HDR LUTs or HDRCompat mode.
+HDRCompat       = true                 # Normalize HDR input to LUT range using max-channel scale. Disable if using a converted float16 DDS HDR LUT.
 
 [_Shaders.LUT.Status]
 Enabled = false                        #
