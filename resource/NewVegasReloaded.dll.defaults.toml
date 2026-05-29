@@ -252,43 +252,49 @@ Enabled = false                        #
 Enabled = false                        # Displays debug information: depth, normal and shadow buffers, colors of the weather/fog and lights positions.
 
 [_Shaders.DepthOfField.FirstPersonView]
-BaseBlurRadius = 1.0                   # Strength of the blurriness caused by depth of Field.
-BlurFallOff = 1.5                      # Hyperfocal distance (x1000). Before this distance, near and far field are blurred. After, only the near field is.
-DiameterRange = 0.8                    # Bokeh treshold. Areas with brightness above this value will bloom in a bokeh like effect.
-DistantBlur = true                     # Activate a constant blurriness in the far distance to hide LOD.
-DistantBlurEndRange = 150000           # Far end of the area blurred in the distance (fully blurry).
-DistantBlurStartRange = 30000          # Start of the area blurred in the distance (not yet blurry).
-Enabled = false                        # Wether to activate the DOF effect in first person.
-Mode = 0                               # Chose when the DOF is activated: 0: always, 1: not during dialog, 2: only in dialog.
-NearBlurCutOff = 100                   # Close up range that doesn't get blurred to avoid blurry gun/player character.
-Radius = 1.5                           # Radius for the bokeh blur.
+AnamorphicRatio = 1.0                  # Vertical scale of the bokeh shape. 1.0 = round. < 1.0 = wide oval (anamorphic lens look). > 1.0 = tall oval.
+BokehCurve = 4.0                       # Luminance weighting exponent (0.5–20). Higher values make bright highlights pop as shaped bokeh discs. No performance impact.
+BlurRadius = 10.0                      # Maximum blur radius in pixels at full CoC. Larger values are more expensive — cost scales with BlurRadius * SampleCount.
+ChromaticAberration = 0.0              # Strength of chromatic aberration on out-of-focus areas (0–5). Adds color fringing to bokeh edges for lens realism.
+DistantBlur = true                     # Apply a constant blur in the far distance to cover LOD pop-in.
+DistantBlurEndRange = 150000           # Scene depth at which the distant blur reaches full strength.
+DistantBlurStartRange = 30000          # Scene depth at which the distant blur begins.
+Enabled = false                        # Enable depth of field in first person view.
+FocusRange = 1.5                       # Hyperfocal distance scale (x1000 units). Controls how quickly blur ramps up away from the focal plane.
+Mode = 0                               # When to apply DOF: 0 = always, 1 = not during dialog, 2 = only in dialog, 3 = only during persuasion, 4 = dialog + persuasion only.
+NearBlurCutOff = 100                   # Depth below which near blur is suppressed to keep the gun and arms sharp.
+SampleCount = 4                        # Taps per direction per pass (1–10). PERFORMANCE: total texture fetches = (2 * SampleCount + 1) * 4 passes per pixel. Raise for quality, lower for speed.
 
 [_Shaders.DepthOfField.Status]
-Enabled = true                         # Depth of Field blurriness with animated autofocus. Simulates a real camera autofocus with a focus on playability.
+Enabled = true                         # MATSO-style depth of field with four-axis directional blur and luminance-weighted bokeh. Produces shaped bokeh discs on bright highlights.
 
 [_Shaders.DepthOfField.ThirdPersonView]
-BaseBlurRadius = 2.0                   # Strength of the blurriness caused by depth of Field.
-BlurFallOff = 1.5                      # Hyperfocal distance (x1000). Before this distance, near and far field are blurred. After, only the near field is.
-DiameterRange = 0.8                    # Bokeh treshold. Areas with brightness above this value will bloom in a bokeh like effect.
-DistantBlur = true                     # Activate a constant blurriness in the far distance to hide LOD.
-DistantBlurEndRange = 150000           # Far end of the area blurred in the distance (fully blurry).
-DistantBlurStartRange = 30000          # Start of the area blurred in the distance (not yet blurry).
-Enabled = false                        # Wether to activate the DOF effect in third person.
-Mode = 0                               # Chose when the DOF is activated: 0: always, 1: not during dialog, 2: only in dialog.
-NearBlurCutOff = 200                   # Close up range that doesn't get blurred to avoid blurry gun/player character.
-Radius = 1.5                           # Radius for the bokeh blur.
+AnamorphicRatio = 1.0                  # Vertical scale of the bokeh shape. 1.0 = round. < 1.0 = wide oval (anamorphic lens look). > 1.0 = tall oval.
+BokehCurve = 4.0                       # Luminance weighting exponent (0.5–20). Higher values make bright highlights pop as shaped bokeh discs. No performance impact.
+BlurRadius = 15.0                      # Maximum blur radius in pixels at full CoC. Larger values are more expensive — cost scales with BlurRadius * SampleCount.
+ChromaticAberration = 0.5              # Strength of chromatic aberration on out-of-focus areas (0–5). Adds color fringing to bokeh edges for lens realism.
+DistantBlur = true                     # Apply a constant blur in the far distance to cover LOD pop-in.
+DistantBlurEndRange = 150000           # Scene depth at which the distant blur reaches full strength.
+DistantBlurStartRange = 30000          # Scene depth at which the distant blur begins.
+Enabled = false                        # Enable depth of field in third person view.
+FocusRange = 1.5                       # Hyperfocal distance scale (x1000 units). Controls how quickly blur ramps up away from the focal plane.
+Mode = 0                               # When to apply DOF: 0 = always, 1 = not during dialog, 2 = only in dialog, 3 = only during persuasion, 4 = dialog + persuasion only.
+NearBlurCutOff = 200                   # Depth below which near blur is suppressed to keep the player character sharp.
+SampleCount = 4                        # Taps per direction per pass (1–10). PERFORMANCE: total texture fetches = (2 * SampleCount + 1) * 4 passes per pixel. Raise for quality, lower for speed.
 
 [_Shaders.DepthOfField.VanityView]
-BaseBlurRadius = 2.0                   # Strength of the blurriness caused by depth of Field.
-BlurFallOff = 1.5                      # Hyperfocal distance (x1000). Before this distance, near and far field are blurred. After, only the near field is.
-DiameterRange = 0.8                    # Bokeh treshold. Areas with brightness above this value will bloom in a bokeh like effect.
-DistantBlur = true                     # Activate a constant blurriness in the far distance to hide LOD.
-DistantBlurEndRange = 150000           # Far end of the area blurred in the distance (fully blurry).
-DistantBlurStartRange = 30000          # Start of the area blurred in the distance (not yet blurry).
-Enabled = false                        # Wether to activate the DOF effect in vanity camera (free rotation camera).
-Mode = 0                               # Chose when the DOF is activated: 0: always, 1: not during dialog, 2: only in dialog.
-NearBlurCutOff = 0                     # Close up range that doesn't get blurred to avoid blurry gun/player character.
-Radius = 1.5                           # Radius for the bokeh blur.
+AnamorphicRatio = 1.0                  # Vertical scale of the bokeh shape. 1.0 = round. < 1.0 = wide oval (anamorphic lens look). > 1.0 = tall oval.
+BokehCurve = 6.0                       # Luminance weighting exponent (0.5–20). Higher values make bright highlights pop as shaped bokeh discs. No performance impact.
+BlurRadius = 20.0                      # Maximum blur radius in pixels at full CoC. Larger values are more expensive — cost scales with BlurRadius * SampleCount.
+ChromaticAberration = 1.0              # Strength of chromatic aberration on out-of-focus areas (0–5). Adds color fringing to bokeh edges for lens realism.
+DistantBlur = true                     # Apply a constant blur in the far distance to cover LOD pop-in.
+DistantBlurEndRange = 150000           # Scene depth at which the distant blur reaches full strength.
+DistantBlurStartRange = 30000          # Scene depth at which the distant blur begins.
+Enabled = false                        # Enable depth of field in vanity (free-rotation) camera view.
+FocusRange = 1.5                       # Hyperfocal distance scale (x1000 units). Controls how quickly blur ramps up away from the focal plane.
+Mode = 0                               # When to apply DOF: 0 = always, 1 = not during dialog, 2 = only in dialog, 3 = only during persuasion, 4 = dialog + persuasion only.
+NearBlurCutOff = 0                     # Depth below which near blur is suppressed. Set to 0 to allow full near blur in vanity view.
+SampleCount = 6                        # Taps per direction per pass (1–10). PERFORMANCE: total texture fetches = (2 * SampleCount + 1) * 4 passes per pixel. Raise for quality, lower for speed.
 
 [_Shaders.Exposure.Main]
 DarkAdaptSpeed = 50.0                  # Speed for the exposure to adjust when the screen gets darker.

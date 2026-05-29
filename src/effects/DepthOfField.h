@@ -9,13 +9,15 @@ public:
 		float DistantBlur;
 		float DistantBlurStartRange;
 		float DistantBlurEndRange;
-		float BaseBlurRadius;
-		float focusDistance;
-		float Radius;
-		float DiameterRange;
+		float BlurRadius;
+		float FocusRange;
 		float NearBlurCutOff;
-		int Mode;
-		bool Enabled;
+		float BokehCurve;
+		int   SampleCount;
+		float ChromaticAberration;
+		float AnamorphicRatio;
+		int   Mode;
+		bool  Enabled;
 	};
 
 	struct DepthOfFieldSettingsStruct {
@@ -27,8 +29,9 @@ public:
 
 	struct DepthOfFieldStruct {
 		bool			Enabled;
-		D3DXVECTOR4		Blur;
-		D3DXVECTOR4		Data;
+		D3DXVECTOR4		Blur;       // x: distant blur, y: distant start, z: distant end, w: blur radius
+		D3DXVECTOR4		Data;       // x: focus range, y: (unused), z: (unused), w: near blur cutoff
+		D3DXVECTOR4		MatsoData;  // x: BokehCurve, y: SampleCount, z: ChromaticAberration, w: AnamorphicRatio
 	};
 	DepthOfFieldStruct	Constants;
 
