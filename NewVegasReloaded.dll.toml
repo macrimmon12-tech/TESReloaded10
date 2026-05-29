@@ -1,16 +1,256 @@
-# Boomstick Classic ENB → NVR Translation
-# Source: enbseries.ini (Boomstick Classic ENB for FNV, edited by WebbProductions2020)
-#         SweetFX_settings.txt (SweetFX 1.5.1 preset)
-# Notes:
-#   - LUT already converted separately; set filenames below.
-#   - DPX Cineon, per-time-of-day environment lighting, and detailed shadow settings
-#     have no direct NVR equivalent and are intentionally omitted.
-#   - All other active effects are translated as closely as parameter ranges allow.
-#   - Anything not listed here will fall back to NVR defaults.
+# NewVegasReloaded.dll.toml
+# Boomstick Classic ENB + SweetFX translation
+# Drop into: Data\NVSE\Plugins\NewVegasReloaded.dll.toml
+# Set your converted LUT filename(s) in [_Shaders.LUT.Main] below.
 
-# ─── LUT ─────────────────────────────────────────────────────────────────────
-# ENB: UsePaletteTexture=true
-# Set your converted LUT filename(s) here.
+[_Main.CameraMode.Main]
+ChasingFirst = false
+ChasingThird = false
+Crosshair = 0
+Enabled = false
+FoV = 90.0
+
+[_Main.CameraMode.Positioning]
+AimingOffsetX = -1.0
+AimingOffsetY = 15.0
+AimingOffsetZ = 4.5
+DialogOffsetX = -50.0
+DialogOffsetY = -50.0
+DialogOffsetZ = 10.0
+OffsetX = 0.0
+OffsetY = 15.0
+OffsetZ = 5.0
+
+[_Main.Develop.Main]
+DebugMode = false
+DebugVar1 = 0.0
+DebugVar2 = 0.0
+DebugVar3 = 0.0
+DebugVar4 = 0.0
+TraceShaders = 25
+
+[_Main.Transitions.Main]
+TransitionCurvePower = 1.0
+
+[_Main.FlyCam.Main]
+Enabled = true
+KeyAdd = 78
+KeySubtract = 74
+ScrollMultiplier = 2.0
+StepValue = 1.0
+
+[_Main.FrameRate.SmartControl]
+FlowControl = -0.5
+SmartControl = false
+SmartControlFPS = 60
+
+[_Main.FrameRate.Stuttering]
+BackgroundThreadPriority = 5
+SmartBackgroundProcess = false
+
+[_Main.LowHFSound.Main]
+FatigueCoeff = 0.5
+FatigueEnabled = true
+HealthCoeff = 0.5
+HealthEnabled = false
+
+[_Main.Main.Misc]
+ForceMSAA = false
+RenderEffects = true
+RenderPreTonemapping = true
+ReplaceIntro = false
+ScreenshotKey = 87
+HDRScreenshot = false
+
+[_Main.Main.Precipitations]
+RemovePrecipitations = false
+
+[_Main.Main.Water]
+ForceReflections = true
+RemoveUnderwater = false
+
+[_Main.Menu.Keys]
+KeyAdd = 78
+KeyDown = 208
+KeyEditing = 156
+KeyEnable = 24
+KeyLeft = 203
+KeyPageDown = 209
+KeyPageUp = 201
+KeyRight = 205
+KeySave = 28
+KeySubtract = 74
+KeyUp = 200
+EntryUseNumpad = true
+MasterSwitchModifier = 2
+
+[_Main.Menu.Style]
+ItemColumnSize = 300
+MainItemColumnSize = 100
+PositionX = 60
+PositionY = 60
+RowSpace = 0
+RowsPerPage = 35
+TextColorEditing = '255,100,50'
+TextColorEnabled = '100,170,90'
+TextColorNormal = '240,200,80'
+TextColorSelected = '255,255,255'
+TextFont = 'Calibri'
+TextFontStatus = 'Consolas'
+TextShadowColorEditing = '50,50,50'
+TextShadowColorEnabled = '50,50,50'
+TextShadowColorNormal = '50,50,50'
+TextShadowColorSelected = '50,50,50'
+TextSize = 22
+TextSizeStatus = 12
+TitleColumnSize = 850
+
+[_Main.SleepingMode.Main]
+Enabled = false
+Mode = 0
+
+[_Main.WeatherMode.General]
+CoeffFogB = 0.86
+CoeffFogG = 0.88
+CoeffFogR = 0.9
+CoeffNightB = 0.5
+CoeffNightG = 0.6
+CoeffNightR = 0.6
+CoeffSunB = 0.8
+CoeffSunG = 0.9
+CoeffSunR = 1.0
+
+[_Main.WeatherMode.Main]
+Enabled = false
+
+# ── Ambient Occlusion ────────────────────────────────────────────────────────
+# ENB: AOAmount=0.65 exterior / 0.45 interior, SamplingRange=0.18 (tight)
+
+[_Shaders.AmbientOcclusion.Exteriors]
+AngleBias = 1.6
+BlurDropThreshold = 8.0
+BlurRadiusMultiplier = 2.0
+ClampStrength = 0.25
+Enabled = true
+LumThreshold = 0.7
+Range = 18.0               # ENB SamplingRange=0.18 → tighter than default 30
+Samples = 5
+StrengthMultiplier = 0.65  # ENB AOAmount=0.65
+
+[_Shaders.AmbientOcclusion.Interiors]
+AngleBias = 0.0
+BlurDropThreshold = 8.0
+BlurRadiusMultiplier = 2.0
+ClampStrength = 0.2
+Enabled = true
+LumThreshold = 0.5
+Range = 18.0
+Samples = 5
+StrengthMultiplier = 0.45  # ENB AOAmountInterior=0.45
+
+[_Shaders.AmbientOcclusion.Status]
+Enabled = true
+
+[_Shaders.Blood.Status]
+Enabled = false
+
+[_Shaders.BloodLens.Main]
+Chance = 10.0
+ColorB = 0.16
+ColorG = 0.16
+ColorR = 0.92
+Intensity = 0.8
+Time = 900.0
+
+[_Shaders.BloodLens.Status]
+Enabled = false
+
+[_Shaders.Bloom]
+
+# ── Bloom ────────────────────────────────────────────────────────────────────
+# ENB: AmountDay=0.15, AmountNight=0.5, AmountInterior=0.25, Quality=0
+
+[_Shaders.Bloom.Main]
+Blending = 0.03            # Subtle day bloom
+Strength = 0.15            # ENB AmountDay=0.15
+Passes = 4                 # ENB Quality=0 → fewer passes
+PassBlending = 0.0
+
+[_Shaders.Bloom.Night]
+Blending = 0.05
+Strength = 0.5             # ENB AmountNight=0.5
+Passes = 6
+PassBlending = 0.0
+
+[_Shaders.Bloom.Interiors]
+Blending = 0.05
+Strength = 0.25            # ENB AmountInterior=0.25
+Passes = 5
+PassBlending = 0.0
+
+[_Shaders.Bloom.Status]
+Enabled = true
+
+[_Shaders.BloomLegacy.Exteriors]
+BloomIntensity = 1.4
+BloomSaturation = 1.2
+Luminance = 0.06
+MiddleGray = 0.18
+OriginalIntensity = 1.0
+OriginalSaturation = 1.0
+WhiteCutOff = 0.8
+
+[_Shaders.BloomLegacy.Interiors]
+BloomIntensity = 1.4
+BloomSaturation = 1.2
+Luminance = 0.06
+MiddleGray = 0.18
+OriginalIntensity = 1.0
+OriginalSaturation = 1.0
+WhiteCutOff = 0.8
+
+[_Shaders.BloomLegacy.Status]
+Enabled = false
+
+[_Shaders.Cinema.Main]
+AspectRatio = 2.35
+ChromaticAberration = 1.0
+FilmGrainAmount = 0.3
+Mode = 3
+OverlayStrength = 0.1
+VignetteDarkness = 1.2
+VignetteRadius = 0.6
+LetterBoxDepth = 0.0
+
+[_Shaders.Cinema.Status]
+Enabled = false
+
+# ── Coloring ─────────────────────────────────────────────────────────────────
+# SweetFX: Curves_contrast=0.15 (luma), Vibrance=0.10
+
+[_Shaders.Coloring.Default]
+BaseGamma = 1.6
+Bleach = 0.05
+BleachLuma = 0.1
+ColorCurve = 1.15          # SweetFX Curves_contrast=0.15 → slight luma S-curve
+ColorCurveB = 1.0
+ColorCurveG = 1.0
+ColorCurveR = 1.0
+Contrast = 0.82
+EffectGamma = 0.9
+EffectGammaB = 1.0
+EffectGammaG = 1.0
+EffectGammaR = 1.0
+Fade = 0.0
+Linearization = 1.1
+Saturation = 0.05          # SweetFX Vibrance=0.10 → mild saturation nudge
+Strength = 0.5
+
+[_Shaders.Coloring.Status]
+Enabled = true
+
+# ── LUT ──────────────────────────────────────────────────────────────────────
+# ENB: UsePaletteTexture=true — set your converted LUT filenames here
 
 [_Shaders.LUT.Main]
 DayLUT      = 'boomstick_day.png'
@@ -21,314 +261,738 @@ Strength    = 1.0
 [_Shaders.LUT.Status]
 Enabled = true
 
+[_Shaders.Debug.Status]
+Enabled = false
 
-# ─── SMAA ────────────────────────────────────────────────────────────────────
-# SweetFX: USE_SMAA_ANTIALIASING=1, COLOR_EDGE_DETECTION=1, THRESHOLD=0.08
-# NVR's SMAA doesn't expose the sub-parameters; Color detection is the important one.
+# ── Depth of Field ───────────────────────────────────────────────────────────
+# ENB: EnableDepthOfField=true, FadeTime=0.5 — no intensity params set, using defaults
 
-[_Shaders.SMAA.Main]
-EdgeDetection = 1   # Color edge detection (SweetFX: COLOR_EDGE_DETECTION=1)
+[_Shaders.DepthOfField.FirstPersonView]
+BaseBlurRadius = 1.0
+BlurFallOff = 1.5
+DiameterRange = 0.8
+DistantBlur = true
+DistantBlurEndRange = 150000
+DistantBlurStartRange = 30000
+Enabled = true
+Mode = 0
+NearBlurCutOff = 100
+Radius = 1.5
 
-[_Shaders.SMAA.Status]
+[_Shaders.DepthOfField.Status]
 Enabled = true
 
-
-# ─── BLOOM ───────────────────────────────────────────────────────────────────
-# ENB: AmountDay=0.15, AmountNight=0.5, AmountInterior=0.25
-#      ContrastDay=0.95, ContrastNight=0.75, ContrastInterior=1.57, Quality=0
-
-[_Shaders.Bloom.Main]
-Strength     = 0.15   # AmountDay=0.15
-Blending     = 0.03   # Low blending, subtle day bloom
-Passes       = 4      # Quality=0 → fewer passes
-PassBlending = 0.0
-
-[_Shaders.Bloom.Night]
-Strength     = 0.5    # AmountNight=0.5, noticeably stronger
-Blending     = 0.05
-Passes       = 6
-PassBlending = 0.0
-
-[_Shaders.Bloom.Interiors]
-Strength     = 0.25   # AmountInterior=0.25
-Blending     = 0.05
-Passes       = 5
-PassBlending = 0.0
-
-[_Shaders.Bloom.Status]
+[_Shaders.DepthOfField.ThirdPersonView]
+BaseBlurRadius = 2.0
+BlurFallOff = 1.5
+DiameterRange = 0.8
+DistantBlur = true
+DistantBlurEndRange = 150000
+DistantBlurStartRange = 30000
 Enabled = true
+Mode = 0
+NearBlurCutOff = 200
+Radius = 1.5
 
-
-# ─── AMBIENT OCCLUSION ───────────────────────────────────────────────────────
-# ENB: AOAmount=0.65, AOIntensity=4.85, SamplingRange=0.18, SamplingQuality=-1
-#      AOAmountInterior=0.45, AOIntensityInterior=5.55, EnableDenoiser=true
-
-[_Shaders.AmbientOcclusion.Exteriors]
-StrengthMultiplier    = 0.65   # AOAmount=0.65
-AngleBias             = 1.6    # AOIntensity≈4.85 → maps loosely to angle bias (NVR default is good here)
-Range                 = 18.0   # SamplingRange=0.18 (narrow) → tighter than default 30
-BlurDropThreshold     = 8.0
-BlurRadiusMultiplier  = 2.0    # FilterQuality=0 / EnableDenoiser=true
-ClampStrength         = 0.25
-LumThreshold          = 0.7
-Samples               = 5
-Enabled               = true
-
-[_Shaders.AmbientOcclusion.Interiors]
-StrengthMultiplier    = 0.45   # AOAmountInterior=0.45
-AngleBias             = 0.0
-Range                 = 18.0
-BlurDropThreshold     = 8.0
-BlurRadiusMultiplier  = 2.0
-ClampStrength         = 0.2
-LumThreshold          = 0.5
-Samples               = 5
-Enabled               = true
-
-[_Shaders.AmbientOcclusion.Status]
+[_Shaders.DepthOfField.VanityView]
+BaseBlurRadius = 2.0
+BlurFallOff = 1.5
+DiameterRange = 0.8
+DistantBlur = true
+DistantBlurEndRange = 150000
+DistantBlurStartRange = 30000
 Enabled = true
+Mode = 0
+NearBlurCutOff = 0
+Radius = 1.5
 
-
-# ─── EXPOSURE (Eye Adaptation) ───────────────────────────────────────────────
-# ENB: AdaptationTime=0.5 (fast), AdaptationSensitivity=0.25 (moderate)
-#      AdaptationMin=0.2, AdaptationMax=100.0 (effectively uncapped upper end)
+# ── Exposure (Eye Adaptation) ────────────────────────────────────────────────
+# ENB: AdaptationTime=0.5 (fast), AdaptationMin=0.2, AdaptationMax=100 (uncapped)
 
 [_Shaders.Exposure.Main]
-DarkAdaptSpeed  = 40.0   # AdaptationTime=0.5 → fairly responsive
+DarkAdaptSpeed = 40.0      # ENB AdaptationTime=0.5 → responsive
 LightAdaptSpeed = 40.0
-MinBrightness   = 0.2    # AdaptationMin=0.2
-MaxBrightness   = 0.5    # AdaptationMax uncapped → permissive upper limit
-
-[_Shaders.Exposure.Night]
-DarkAdaptSpeed  = 40.0
-LightAdaptSpeed = 40.0
-MinBrightness   = 0.25   # Slightly more aggressive floor at night (DetectorLevelNight=0.25)
-MaxBrightness   = 0.0    # Don't darken nights
+MaxBrightness = 0.5        # ENB AdaptationMax effectively uncapped → permissive
+MinBrightness = 0.2        # ENB AdaptationMin=0.2
 
 [_Shaders.Exposure.Interiors]
-DarkAdaptSpeed  = 50.0
+DarkAdaptSpeed = 50.0
 LightAdaptSpeed = 50.0
-MinBrightness   = 0.8    # ENB interiors were well-lit (AmbientLightingIntensityInterior=1.0)
-MaxBrightness   = 0.35
+MaxBrightness = 0.35
+MinBrightness = 0.8        # ENB interiors were bright (AmbientLightingIntensityInterior=1.0)
+
+[_Shaders.Exposure.Night]
+DarkAdaptSpeed = 40.0
+LightAdaptSpeed = 40.0
+MaxBrightness = 0.0        # Don't dim nights
+MinBrightness = 0.25       # ENB DetectorLevelNight=0.25
 
 [_Shaders.Exposure.Status]
 Enabled = true
 
+[_Shaders.Flashlight.Main]
+ColorR = 2.0
+ColorG = 2.0
+ColorB = 1.0
+Dimmer = 1.0
+Angle = 30.0
+Distance = 1000
+OffsetX = 0.0
+OffsetY = 0.0
+OffsetZ = 0.0
+RenderShadows = false
+AttachToWeapon = true
 
-# ─── TONEMAPPING ─────────────────────────────────────────────────────────────
-# ENB: Brightness=1.2, GammaCurve=1.05, LightingIntensityDay=1.15
-# SweetFX: Vibrance=0.10 (slight saturation boost), Tonemap params all neutral
-#          Curves_contrast=0.15 on Luma
+[_Shaders.Flashlight.Status]
+Enabled = false
 
-[_Shaders.Tonemapping.Main]
-TonemappingMode      = 2     # NVRLottes — good match for the ENB's filmic color science
-Exposure             = 1.6   # ENB Brightness=1.2 × LightingIntensityDay=1.15 → slightly elevated
-Gamma                = 2.2
-Linearization        = 2.2
-SkyMultiplier        = 1.0
-WeatherModifier      = 1.0
-WeatherContrast      = 0.0
-Saturation           = 1.05  # SweetFX Vibrance=0.10 → subtle saturation bump
-ToneMappingColor     = 1.0
-TonemapContrast      = 1.05  # Curves_contrast=0.15 → very slight contrast
-TonemapBrightness    = 1.0
-TonemapMidpoint      = 1.0
-TonemapShoulder      = 1.0
-TonemapWhitePoint    = 1.0
-HighlightSaturation  = 1.0
-PointLightMultiplier = 1.0
+[_Shaders.Grass.Main]
+WindEnabled = false
+GrassDensity = 1
+WindCoefficient = 0.0
+ScaleX = 1.0
+ScaleY = 1.0
+ScaleZ = 1.0
+MinDistance = 0
+MaxDistance = 0
 
-[_Shaders.Tonemapping.Night]
-Exposure             = 1.25  # ENB LightingIntensityNight=0.6 → darker nights
-Gamma                = 2.2
-Linearization        = 2.2
-SkyMultiplier        = 1.0
-WeatherModifier      = 1.0
-WeatherContrast      = 0.0
-Saturation           = 0.95  # ENB LightingDesaturationNight=0.2 → mild desaturation
-ToneMappingColor     = 1.0
-TonemapContrast      = 1.0
-TonemapBrightness    = 1.0
-TonemapMidpoint      = 1.0
-TonemapShoulder      = 1.0
-TonemapWhitePoint    = 1.0
-HighlightSaturation  = 1.0
-PointLightMultiplier = 1.0
+[_Shaders.Grass.Status]
+Enabled = false
 
-[_Shaders.Tonemapping.Interiors]
-TonemappingMode      = 1     # VTLottes for interiors
-Exposure             = 1.4   # ENB LightingIntensityInterior=0.8, AmbientIntensityInterior=1.0
-Gamma                = 2.2
-Linearization        = 2.2
-SkyMultiplier        = 1.0
-WeatherModifier      = 1.0
-WeatherContrast      = 0.0
-Saturation           = 1.0
-ToneMappingColor     = 1.0
-TonemapContrast      = 1.0
-TonemapBrightness    = 1.0
-TonemapMidpoint      = 1.0
-TonemapShoulder      = 1.0
-TonemapWhitePoint    = 1.0
-HighlightSaturation  = 1.0
-PointLightMultiplier = 1.0
-
-[_Shaders.Tonemapping.Status]
-Enabled = true
-
-
-# ─── GOD RAYS (Sun Rays) ─────────────────────────────────────────────────────
-# ENB: [RAYS] SunRaysMultiplier=0.212, EnableSunRays=true (first entry)
+# ── God Rays (Sun Rays) ──────────────────────────────────────────────────────
+# ENB: SunRaysMultiplier=0.212
 
 [_Shaders.GodRays.Main]
-DayMultiplier    = 0.21   # SunRaysMultiplier=0.212
-NightMultiplier  = 0.1    # scaled down proportionally
-Luminance        = 0.8
-RayDensity       = 1.0
-RayIntensity     = 1.0
-RayLength        = 1.0
-RayVisibility    = 50.0
-SunGlareEnabled  = true
-TimeEnabled      = false
+DayMultiplier = 0.21       # ENB SunRaysMultiplier=0.212
 LightShaftPasses = 8
+Luminance = 0.8
+NightMultiplier = 0.1
+RayDensity = 1.0
+RayIntensity = 1.0
+RayLength = 1.0
+RayVisibility = 50.0
+SunGlareEnabled = true
+TimeEnabled = false
 
 [_Shaders.GodRays.Coloring]
-RayR     = 1.0
-RayG     = 1.0
-RayB     = 1.0
+RayR = 1.0
+RayG = 1.0
+RayB = 1.0
 Saturate = 0.0
 
 [_Shaders.GodRays.Status]
 Enabled = true
 
+# ── Tonemapping ──────────────────────────────────────────────────────────────
+# ENB: Brightness=1.2, GammaCurve=1.05, LightingIntensityDay=1.15
+# SweetFX: Vibrance=0.10 → Saturation=1.05, Curves_contrast=0.15 → TonemapContrast=1.05
 
-# ─── SKY ─────────────────────────────────────────────────────────────────────
-# ENB: SunIntensity=2.5, StarsIntensity=1.5, SunCoronaIntensity=1.5
-#      CloudsIntensityDay=1.13, CloudsIntensityNight=1.1, MoonIntensity=1.25
+[_Shaders.Tonemapping.Main]
+TonemappingMode = 2
+Exposure = 1.6             # ENB Brightness=1.2 × LightingIntensityDay=1.15
+Gamma = 2.2
+Linearization = 2.2
+SkyMultiplier = 1.0
+WeatherModifier = 1.0
+WeatherContrast = 0.0
+Saturation = 1.05          # SweetFX Vibrance=0.10 → slight saturation boost
+ToneMappingColor = 1.0
+TonemapContrast = 1.05     # SweetFX Curves_contrast=0.15 → subtle contrast
+TonemapBrightness = 1.0
+TonemapMidpoint = 1.0
+TonemapShoulder = 1.0
+TonemapWhitePoint = 1.0
+HighlightSaturation = 1.0
+PointLightMultiplier = 1.0
 
-[_Shaders.Sky.Main]
-AthmosphereThickness = 2.0
-SunInfluence         = 1.0
-SunStrength          = 2.5   # ENB SunIntensity=2.5
-GlareStrength        = 1.0   # ENB SunCoronaIntensity=1.5 → inverse scale, default fits
-StarStrength         = 1.5   # ENB StarsIntensity=1.5
-UseSunDiskColor      = false
-SunsetR              = 0.5
-SunsetG              = 0.0
-SunsetB              = 0.03
-StarTwinkle          = 1.0
+[_Shaders.Tonemapping.Interiors]
+TonemappingMode = 1
+Exposure = 1.4             # ENB LightingIntensityInterior=0.8 + AmbientIntensity=1.0
+Gamma = 2.2
+Linearization = 2.2
+SkyMultiplier = 1.0
+WeatherModifier = 1.0
+WeatherContrast = 0.0
+Saturation = 1.0
+ToneMappingColor = 1.0
+TonemapContrast = 1.0
+TonemapBrightness = 1.0
+TonemapMidpoint = 1.0
+TonemapShoulder = 1.0
+TonemapWhitePoint = 1.0
+HighlightSaturation = 1.0
+PointLightMultiplier = 1.0
 
-[_Shaders.Sky.Clouds]
-UseNormals       = false
-SphericalNormals = false
-Transparency     = 0.4
-Brightness       = 1.0   # ENB CloudsIntensityDay=1.13 → slight bump from default 0.9
+[_Shaders.Tonemapping.Night]
+Exposure = 1.25            # ENB LightingIntensityNight=0.6 → darker nights
+Gamma = 2.2
+Linearization = 2.2
+SkyMultiplier = 1.0
+WeatherModifier = 1.0
+WeatherContrast = 0.0
+Saturation = 0.95          # ENB LightingDesaturationNight=0.2 → mild desaturation
+ToneMappingColor = 1.0
+TonemapContrast = 1.0
+TonemapBrightness = 1.0
+TonemapMidpoint = 1.0
+TonemapShoulder = 1.0
+TonemapWhitePoint = 1.0
+HighlightSaturation = 1.0
+PointLightMultiplier = 1.0
 
-[_Shaders.Sky.Status]
+[_Shaders.Tonemapping.Status]
 Enabled = true
 
-
-# ─── LENS DIRT ───────────────────────────────────────────────────────────────
-# ENB: LenzDirtIntensityDay=0.08, LenzDirtIntensityNight=0.25, LenzDirtIntensityInterior=0.2
-#      LenzDirtPowerDay=0.5, LenzDirtPowerNight=2.57, LenzDirtPowerInterior=2.76
-# (LenzReflection params from [LENS] section, not [CAMERAFX])
-
-[_Shaders.Lens.Main]
-Strength      = 0.08   # LenzDirtIntensityDay=0.08
-BloomExponent = 0.5    # LenzDirtPowerDay=0.5
-Smudginess    = 0.0
-
-[_Shaders.Lens.Night]
-Strength      = 0.25   # LenzDirtIntensityNight=0.25
-BloomExponent = 0.7    # LenzDirtPowerNight=2.57 → clamped to NVR range
-Smudginess    = 0.4
-
-[_Shaders.Lens.Interiors]
-Strength      = 0.2    # LenzDirtIntensityInterior=0.2
-BloomExponent = 0.6    # LenzDirtPowerInterior=2.76 → clamped
-Smudginess    = 0.2
-
-[_Shaders.Lens.Status]
-Enabled = true
-
-
-# ─── DEPTH OF FIELD ──────────────────────────────────────────────────────────
-# ENB: EnableDepthOfField=true, FadeTime=0.5
-# No ENB DOF intensity parameters were set → use conservative NVR defaults, just enabled.
-
-[_Shaders.DepthOfField.FirstPersonView]
-Enabled              = true
-BaseBlurRadius       = 1.0
-BlurFallOff          = 1.5
-DiameterRange        = 0.8
-DistantBlur          = true
-DistantBlurStartRange = 30000
-DistantBlurEndRange  = 150000
-Mode                 = 0
-NearBlurCutOff       = 100
-Radius               = 1.5
-
-[_Shaders.DepthOfField.ThirdPersonView]
-Enabled              = true
-BaseBlurRadius       = 2.0
-BlurFallOff          = 1.5
-DiameterRange        = 0.8
-DistantBlur          = true
-DistantBlurStartRange = 30000
-DistantBlurEndRange  = 150000
-Mode                 = 0
-NearBlurCutOff       = 200
-Radius               = 1.5
-
-[_Shaders.DepthOfField.VanityView]
-Enabled              = true
-BaseBlurRadius       = 2.0
-BlurFallOff          = 1.5
-DiameterRange        = 0.8
-DistantBlur          = true
-DistantBlurStartRange = 30000
-DistantBlurEndRange  = 150000
-Mode                 = 0
-NearBlurCutOff       = 0
-Radius               = 1.5
-
-[_Shaders.DepthOfField.Status]
-Enabled = true
-
-
-# ─── DITHER ──────────────────────────────────────────────────────────────────
-# SweetFX: USE_DITHER=1, dither_method=1 (ordered)
+# ── Dither ───────────────────────────────────────────────────────────────────
+# SweetFX: USE_DITHER=1
 
 [_Shaders.DitherBuster.Main]
-Strength   = 1.0
-MaskPower  = 0.5
+Strength = 1.0
+MaskPower = 0.5
 
 [_Shaders.DitherBuster.Status]
 Enabled = true
 
+# ── SMAA ─────────────────────────────────────────────────────────────────────
+# SweetFX: USE_SMAA_ANTIALIASING=1, COLOR_EDGE_DETECTION=1
 
-# ─── COLORING ────────────────────────────────────────────────────────────────
-# SweetFX: Curves_contrast=0.15 (luma S-curve), Vibrance=0.10
-# These are soft adjustments; baked mostly into Tonemapping above.
-# Using Coloring as a light assist for the SweetFX curves + vibrance residual.
+[_Shaders.SMAA.Main]
+EdgeDetection = 1          # SweetFX COLOR_EDGE_DETECTION=1
 
-[_Shaders.Coloring.Default]
-BaseGamma    = 1.6
-Bleach       = 0.05    # SweetFX Bleach=0.0 → minimal, slight lift kept from NVR default
-BleachLuma   = 0.1
-ColorCurve   = 1.15    # Curves_contrast=0.15 → slight luma S-curve
-ColorCurveB  = 1.0
-ColorCurveG  = 1.0
-ColorCurveR  = 1.0
-Contrast     = 0.82    # Mild contrast to complement the curves pass
-EffectGamma  = 0.9
-EffectGammaB = 1.0
-EffectGammaG = 1.0
-EffectGammaR = 1.0
-Fade         = 0.0
-Linearization = 1.1
-Saturation   = 0.05    # Vibrance=0.10 → very mild saturation nudge
-Strength     = 0.5
+[_Shaders.SMAA.Status]
+Enabled = true
 
-[_Shaders.Coloring.Status]
+[_Shaders.ImageAdjust.Main]
+Brightness = 1.0
+Saturation = 1.0
+Contrast = 1.0
+Strength = 1.0
+DarkColorR = 1.0
+DarkColorG = 1.0
+DarkColorB = 1.0
+LightColorR = 1.0
+LightColorG = 1.0
+LightColorB = 1.0
+
+[_Shaders.ImageAdjust.Night]
+Brightness = 1.0
+Saturation = 1.0
+Contrast = 1.0
+Strength = 1.0
+DarkColorR = 1.0
+DarkColorG = 1.0
+DarkColorB = 1.0
+LightColorR = 1.0
+LightColorG = 1.0
+LightColorB = 1.0
+
+[_Shaders.ImageAdjust.Interiors]
+Brightness = 1.0
+Saturation = 1.0
+Contrast = 1.0
+Strength = 1.0
+DarkColorR = 1.0
+DarkColorG = 1.0
+DarkColorB = 1.0
+LightColorR = 1.0
+LightColorG = 1.0
+LightColorB = 1.0
+
+[_Shaders.ImageAdjust.Status]
+Enabled = true
+
+# ── Lens Dirt ────────────────────────────────────────────────────────────────
+# ENB: LenzDirtIntensityDay=0.08, Night=0.25, Interior=0.2
+#      LenzDirtPowerDay=0.5, Night=2.57, Interior=2.76
+
+[_Shaders.Lens.Main]
+Strength = 0.08            # ENB LenzDirtIntensityDay=0.08
+BloomExponent = 0.5        # ENB LenzDirtPowerDay=0.5
+Smudginess = 0.0
+
+[_Shaders.Lens.Night]
+Strength = 0.25            # ENB LenzDirtIntensityNight=0.25
+BloomExponent = 0.7        # ENB LenzDirtPowerNight=2.57 (clamped to NVR range)
+Smudginess = 0.4
+
+[_Shaders.Lens.Interiors]
+Strength = 0.2             # ENB LenzDirtIntensityInterior=0.2
+BloomExponent = 0.6        # ENB LenzDirtPowerInterior=2.76 (clamped)
+Smudginess = 0.2
+
+[_Shaders.Lens.Status]
+Enabled = true
+
+[_Shaders.LowHF.Main]
+BlurMultiplier = 0.2
+DarknessMultiplier = 1.0
+FatigueLimit = 0.25
+HealthLimit = 0.5
+LumaMultiplier = 1.0
+VignetteMultiplier = 1.0
+
+[_Shaders.LowHF.Status]
+Enabled = false
+
+[_Shaders.MotionBlur.FirstPersonView]
+BlurCutOff = 15.0
+BlurOffsetMax = 24.0
+BlurScale = 4.0
+Enabled = true
+GaussianWeight = 6.0
+
+[_Shaders.MotionBlur.ThirdPersonView]
+BlurCutOff = 15.0
+BlurOffsetMax = 24.0
+BlurScale = 4.0
+Enabled = false
+GaussianWeight = 6.0
+
+[_Shaders.MotionBlur.Status]
+Enabled = false
+
+[_Shaders.PBR.Main]
+Roughness = 1.0
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+Saturation = 1.0
+
+[_Shaders.PBR.Rain]
+Roughness = 1.0
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+Saturation = 1.0
+
+[_Shaders.PBR.Night]
+Roughness = 1.0
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+Saturation = 1.0
+
+[_Shaders.PBR.NightRain]
+Roughness = 1.0
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+Saturation = 1.0
+
+[_Shaders.PBR.Interiors]
+Roughness = 1.0
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+Saturation = 1.0
+
+[_Shaders.PBR.Status]
+Enabled = false
+
+[_Shaders.POM.Main]
+HeightMapScale = 0.4
+
+[_Shaders.POM.Status]
+Enabled = true
+
+[_Shaders.Precipitations.Main]
+Bloom = 0.5
+Coloring = 1.1
+Opacity = 1.0
+Refraction = 1.0
+Speed = 3.0
+VerticalScale = 1.6
+
+[_Shaders.Precipitations.Status]
+Enabled = true
+
+[_Shaders.ShadowsExteriors.Main]
+Quality = 4
+Enabled = true
+Darkness = 0.75
+NightMinDarkness = 0.35
+OrthoMapResolution = 256
+OrthoRadius = 8000
+UsePointShadowsDay = false
+UsePointShadowsNight = false
+
+[_Shaders.ShadowsExteriors.SunSmoothing]
+SmoothSun = 1
+QuantizeSun = 1
+SmoothingFactor = 0.1
+YawStepSize = 1.0
+PitchStepSize = 0.25
+MaxJumpAngle = 5.0
+
+[_Shaders.ShadowsExteriors.FormsNear]
+Activators = true
+Actors = true
+AlphaEnabled = true
+Apparatus = false
+Books = false
+Containers = true
+Doors = true
+Furniture = true
+Lod = false
+MinRadius = 1.0
+Misc = true
+Statics = true
+Terrain = true
+Trees = true
+
+[_Shaders.ShadowsExteriors.FormsMiddle]
+Activators = true
+Actors = true
+AlphaEnabled = true
+Apparatus = false
+Books = false
+Containers = true
+Doors = true
+Furniture = true
+Lod = false
+MinRadius = 1.0
+Misc = true
+Statics = true
+Terrain = true
+Trees = true
+
+[_Shaders.ShadowsExteriors.FormsFar]
+Activators = true
+Actors = true
+AlphaEnabled = true
+Apparatus = false
+Books = false
+Containers = true
+Doors = true
+Furniture = true
+Lod = true
+MinRadius = 10.0
+Misc = true
+Statics = true
+Terrain = true
+Trees = true
+
+[_Shaders.ShadowsExteriors.FormsLod]
+Activators = false
+Actors = false
+AlphaEnabled = true
+Apparatus = false
+Books = false
+Containers = false
+Doors = true
+Furniture = false
+Lod = true
+MinRadius = 10.0
+Misc = false
+Statics = true
+Terrain = true
+Trees = true
+
+[_Shaders.ShadowsExteriors.FormsOrtho]
+Activators = false
+Actors = false
+AlphaEnabled = false
+Apparatus = false
+Books = false
+Containers = false
+Doors = false
+Furniture = false
+Lod = false
+MinRadius = 1.0
+Misc = true
+Statics = true
+Terrain = true
+Trees = true
+
+[_Shaders.ShadowsExteriors.ScreenSpace]
+BlurRadius = 1.0
+Enabled = true
+RenderDistance = 180000
+Intensity = 2.0
+
+[_Shaders.ShadowsExteriors.ShadowMaps]
+Mode = 2
+Format = 0
+CascadeResolution = 2
+Prefilter = true
+MSAA = true
+Mipmaps = false
+Anisotropy = 0
+Distance = 6000
+CascadeLambda = 0.9
+LimitFrequency = true
+
+[_Shaders.ShadowsExteriors.Ortho]
+Resolution = 2
+Distance = 3000
+LimitFrequency = true
+
+[_Shaders.ShadowsExteriors.Status]
+Enabled = true
+
+[_Shaders.ShadowsInteriors.Main]
+UseCastShadowFlag = false
+Activators = true
+Actors = true
+AlphaEnabled = true
+Apparatus = true
+Books = true
+Containers = true
+Darkness = 0.65
+Doors = true
+Furniture = true
+LightPoints = 12
+LightRadiusMult = 1.5
+MinRadius = 10.0
+Misc = true
+Quality = 1
+ShadowCubeMapSize = 512
+Statics = true
+TorchesCastShadows = true
+DrawDistance = 4000
+PlayerShadowThirdPerson = true
+PlayerShadowFirstPerson = false
+
+[_Shaders.ShadowsInteriors.Status]
+Enabled = true
+
+[_Shaders.Sharpening.Main]
+Clamp = 0.1
+Offset = 2.0
+Strength = 0.75
+
+[_Shaders.Sharpening.Status]
+Enabled = false
+
+[_Shaders.Skin.Main]
+Attenuation = 0.84
+CoeffBlue = 0.12
+CoeffGreen = 0.22
+CoeffRed = 0.36
+MaterialThickness = 0.12
+RimScalar = 0.5
+SpecularPower = 0.78
+
+[_Shaders.Skin.Status]
+Enabled = false
+
+# ── Sky ──────────────────────────────────────────────────────────────────────
+# ENB: SunIntensity=2.5, StarsIntensity=1.5, CloudsIntensityDay=1.13
+
+[_Shaders.Sky.Main]
+AthmosphereThickness = 2.0
+SunInfluence = 1.0
+SunStrength = 2.5          # ENB SunIntensity=2.5
+GlareStrength = 1.0
+StarStrength = 1.5         # ENB StarsIntensity=1.5
+UseSunDiskColor = false
+SunsetR = 0.5
+SunsetG = 0.0
+SunsetB = 0.03
+StarTwinkle = 1.0
+
+[_Shaders.Sky.Clouds]
+UseNormals = false
+SphericalNormals = false
+Transparency = 0.4
+Brightness = 1.0           # ENB CloudsIntensityDay=1.13 → nudge up from default 0.9
+
+[_Shaders.Sky.Status]
+Enabled = true
+
+[_Shaders.Snow.Main]
+Flakes = 0.5
+Speed = 1.4
+
+[_Shaders.Snow.Status]
+Enabled = false
+
+[_Shaders.SnowAccumulation.Main]
+BlurNormDropThreshhold = 120
+BlurRadiusMultiplier = 2.0
+Decrease = 12.0
+Increase = 0.3
+SunPower = 1.0
+SnowColorR = 0.9
+SnowColorG = 0.9
+SnowColorB = 0.8
+
+[_Shaders.SnowAccumulation.Status]
+Enabled = false
+
+[_Shaders.Specular.Exterior]
+BlurMultiplier = 1.0
+DistanceFade = 30000
+FresnelStrength = 1.0
+Glossiness = 16
+SkyTintSaturation = 1.0
+SkyTintStrength = 0.5
+SpecLumaTreshold = 0.25
+SpecularStrength = 0.2
+
+[_Shaders.Specular.Rain]
+BlurMultiplier = 3.0
+DistanceFade = 30000
+FresnelStrength = 1.0
+Glossiness = 7
+SkyTintSaturation = 1.0
+SkyTintStrength = 0.1
+SpecLumaTreshold = 0.25
+SpecularStrength = 1.0
+
+[_Shaders.Specular.Status]
+Enabled = false
+
+[_Shaders.Terrain.Main]
+UsePBR = true
+Roughness = 1.0
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+TerrainSaturation = 1.0
+
+[_Shaders.Terrain.Rain]
+Roughness = 0.7
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+TerrainSaturation = 1.0
+
+[_Shaders.Terrain.Night]
+Roughness = 1.0
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+TerrainSaturation = 1.0
+
+[_Shaders.Terrain.NightRain]
+Roughness = 0.6
+Metallicness = 0.0
+AmbientScale = 1.0
+LightingScale = 1.0
+TerrainSaturation = 1.0
+
+[_Shaders.Terrain.Parallax]
+Enabled = true
+Shadows = true
+HeightBlend = true
+HighQuality = true
+MaxDistance = 2048
+Height = 0.1
+ShadowsIntensity = 2.0
+
+[_Shaders.Terrain.LOD]
+LODNoiseScale = 0.7
+LODNoiseTile = 2.7
+
+[_Shaders.Terrain.Status]
+Enabled = false
+
+[_Shaders.Underwater.Status]
+Enabled = true
+
+[_Shaders.VolumetricFog.Main]
+Amount = 0.4
+SunPower = 0.2
+FogSaturation = 1.7
+MinimumBaseFog = 0.2
+WeatherImpact = 0.5
+DistantFogRange = 0.9
+DistantFogBlend = 0.3
+DistantFogHeight = 0.3
+HeightFogDensity = 0.6
+HeightFogFalloff = 50.0
+HeightFogDist = 0.4
+HeightFogSkyColor = 4.0
+HeightFogHeight = 3.0
+HeightFogBlend = 1.0
+HeightFogRolloff = 1.3
+Extinction = 3.0
+Inscattering = 1.6
+FogNight = 2.0
+SimpleFogSkyColor = 20.0
+SimpleFogHeight = 0.2
+SimpleFogBlend = 0.5
+
+[_Shaders.VolumetricFog.Interiors]
+Amount = 0.25
+FogSaturation = 0.5
+MinimumBaseFog = 0.3
+WeatherImpact = 0.0
+HeightFogDensity = 0.6
+HeightFogFalloff = 50.0
+HeightFogDist = 0.4
+HeightFogHeight = 0.0
+HeightFogBlend = 1.0
+HeightFogRolloff = 1.3
+Extinction = 0.4
+Inscattering = 0.35
+SimpleFogHeight = 0.5
+SimpleFogBlend = 0.2
+
+[_Shaders.VolumetricFog.Status]
+Enabled = true
+
+[_Shaders.Water.Default]
+causticsStrength = 3.0
+causticsStrengthS = 0.2
+choppiness = 0.7
+depthDarkness = 1.0
+inExtCoeff_B = 1.0
+inExtCoeff_G = 1.0
+inExtCoeff_R = 1.0
+inScattCoeff = 1.0
+reflectivity = 1.0
+shoreFactor = 6.0
+shoreMovement = 0.3
+turbidity = 3.0
+waveSpeed = 0.7
+waveWidth = 0.8
+refractionPower = 0.2
+
+[_Shaders.Water.Interiors]
+choppiness = 0.5
+depthDarkness = 10.0
+reflectivity = 0.0
+shoreFactor = 6.0
+shoreMovement = 0.6
+turbidity = 1.0
+waveSpeed = 0.7
+waveWidth = 0.8
+refractionPower = 0.2
+
+[_Shaders.Water.Placed]
+choppiness = 0.5
+depthDarkness = 10.0
+reflectivity = 0.0
+shoreFactor = 6.0
+shoreMovement = 0.6
+turbidity = 1.0
+waveSpeed = 0.7
+waveWidth = 0.8
+refractionPower = 0.2
+
+[_Shaders.Water.Status]
+Enabled = true
+
+[_Shaders.WaterLens.Main]
+Amount = 0.1
+Time = 180.0
+TimeMultA = 0.1
+TimeMultB = 0.2
+Viscosity = 0.05
+
+[_Shaders.WaterLens.Status]
+Enabled = true
+
+[_Shaders.WetWorld.Main]
+Amount = 0.0
+Decrease = 0.0
+Increase = 0.0
+PuddleCoeff_B = 0.48
+PuddleCoeff_G = 0.62
+PuddleCoeff_R = 0.72
+PuddleSpecularMultiplier = 0.2
+
+[_Shaders.WetWorld.Status]
 Enabled = true
