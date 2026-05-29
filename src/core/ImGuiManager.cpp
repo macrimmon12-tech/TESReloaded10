@@ -116,7 +116,7 @@ static void CfabSaveBaselines() {
 	s_cfabBase.curveR       = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "ColorCurveR");
 	s_cfabBase.curveG       = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "ColorCurveG");
 	s_cfabBase.curveB       = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "ColorCurveB");
-	s_cfabBase.dofBlur      = TheSettingManager->GetSettingF("Shaders.DepthOfField.FirstPersonView", "BaseBlurRadius");
+	s_cfabBase.dofBlur      = TheSettingManager->GetSettingF("Shaders.DepthOfField.FirstPersonView", "BlurRadius");
 	s_cfabBase.sharpening   = TheSettingManager->GetSettingF("Shaders.Sharpening.Main",              "Strength");
 	s_cfabBase.bloom        = TheSettingManager->GetSettingF("Shaders.Bloom.Main",                   "Strength");
 	s_cfabBase.chroma       = TheSettingManager->GetSettingF("Shaders.Cinema.Main",                  "ChromaticAberration");
@@ -138,7 +138,7 @@ static void CfabRestoreBaselines() {
 	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveR",         s_cfabBase.curveR);
 	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveG",         s_cfabBase.curveG);
 	TheSettingManager->SetSetting("Shaders.Coloring.Default",             "ColorCurveB",         s_cfabBase.curveB);
-	TheSettingManager->SetSetting("Shaders.DepthOfField.FirstPersonView", "BaseBlurRadius",      s_cfabBase.dofBlur);
+	TheSettingManager->SetSetting("Shaders.DepthOfField.FirstPersonView", "BlurRadius",          s_cfabBase.dofBlur);
 	TheSettingManager->SetSetting("Shaders.Sharpening.Main",              "Strength",            s_cfabBase.sharpening);
 	TheSettingManager->SetSetting("Shaders.Bloom.Main",                   "Strength",            s_cfabBase.bloom);
 	TheSettingManager->SetSetting("Shaders.Cinema.Main",                  "ChromaticAberration", s_cfabBase.chroma);
@@ -173,7 +173,7 @@ static void CfabApply(float x, float y, float z) {
 	TheSettingManager->SetSetting("Shaders.Tonemapping.Main",             "Saturation",          b.tmSaturation  + x * sc.tmSat);
 	TheSettingManager->SetSetting("Shaders.Tonemapping.Main",             "TonemapContrast",     b.tmContrast    + x * sc.tmContrast);
 	// Y — Focus/Dream
-	TheSettingManager->SetSetting("Shaders.DepthOfField.FirstPersonView", "BaseBlurRadius",      ImMax(0.0f, b.dofBlur     + y * sc.dofBlur));
+	TheSettingManager->SetSetting("Shaders.DepthOfField.FirstPersonView", "BlurRadius",          ImMax(0.0f, b.dofBlur     + y * sc.dofBlur));
 	TheSettingManager->SetSetting("Shaders.Sharpening.Main",              "Strength",            ImMax(0.0f, b.sharpening  - y * sc.sharpening));
 	TheSettingManager->SetSetting("Shaders.Bloom.Main",                   "Strength",            ImMax(0.0f, b.bloom       + y * sc.bloom));
 	TheSettingManager->SetSetting("Shaders.GodRays.Main",                 "DayMultiplier",       ImMax(0.0f, b.godRaysMult + y * sc.godRays));

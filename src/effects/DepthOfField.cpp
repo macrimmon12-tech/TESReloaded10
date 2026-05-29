@@ -23,17 +23,18 @@ void DepthOfFieldEffect::UpdateConstants() {
 	Constants.Blur.x = category->DistantBlur;
 	Constants.Blur.y = category->DistantBlurStartRange;
 	Constants.Blur.z = category->DistantBlurEndRange;
-	Constants.Blur.w = category->BlurRadius;
 
-	Constants.Data.x = category->FocusRange * dofActive;
+	// Clamp to sane minimums so missing settings keys don't produce zero CoC or a silent no-op
+	Constants.Blur.w = max(category->BlurRadius,  0.1f);
+	Constants.Data.x = max(category->FocusRange,  0.1f) * dofActive;
 	Constants.Data.y = 0.0f;
 	Constants.Data.z = 0.0f;
 	Constants.Data.w = category->NearBlurCutOff;
 
-	Constants.MatsoData.x = category->BokehCurve;
-	Constants.MatsoData.y = (float)category->SampleCount;
+	Constants.MatsoData.x = max(category->BokehCurve,        0.5f);
+	Constants.MatsoData.y = max((float)category->SampleCount, 1.0f);
 	Constants.MatsoData.z = category->ChromaticAberration;
-	Constants.MatsoData.w = category->AnamorphicRatio;
+	Constants.MatsoData.w = max(category->AnamorphicRatio,    0.01f);
 }
 
 void DepthOfFieldEffect::UpdateSettings() {

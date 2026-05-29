@@ -106,42 +106,28 @@ float4 DoF(VSOUT IN) : COLOR0
 // ---------------------------------------------------------------------------
 // Passes 1-4 — MATSO directional blur
 //
-// firstPass = true:  source color from TESR_SourceBuffer; CoC from TESR_RenderedBuffer.a
-// firstPass = false: source color from TESR_RenderedBuffer.rgb; CoC from .a (carried through)
+// MatsoDOF_Init (pass 1): sources color from TESR_SourceBuffer (original scene);
+//   CoC is read from TESR_RenderedBuffer.a (output of the CoC pass).
+// MatsoDOF_Cont (passes 2-4): sources color from TESR_RenderedBuffer.rgb;
+//   CoC preserved in .a from the previous blur pass.
 //
 // Each tap is weighted by pow(luminance, BokehCurve).  Higher BokehCurve means
 // brighter pixels dominate the accumulation, producing visible bokeh disc shapes
 // on specular highlights.  At BokehCurve = 1.0 the result is a plain average.
 //
-// PERFORMANCE: total texture fetches per pixel = 2 * SampleCount + 1 per pass.
+// PERFORMANCE: total texture fetches per pixel = (2 * SampleCount + 1) * 4 passes.
 // Doubling SampleCount doubles cost; 4–6 is a good balance for modern GPUs.
 // ---------------------------------------------------------------------------
-float4 MatsoDOF(VSOUT IN, uniform int axisIndex, uniform bool firstPass) : COLOR0
+
+// Shared inner loop — separated to avoid code duplication across two functions.
+float4 MatsoDOFBlur(float2 uv, float4 center, float coc, sampler2D colorSampler, uniform int axisIndex)
 {
-    float2 uv  = IN.UVCoord;
-    float4 crt = tex2D(TESR_RenderedBuffer, uv);   // current RenderedBuffer pixel
-
-    float  coc;
-    float4 center;
-
-    if (firstPass) {
-        // Pass 1 reads CoC from the DoF pass output (TESR_RenderedBuffer)
-        // and colors from the unmodified scene (TESR_SourceBuffer).
-        coc    = crt.a;                               // combinedCoc from pass 0
-        center = tex2D(TESR_SourceBuffer, uv);
-    } else {
-        // Passes 2-4: color and CoC are both in TESR_RenderedBuffer from prior pass.
-        coc    = crt.a;
-        center = float4(crt.rgb, 1.0);
-    }
-
     if (coc < 0.001)
-        return float4(center.rgb, coc);  // fully in-focus — skip expensive loop
+        return float4(center.rgb, coc);
 
     float2 axis = axes[axisIndex];
-    axis.y *= AnamorphicRatio;           // squash/stretch vertically for anamorphic bokeh
+    axis.y *= AnamorphicRatio;
 
-    // Luminance-weighted accumulation
     float  cw     = pow(max(luma(center.rgb), 0.001), BokehCurve);
     float4 accum  = center * cw;
     float  weight = cw;
@@ -150,14 +136,8 @@ float4 MatsoDOF(VSOUT IN, uniform int axisIndex, uniform bool firstPass) : COLOR
         float  t   = float(i) / SampleCount;
         float2 off = axis * TESR_ReciprocalResolution.xy * t * BlurRadius * coc;
 
-        float4 tap1, tap2;
-        if (firstPass) {
-            tap1 = tex2D(TESR_SourceBuffer, uv + off);
-            tap2 = tex2D(TESR_SourceBuffer, uv - off);
-        } else {
-            tap1 = tex2D(TESR_RenderedBuffer, uv + off);
-            tap2 = tex2D(TESR_RenderedBuffer, uv - off);
-        }
+        float4 tap1 = tex2D(colorSampler, uv + off);
+        float4 tap2 = tex2D(colorSampler, uv - off);
 
         float w1 = pow(max(luma(tap1.rgb), 0.001), BokehCurve);
         float w2 = pow(max(luma(tap2.rgb), 0.001), BokehCurve);
@@ -166,8 +146,25 @@ float4 MatsoDOF(VSOUT IN, uniform int axisIndex, uniform bool firstPass) : COLOR
         weight += w1 + w2;
     }
 
-    float3 blurred = (accum / max(weight, 0.0001)).rgb;
-    return float4(blurred, coc);    // carry CoC in alpha for next pass / combine
+    return float4((accum / max(weight, 0.0001)).rgb, coc);
+}
+
+// Pass 1: initialise blur from the original scene; CoC comes from the DoF pass stored in RenderedBuffer.a
+float4 MatsoDOF_Init(VSOUT IN, uniform int axisIndex) : COLOR0
+{
+    float2 uv  = IN.UVCoord;
+    float  coc = tex2D(TESR_RenderedBuffer, uv).a;
+    float4 center = tex2D(TESR_SourceBuffer, uv);
+    return MatsoDOFBlur(uv, center, coc, TESR_SourceBuffer, axisIndex);
+}
+
+// Passes 2-4: continue accumulation from the previous blur pass
+float4 MatsoDOF_Cont(VSOUT IN, uniform int axisIndex) : COLOR0
+{
+    float2 uv  = IN.UVCoord;
+    float4 prev = tex2D(TESR_RenderedBuffer, uv);
+    float4 center = float4(prev.rgb, 1.0);
+    return MatsoDOFBlur(uv, center, prev.a, TESR_RenderedBuffer, axisIndex);
 }
 
 // ---------------------------------------------------------------------------
@@ -218,17 +215,17 @@ technique
         PixelShader  = compile ps_3_0 DoF();
     }
 
-    // Pass 1: horizontal blur — init from source scene + CoC
+    // Pass 1: horizontal blur — init from original scene; CoC from DoF pass
     pass
     {
         VertexShader = compile vs_3_0 FrameVS();
-        PixelShader  = compile ps_3_0 MatsoDOF(0, true);
+        PixelShader  = compile ps_3_0 MatsoDOF_Init(0);
     }
 
-    // Passes 2-4: continue accumulation along remaining three axes
-    pass { VertexShader = compile vs_3_0 FrameVS(); PixelShader = compile ps_3_0 MatsoDOF(1, false); }
-    pass { VertexShader = compile vs_3_0 FrameVS(); PixelShader = compile ps_3_0 MatsoDOF(2, false); }
-    pass { VertexShader = compile vs_3_0 FrameVS(); PixelShader = compile ps_3_0 MatsoDOF(3, false); }
+    // Passes 2-4: continue accumulation from previous blur pass
+    pass { VertexShader = compile vs_3_0 FrameVS(); PixelShader = compile ps_3_0 MatsoDOF_Cont(1); }
+    pass { VertexShader = compile vs_3_0 FrameVS(); PixelShader = compile ps_3_0 MatsoDOF_Cont(2); }
+    pass { VertexShader = compile vs_3_0 FrameVS(); PixelShader = compile ps_3_0 MatsoDOF_Cont(3); }
 
     // Pass 5: composite blurred result over original with optional chromatic aberration
     pass
