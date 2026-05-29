@@ -1,0 +1,334 @@
+# Boomstick Classic ENB → NVR Translation
+# Source: enbseries.ini (Boomstick Classic ENB for FNV, edited by WebbProductions2020)
+#         SweetFX_settings.txt (SweetFX 1.5.1 preset)
+# Notes:
+#   - LUT already converted separately; set filenames below.
+#   - DPX Cineon, per-time-of-day environment lighting, and detailed shadow settings
+#     have no direct NVR equivalent and are intentionally omitted.
+#   - All other active effects are translated as closely as parameter ranges allow.
+#   - Anything not listed here will fall back to NVR defaults.
+
+# ─── LUT ─────────────────────────────────────────────────────────────────────
+# ENB: UsePaletteTexture=true
+# Set your converted LUT filename(s) here.
+
+[_Shaders.LUT.Main]
+DayLUT      = 'boomstick_day.png'
+NightLUT    = 'boomstick_night.png'
+InteriorLUT = 'boomstick_interior.png'
+Strength    = 1.0
+
+[_Shaders.LUT.Status]
+Enabled = true
+
+
+# ─── SMAA ────────────────────────────────────────────────────────────────────
+# SweetFX: USE_SMAA_ANTIALIASING=1, COLOR_EDGE_DETECTION=1, THRESHOLD=0.08
+# NVR's SMAA doesn't expose the sub-parameters; Color detection is the important one.
+
+[_Shaders.SMAA.Main]
+EdgeDetection = 1   # Color edge detection (SweetFX: COLOR_EDGE_DETECTION=1)
+
+[_Shaders.SMAA.Status]
+Enabled = true
+
+
+# ─── BLOOM ───────────────────────────────────────────────────────────────────
+# ENB: AmountDay=0.15, AmountNight=0.5, AmountInterior=0.25
+#      ContrastDay=0.95, ContrastNight=0.75, ContrastInterior=1.57, Quality=0
+
+[_Shaders.Bloom.Main]
+Strength     = 0.15   # AmountDay=0.15
+Blending     = 0.03   # Low blending, subtle day bloom
+Passes       = 4      # Quality=0 → fewer passes
+PassBlending = 0.0
+
+[_Shaders.Bloom.Night]
+Strength     = 0.5    # AmountNight=0.5, noticeably stronger
+Blending     = 0.05
+Passes       = 6
+PassBlending = 0.0
+
+[_Shaders.Bloom.Interiors]
+Strength     = 0.25   # AmountInterior=0.25
+Blending     = 0.05
+Passes       = 5
+PassBlending = 0.0
+
+[_Shaders.Bloom.Status]
+Enabled = true
+
+
+# ─── AMBIENT OCCLUSION ───────────────────────────────────────────────────────
+# ENB: AOAmount=0.65, AOIntensity=4.85, SamplingRange=0.18, SamplingQuality=-1
+#      AOAmountInterior=0.45, AOIntensityInterior=5.55, EnableDenoiser=true
+
+[_Shaders.AmbientOcclusion.Exteriors]
+StrengthMultiplier    = 0.65   # AOAmount=0.65
+AngleBias             = 1.6    # AOIntensity≈4.85 → maps loosely to angle bias (NVR default is good here)
+Range                 = 18.0   # SamplingRange=0.18 (narrow) → tighter than default 30
+BlurDropThreshold     = 8.0
+BlurRadiusMultiplier  = 2.0    # FilterQuality=0 / EnableDenoiser=true
+ClampStrength         = 0.25
+LumThreshold          = 0.7
+Samples               = 5
+Enabled               = true
+
+[_Shaders.AmbientOcclusion.Interiors]
+StrengthMultiplier    = 0.45   # AOAmountInterior=0.45
+AngleBias             = 0.0
+Range                 = 18.0
+BlurDropThreshold     = 8.0
+BlurRadiusMultiplier  = 2.0
+ClampStrength         = 0.2
+LumThreshold          = 0.5
+Samples               = 5
+Enabled               = true
+
+[_Shaders.AmbientOcclusion.Status]
+Enabled = true
+
+
+# ─── EXPOSURE (Eye Adaptation) ───────────────────────────────────────────────
+# ENB: AdaptationTime=0.5 (fast), AdaptationSensitivity=0.25 (moderate)
+#      AdaptationMin=0.2, AdaptationMax=100.0 (effectively uncapped upper end)
+
+[_Shaders.Exposure.Main]
+DarkAdaptSpeed  = 40.0   # AdaptationTime=0.5 → fairly responsive
+LightAdaptSpeed = 40.0
+MinBrightness   = 0.2    # AdaptationMin=0.2
+MaxBrightness   = 0.5    # AdaptationMax uncapped → permissive upper limit
+
+[_Shaders.Exposure.Night]
+DarkAdaptSpeed  = 40.0
+LightAdaptSpeed = 40.0
+MinBrightness   = 0.25   # Slightly more aggressive floor at night (DetectorLevelNight=0.25)
+MaxBrightness   = 0.0    # Don't darken nights
+
+[_Shaders.Exposure.Interiors]
+DarkAdaptSpeed  = 50.0
+LightAdaptSpeed = 50.0
+MinBrightness   = 0.8    # ENB interiors were well-lit (AmbientLightingIntensityInterior=1.0)
+MaxBrightness   = 0.35
+
+[_Shaders.Exposure.Status]
+Enabled = true
+
+
+# ─── TONEMAPPING ─────────────────────────────────────────────────────────────
+# ENB: Brightness=1.2, GammaCurve=1.05, LightingIntensityDay=1.15
+# SweetFX: Vibrance=0.10 (slight saturation boost), Tonemap params all neutral
+#          Curves_contrast=0.15 on Luma
+
+[_Shaders.Tonemapping.Main]
+TonemappingMode      = 2     # NVRLottes — good match for the ENB's filmic color science
+Exposure             = 1.6   # ENB Brightness=1.2 × LightingIntensityDay=1.15 → slightly elevated
+Gamma                = 2.2
+Linearization        = 2.2
+SkyMultiplier        = 1.0
+WeatherModifier      = 1.0
+WeatherContrast      = 0.0
+Saturation           = 1.05  # SweetFX Vibrance=0.10 → subtle saturation bump
+ToneMappingColor     = 1.0
+TonemapContrast      = 1.05  # Curves_contrast=0.15 → very slight contrast
+TonemapBrightness    = 1.0
+TonemapMidpoint      = 1.0
+TonemapShoulder      = 1.0
+TonemapWhitePoint    = 1.0
+HighlightSaturation  = 1.0
+PointLightMultiplier = 1.0
+
+[_Shaders.Tonemapping.Night]
+Exposure             = 1.25  # ENB LightingIntensityNight=0.6 → darker nights
+Gamma                = 2.2
+Linearization        = 2.2
+SkyMultiplier        = 1.0
+WeatherModifier      = 1.0
+WeatherContrast      = 0.0
+Saturation           = 0.95  # ENB LightingDesaturationNight=0.2 → mild desaturation
+ToneMappingColor     = 1.0
+TonemapContrast      = 1.0
+TonemapBrightness    = 1.0
+TonemapMidpoint      = 1.0
+TonemapShoulder      = 1.0
+TonemapWhitePoint    = 1.0
+HighlightSaturation  = 1.0
+PointLightMultiplier = 1.0
+
+[_Shaders.Tonemapping.Interiors]
+TonemappingMode      = 1     # VTLottes for interiors
+Exposure             = 1.4   # ENB LightingIntensityInterior=0.8, AmbientIntensityInterior=1.0
+Gamma                = 2.2
+Linearization        = 2.2
+SkyMultiplier        = 1.0
+WeatherModifier      = 1.0
+WeatherContrast      = 0.0
+Saturation           = 1.0
+ToneMappingColor     = 1.0
+TonemapContrast      = 1.0
+TonemapBrightness    = 1.0
+TonemapMidpoint      = 1.0
+TonemapShoulder      = 1.0
+TonemapWhitePoint    = 1.0
+HighlightSaturation  = 1.0
+PointLightMultiplier = 1.0
+
+[_Shaders.Tonemapping.Status]
+Enabled = true
+
+
+# ─── GOD RAYS (Sun Rays) ─────────────────────────────────────────────────────
+# ENB: [RAYS] SunRaysMultiplier=0.212, EnableSunRays=true (first entry)
+
+[_Shaders.GodRays.Main]
+DayMultiplier    = 0.21   # SunRaysMultiplier=0.212
+NightMultiplier  = 0.1    # scaled down proportionally
+Luminance        = 0.8
+RayDensity       = 1.0
+RayIntensity     = 1.0
+RayLength        = 1.0
+RayVisibility    = 50.0
+SunGlareEnabled  = true
+TimeEnabled      = false
+LightShaftPasses = 8
+
+[_Shaders.GodRays.Coloring]
+RayR     = 1.0
+RayG     = 1.0
+RayB     = 1.0
+Saturate = 0.0
+
+[_Shaders.GodRays.Status]
+Enabled = true
+
+
+# ─── SKY ─────────────────────────────────────────────────────────────────────
+# ENB: SunIntensity=2.5, StarsIntensity=1.5, SunCoronaIntensity=1.5
+#      CloudsIntensityDay=1.13, CloudsIntensityNight=1.1, MoonIntensity=1.25
+
+[_Shaders.Sky.Main]
+AthmosphereThickness = 2.0
+SunInfluence         = 1.0
+SunStrength          = 2.5   # ENB SunIntensity=2.5
+GlareStrength        = 1.0   # ENB SunCoronaIntensity=1.5 → inverse scale, default fits
+StarStrength         = 1.5   # ENB StarsIntensity=1.5
+UseSunDiskColor      = false
+SunsetR              = 0.5
+SunsetG              = 0.0
+SunsetB              = 0.03
+StarTwinkle          = 1.0
+
+[_Shaders.Sky.Clouds]
+UseNormals       = false
+SphericalNormals = false
+Transparency     = 0.4
+Brightness       = 1.0   # ENB CloudsIntensityDay=1.13 → slight bump from default 0.9
+
+[_Shaders.Sky.Status]
+Enabled = true
+
+
+# ─── LENS DIRT ───────────────────────────────────────────────────────────────
+# ENB: LenzDirtIntensityDay=0.08, LenzDirtIntensityNight=0.25, LenzDirtIntensityInterior=0.2
+#      LenzDirtPowerDay=0.5, LenzDirtPowerNight=2.57, LenzDirtPowerInterior=2.76
+# (LenzReflection params from [LENS] section, not [CAMERAFX])
+
+[_Shaders.Lens.Main]
+Strength      = 0.08   # LenzDirtIntensityDay=0.08
+BloomExponent = 0.5    # LenzDirtPowerDay=0.5
+Smudginess    = 0.0
+
+[_Shaders.Lens.Night]
+Strength      = 0.25   # LenzDirtIntensityNight=0.25
+BloomExponent = 0.7    # LenzDirtPowerNight=2.57 → clamped to NVR range
+Smudginess    = 0.4
+
+[_Shaders.Lens.Interiors]
+Strength      = 0.2    # LenzDirtIntensityInterior=0.2
+BloomExponent = 0.6    # LenzDirtPowerInterior=2.76 → clamped
+Smudginess    = 0.2
+
+[_Shaders.Lens.Status]
+Enabled = true
+
+
+# ─── DEPTH OF FIELD ──────────────────────────────────────────────────────────
+# ENB: EnableDepthOfField=true, FadeTime=0.5
+# No ENB DOF intensity parameters were set → use conservative NVR defaults, just enabled.
+
+[_Shaders.DepthOfField.FirstPersonView]
+Enabled              = true
+BaseBlurRadius       = 1.0
+BlurFallOff          = 1.5
+DiameterRange        = 0.8
+DistantBlur          = true
+DistantBlurStartRange = 30000
+DistantBlurEndRange  = 150000
+Mode                 = 0
+NearBlurCutOff       = 100
+Radius               = 1.5
+
+[_Shaders.DepthOfField.ThirdPersonView]
+Enabled              = true
+BaseBlurRadius       = 2.0
+BlurFallOff          = 1.5
+DiameterRange        = 0.8
+DistantBlur          = true
+DistantBlurStartRange = 30000
+DistantBlurEndRange  = 150000
+Mode                 = 0
+NearBlurCutOff       = 200
+Radius               = 1.5
+
+[_Shaders.DepthOfField.VanityView]
+Enabled              = true
+BaseBlurRadius       = 2.0
+BlurFallOff          = 1.5
+DiameterRange        = 0.8
+DistantBlur          = true
+DistantBlurStartRange = 30000
+DistantBlurEndRange  = 150000
+Mode                 = 0
+NearBlurCutOff       = 0
+Radius               = 1.5
+
+[_Shaders.DepthOfField.Status]
+Enabled = true
+
+
+# ─── DITHER ──────────────────────────────────────────────────────────────────
+# SweetFX: USE_DITHER=1, dither_method=1 (ordered)
+
+[_Shaders.DitherBuster.Main]
+Strength   = 1.0
+MaskPower  = 0.5
+
+[_Shaders.DitherBuster.Status]
+Enabled = true
+
+
+# ─── COLORING ────────────────────────────────────────────────────────────────
+# SweetFX: Curves_contrast=0.15 (luma S-curve), Vibrance=0.10
+# These are soft adjustments; baked mostly into Tonemapping above.
+# Using Coloring as a light assist for the SweetFX curves + vibrance residual.
+
+[_Shaders.Coloring.Default]
+BaseGamma    = 1.6
+Bleach       = 0.05    # SweetFX Bleach=0.0 → minimal, slight lift kept from NVR default
+BleachLuma   = 0.1
+ColorCurve   = 1.15    # Curves_contrast=0.15 → slight luma S-curve
+ColorCurveB  = 1.0
+ColorCurveG  = 1.0
+ColorCurveR  = 1.0
+Contrast     = 0.82    # Mild contrast to complement the curves pass
+EffectGamma  = 0.9
+EffectGammaB = 1.0
+EffectGammaG = 1.0
+EffectGammaR = 1.0
+Fade         = 0.0
+Linearization = 1.1
+Saturation   = 0.05    # Vibrance=0.10 → very mild saturation nudge
+Strength     = 0.5
+
+[_Shaders.Coloring.Status]
+Enabled = true
