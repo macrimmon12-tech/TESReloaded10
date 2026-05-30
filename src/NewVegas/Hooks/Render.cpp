@@ -225,25 +225,12 @@ static void RenderMainMenuMovie() {
 
 }
 
-static void CallImGuiNewFrame() { ImGuiManager::NewFrame(); }
-static void CallImGuiRender()   { ImGuiManager::Render(); }
-
-__declspec(naked) void RenderInterfaceHook() {
-
-	__asm {
-		pushad
-		call	RenderMainMenuMovie
-		popad
-		pushad
-		call	CallImGuiNewFrame
-		popad
-		call	Jumpers::RenderInterface::Method
-		pushad
-		call	CallImGuiRender
-		popad
-		jmp		Jumpers::RenderInterface::Return
-	}
-
+CallDetour kRenderInterfaceDetour;
+void __fastcall RenderInterfaceHook(void* apThis, void*, void* apCuller, bool abPipboyVisible) {
+	RenderMainMenuMovie();
+	ImGuiManager::NewFrame();
+	ThisCall(kRenderInterfaceDetour.GetOverwrittenAddr(), apThis, apCuller, abPipboyVisible);
+	ImGuiManager::Render();
 }
 
 static void SetTileShaderConstants() {
