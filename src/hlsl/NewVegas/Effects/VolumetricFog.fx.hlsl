@@ -126,8 +126,7 @@ float3 mixFog(float3 color, float3 fogColor, float3 extinctionColor, float3 insc
 }
 
 float3 mixHeightFog(float3 color, float3 fogColor, float3 extinctionColor, float3 inscatteringColor, float distance, float density, float falloff, float3 worldPos, float offset){
-	float fog = density * 0.00000001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset);
-	// float fog = density * 0.00001 * getHeightFog(distance, falloff * 0.000000005f, worldPos, offset);
+	float fog = density * 0.00001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset);
 	float3 extColor = fog * extinctionColor;
 	float3 insColor = fog * inscatteringColor;
 	return color * saturate(1 - extColor) + fogColor * saturate(insColor);
