@@ -36,7 +36,9 @@ static const float FogPower = TESR_FogData.w;
 
 // scale settings for easier tuning
 static const float BaseFogStrength = max(0, TESR_VolumetricFogData.x);
+static const float HeightFogSaturation = max(0, TESR_VolumetricFogData.y);
 static const float FogAmount = max(0, TESR_VolumetricFogData.z);
+static const float HeightFogInscattering = max(0.0, TESR_VolumetricFogData.w) * 0.1;
 
 static const float FogSaturation = max(0, TESR_VolumetricFogLow.x);
 static const float WeatherImpact = max(0, TESR_VolumetricFogLow.y);
@@ -230,8 +232,8 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 
 	finalColor = lerp (finalColor, skyColor, distantFog * saturate(DistantFogBlend) * distantHeightFade * isExterior);
 
-	float4 heightFogColor = fogColor(skyColor, pureFogColor, strength, HeightFogSkyColor, sun, FogSaturation);
-	float3 heightFog = mixHeightFog(finalColor.rgb, heightFogColor.rgb, extinction, inScattering, fogDepth, strength * HeightFogDensity, 1.5 / (fogPower * HeightFogFalloff), worldPos, HeightFogHeight);
+	float4 heightFogColor = fogColor(skyColor, pureFogColor, strength, HeightFogSkyColor, sun, HeightFogSaturation);
+	float3 heightFog = mixHeightFog(finalColor.rgb, heightFogColor.rgb, extinction, HeightFogInscattering, fogDepth, strength * HeightFogDensity, 1.5 / (fogPower * HeightFogFalloff), worldPos, HeightFogHeight);
 	finalColor = lerp(finalColor, float4(heightFog, 1), saturate(HeightFogBlend));
 
     finalColor = max(lerp(color, finalColor, FogAmount), 0.0f);

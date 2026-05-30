@@ -12,9 +12,9 @@ void VolumetricFogEffect::UpdateSettings(){
 		strcat(SettingCategory, "Interiors");
 
 	Constants.Data.x = TheSettingManager->GetSettingF(SettingCategory, "MinimumBaseFog");
-	//Constants.Data.y = TheSettingManager->GetSettingF(SettingCategory, "ColorCoeff");
-	//Constants.Data.w = TheSettingManager->GetSettingF(SettingCategory, "MaxDistance");
+	Constants.Data.y = TheSettingManager->GetSettingF(SettingCategory, "HeightFogSaturation");
 	Constants.Data.z = TheSettingManager->GetSettingF(SettingCategory, "Amount");
+	Constants.Data.w = TheSettingManager->GetSettingF(SettingCategory, "HeightFogInscattering");
 
 	Constants.LowFog.x = TheSettingManager->GetSettingF(SettingCategory, "FogSaturation");
 	Constants.LowFog.y = TheSettingManager->GetSettingF(SettingCategory, "WeatherImpact");
