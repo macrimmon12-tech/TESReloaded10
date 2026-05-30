@@ -75,7 +75,7 @@ extern "C" {
 		
 		Info->InfoVersion = PluginInfo::kInfoVersion;
 		Info->Name = "NewVegasReloaded";
-		Info->Version = 440;
+		Info->Version = 441;
 		return true;
 
 	}
