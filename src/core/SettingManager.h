@@ -354,7 +354,7 @@ public:
 	void					SetSetting(const char* Section, const char* Key, float Value);
 	void					SetSetting(const char* Section, const char* Key, int Value);
 	void					SetSetting(const char* Section, const char* Key, bool Value);
-	void					SetSettingS(const char* Section, const char* Key, char* Value);
+	void					SetSettingS(const char* Section, const char* Key, const char* Value);
 	void					SetSettingF(const char* Section, const char* Key, float Value);
 	void					SetSetting(Configuration::ConfigNode* Node);
 	void					Increment(const char* Section, const char* Key);

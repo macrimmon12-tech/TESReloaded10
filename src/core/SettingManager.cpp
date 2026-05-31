@@ -800,7 +800,7 @@ void SettingManager::SetSetting(const char* Section, const char* Key, float Valu
 /*
 * Builds a node and sets the value
 */
-void SettingManager::SetSettingS(const char* Section, const char* Key, char* Value) {
+void SettingManager::SetSettingS(const char* Section, const char* Key, const char* Value) {
 
 	Configuration::ConfigNode Node;
 
