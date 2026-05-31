@@ -36,7 +36,9 @@ static const float FogPower = TESR_FogData.w;
 
 // scale settings for easier tuning
 static const float BaseFogStrength = max(0, TESR_VolumetricFogData.x);
+static const float HeightFogSaturation = max(0, TESR_VolumetricFogData.y);
 static const float FogAmount = max(0, TESR_VolumetricFogData.z);
+static const float HeightFogInscattering = max(0.0, TESR_VolumetricFogData.w) * 0.1;
 
 static const float FogSaturation = max(0, TESR_VolumetricFogLow.x);
 static const float WeatherImpact = max(0, TESR_VolumetricFogLow.y);
@@ -126,8 +128,7 @@ float3 mixFog(float3 color, float3 fogColor, float3 extinctionColor, float3 insc
 }
 
 float3 mixHeightFog(float3 color, float3 fogColor, float3 extinctionColor, float3 inscatteringColor, float distance, float density, float falloff, float3 worldPos, float offset){
-	float fog = density * 0.00000001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset);
-	// float fog = density * 0.00001 * getHeightFog(distance, falloff * 0.000000005f, worldPos, offset);
+	float fog = density * 0.00001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset);
 	float3 extColor = fog * extinctionColor;
 	float3 insColor = fog * inscatteringColor;
 	return color * saturate(1 - extColor) + fogColor * saturate(insColor);
@@ -231,8 +232,8 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 
 	finalColor = lerp (finalColor, skyColor, distantFog * saturate(DistantFogBlend) * distantHeightFade * isExterior);
 
-	float4 heightFogColor = fogColor(skyColor, pureFogColor, strength, HeightFogSkyColor, sun, FogSaturation);
-	float3 heightFog = mixHeightFog(finalColor.rgb, heightFogColor.rgb, extinction, inScattering, fogDepth, strength * HeightFogDensity, 1.5 / (fogPower * HeightFogFalloff), worldPos, HeightFogHeight);
+	float4 heightFogColor = fogColor(skyColor, pureFogColor, strength, HeightFogSkyColor, sun, HeightFogSaturation);
+	float3 heightFog = mixHeightFog(finalColor.rgb, heightFogColor.rgb, extinction, HeightFogInscattering, fogDepth, strength * HeightFogDensity, 1.5 / (fogPower * HeightFogFalloff), worldPos, HeightFogHeight);
 	finalColor = lerp(finalColor, float4(heightFog, 1), saturate(HeightFogBlend));
 
     finalColor = max(lerp(color, finalColor, FogAmount), 0.0f);
