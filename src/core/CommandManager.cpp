@@ -30,6 +30,14 @@ static CommandParam SetSettingParams[3] = {
 
 };
 
+static CommandParam SetSettingSParams[3] = {
+
+	{ "string",	CommandParam::ParamType::kParamType_String, 0 },
+	{ "string",	CommandParam::ParamType::kParamType_String, 0 },
+	{ "string",	CommandParam::ParamType::kParamType_String, 0 },
+
+};
+
 static CommandParam CameraTranslateParams[4] = {
 	
 	{ "objectRef",	CommandParam::ParamType::kParamType_ObjectRef, 0 },
@@ -116,6 +124,17 @@ static bool CommandExecuter_SetSetting(CommandArgs Args) {
 
 }
 
+static bool CommandExecuter_SetSettingS(CommandArgs Args) {
+
+	char Section[40];
+	char Key[40];
+	char Value[80];
+
+	if (Pointers::Functions::ExtractArgs(Args.paramInfo, Args.arg1, Args.opcodeOffset, Args.thisObj, Args.Obj, Args.scriptObj, Args.eventList, &Section, &Key, &Value)) TheCommandManager->Commands.SetSettingS(Args.result, Section, Key, Value);
+	return true;
+
+}
+
 static bool CommandExecuter_CameraTranslate(CommandArgs Args) {
 
 	TESObjectREFR* Ref;
@@ -187,6 +206,7 @@ static CommandInfo CommandInfo_SetCustomConstant			= { CommandPrefix"SetCustomCo
 static CommandInfo CommandInfo_GetWeatherName				= { CommandPrefix"GetWeatherName", "", 0, "Returns the plugin version (console command only)", 0, 0, NULL, CommandExecuter_GetWeatherName, NULL, NULL, 0 };
 static CommandInfo CommandInfo_GetSetting					= { CommandPrefix"GetSetting", "", 0, "Gets a configuration setting", 0, 2, GetSettingParams, CommandExecuter_GetSetting, NULL, NULL, 0 };
 static CommandInfo CommandInfo_SetSetting					= { CommandPrefix"SetSetting", "", 0, "Sets a configuration setting", 0, 3, SetSettingParams, CommandExecuter_SetSetting, NULL, NULL, 0 };
+static CommandInfo CommandInfo_SetSettingS					= { CommandPrefix"SetSettingS", "", 0, "Sets a string configuration setting and applies it immediately", 0, 3, SetSettingSParams, CommandExecuter_SetSettingS, NULL, NULL, 0 };
 static CommandInfo CommandInfo_CameraTranslate				= { CommandPrefix"CameraTranslate", "", 0, "Translates the camera position in relation of the ref", 0, 4, CameraTranslateParams, CommandExecuter_CameraTranslate, NULL, NULL, 0 };
 static CommandInfo CommandInfo_CameraRotate					= { CommandPrefix"CameraRotate", "", 0, "Rotates the camera in relation of the ref (yaw, pitch, roll)", 0, 4, CameraTranslateParams, CommandExecuter_CameraRotate, NULL, NULL, 0 };
 static CommandInfo CommandInfo_CameraTranslateToPosition	= { CommandPrefix"CameraTranslateToPosition", "", 0, "Translates the camera position in the world", 0, 3, CameraTranslateToPositionParams, CommandExecuter_CameraTranslateToPosition, NULL, NULL, 0 };
@@ -220,9 +240,9 @@ void CommandManager::Initialize(const PluginInterface* Interface) {
 	TheCommandManager = new CommandManager();
 
 	void* CommandExecuters[] = { CommandExecuter_IsThirdPerson };
-	CommandInfo* CommandInfos[] = { &CommandInfo_GetVersion, &CommandInfo_GetLocationName, &CommandInfo_SetExtraEffectEnabled, &CommandInfo_SetCustomConstant, &CommandInfo_GetWeatherName, &CommandInfo_GetSetting, &CommandInfo_SetSetting, &CommandInfo_CameraTranslate, &CommandInfo_CameraRotate, &CommandInfo_CameraTranslateToPosition, &CommandInfo_CameraRotateToPosition, &CommandInfo_CameraLookAt, &CommandInfo_CameraLookAtPosition, &CommandInfo_CameraReset };
+	CommandInfo* CommandInfos[] = { &CommandInfo_GetVersion, &CommandInfo_GetLocationName, &CommandInfo_SetExtraEffectEnabled, &CommandInfo_SetCustomConstant, &CommandInfo_GetWeatherName, &CommandInfo_GetSetting, &CommandInfo_SetSetting, &CommandInfo_SetSettingS, &CommandInfo_CameraTranslate, &CommandInfo_CameraRotate, &CommandInfo_CameraTranslateToPosition, &CommandInfo_CameraRotateToPosition, &CommandInfo_CameraLookAt, &CommandInfo_CameraLookAtPosition, &CommandInfo_CameraReset };
 	void* PapyrusCommands[] = { Papyrus_SetExtraEffectEnabled, Papyrus_SetCustomConstant };
-	TheCommandManager->RegisterCommands(Interface, CommandExecuters, CommandInfos, 14, PapyrusCommands);
+	TheCommandManager->RegisterCommands(Interface, CommandExecuters, CommandInfos, 15, PapyrusCommands);
 
 }
 
@@ -303,9 +323,25 @@ void CommandManager::PluginCommands::GetSetting(double* result, const char* Sect
 }
 
 void CommandManager::PluginCommands::SetSetting(double* result, const char* Section, const char* Key, float Value) {
-	
+
 	TheSettingManager->SetSettingF(Section, Key, Value);
-	*result = 1; 
+	*result = 1;
+
+}
+
+void CommandManager::PluginCommands::SetSettingS(double* result, const char* Section, const char* Key, const char* Value) {
+
+	TheSettingManager->SetSettingS(Section, Key, Value);
+
+	if (strcmp(Section, "Shaders.LUT.Main") == 0 && TheShaderManager->Effects.LUT) {
+		int slot = -1;
+		if      (strcmp(Key, "DayLUT")      == 0) slot = 0;
+		else if (strcmp(Key, "NightLUT")    == 0) slot = 1;
+		else if (strcmp(Key, "InteriorLUT") == 0) slot = 2;
+		if (slot >= 0) TheShaderManager->Effects.LUT->LoadLUT(slot, Value);
+	}
+
+	*result = 1;
 
 }
 
