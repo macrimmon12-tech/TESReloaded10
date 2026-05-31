@@ -12,6 +12,7 @@ public:
 		void GetWeatherName(double* result);
 		void GetSetting(double* result, const char* Section, const char* Key);
 		void SetSetting(double* result, const char* Section, const char* Key, float Value);
+		void SetSettingS(double* result, const char* Section, const char* Key, const char* Value);
 		void CameraTranslate(double* result, TESObjectREFR* Ref, NiPoint3* Value);
 		void CameraRotate(double* result, TESObjectREFR* Ref, NiPoint3* Value);
 		void CameraTranslateToPosition(double* result, NiPoint3* Value);
