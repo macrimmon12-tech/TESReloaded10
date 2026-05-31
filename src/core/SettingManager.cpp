@@ -1320,6 +1320,11 @@ void SettingManager::SetSettingsWeather(TESWeather* Weather) {
 
 }
 
+void SettingManager::ReapplyWeatherMode() {
+	if (Tes && Tes->sky && Tes->sky->firstWeather)
+		SetSettingsWeather(Tes->sky->firstWeather);
+}
+
 template<typename T>
 std::string SettingManager::ToString(const T Value) {
 

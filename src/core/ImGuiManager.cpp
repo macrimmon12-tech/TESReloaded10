@@ -440,6 +440,61 @@ static void RenderConfabulator() {
 	ImGui::End();
 }
 
+// ---- Weather Mode panel ----------------------------------------------------
+
+static float s_wmNightXY[2] = { 0.0f, 0.0f };
+static float s_wmFogXY[2]   = { 0.0f, 0.0f };
+static float s_wmSunXY[2]   = { 0.0f, 0.0f };
+
+static void WmApplyCoeff(float x, float y, NiPoint3& coeff) {
+	float bright = 1.0f + y * 0.3f;
+	coeff.x = ImClamp((1.0f + x * 0.4f) * bright, 0.0f, 3.0f); // R
+	coeff.y = ImClamp(bright,                       0.0f, 3.0f); // G
+	coeff.z = ImClamp((1.0f - x * 0.4f) * bright,  0.0f, 3.0f); // B
+}
+
+static void WmApplyAll() {
+	if (!TheSettingManager) return;
+	WmApplyCoeff(s_wmNightXY[0], s_wmNightXY[1], TheSettingManager->SettingsMain.WeatherMode.CoeffNight);
+	WmApplyCoeff(s_wmFogXY[0],   s_wmFogXY[1],   TheSettingManager->SettingsMain.WeatherMode.CoeffFog);
+	WmApplyCoeff(s_wmSunXY[0],   s_wmSunXY[1],   TheSettingManager->SettingsMain.WeatherMode.CoeffSun);
+	TheSettingManager->ReapplyWeatherMode();
+}
+
+static void WmRenderPad(const char* id, const char* label, float* xy, float padSize,
+                        ImU32 colTL, ImU32 colTR, ImU32 colBL, ImU32 colBR,
+                        ImU32 warmCol, ImU32 coolCol) {
+	ImGui::TextDisabled("%s", label);
+	ImVec2 tl = ImGui::GetCursorScreenPos();
+	ImVec2 br = ImVec2(tl.x + padSize, tl.y + padSize);
+
+	ImGui::InvisibleButton(id, ImVec2(padSize, padSize));
+	bool changed = false;
+	if (ImGui::IsItemActive()) {
+		ImVec2 mp = ImGui::GetIO().MousePos;
+		xy[0] = ImClamp(((mp.x - tl.x) / padSize) * 2.0f - 1.0f, -1.0f, 1.0f);
+		xy[1] = ImClamp(-((mp.y - tl.y) / padSize) * 2.0f + 1.0f, -1.0f, 1.0f);
+		changed = true;
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("X %+.2f  (warm/cool)\nY %+.2f  (bright/dim)", xy[0], xy[1]);
+
+	ImDrawList* dl = ImGui::GetWindowDrawList();
+	dl->AddRectFilledMultiColor(tl, br, colTL, colTR, colBL, colBR);
+	dl->AddRect(tl, br, IM_COL32(130, 130, 160, 180), 2.0f, 0, 1.2f);
+	float cx = tl.x + padSize * 0.5f, cy = tl.y + padSize * 0.5f;
+	dl->AddLine(ImVec2(tl.x, cy), ImVec2(br.x, cy), IM_COL32(80, 80, 100, 120));
+	dl->AddLine(ImVec2(cx, tl.y), ImVec2(cx, br.y), IM_COL32(80, 80, 100, 120));
+	dl->AddText(ImVec2(tl.x + 3, tl.y + 3),  IM_COL32(180, 180, 220, 160), "+");
+	dl->AddText(ImVec2(tl.x + 3, br.y - 15), IM_COL32(180, 180, 180, 120), "-");
+	dl->AddText(ImVec2(tl.x + 3, cy - 7),    coolCol,                       "<");
+	dl->AddText(ImVec2(br.x - 10, cy - 7),   warmCol,                       ">");
+	float dotX = tl.x + (xy[0] + 1.0f) * 0.5f * padSize;
+	float dotY = tl.y + (1.0f - (xy[1] + 1.0f) * 0.5f) * padSize;
+	dl->AddCircleFilled(ImVec2(dotX, dotY), 6.0f, IM_COL32(255, 220, 80, 220));
+	dl->AddCircle(ImVec2(dotX, dotY),       6.0f, IM_COL32(255, 255, 255, 160), 0, 1.2f);
+}
+
 // ---- Dev Tools panel -------------------------------------------------------
 
 static void RunConsoleCommand(const char* cmd) {
@@ -560,6 +615,70 @@ static void RenderDevPanel() {
 		}
 		ImGui::SameLine();
 		ImGui::TextDisabled("(Press NVR key to restore)");
+	}
+
+	ImGui::Spacing();
+
+	if (ImGui::CollapsingHeader("Weather Mode")) {
+		if (!TheSettingManager) {
+			ImGui::TextDisabled("SettingManager unavailable.");
+		} else {
+			bool wmEnabled = TheSettingManager->SettingsMain.WeatherMode.Enabled;
+			if (ImGui::Checkbox("Enabled", &wmEnabled)) {
+				TheSettingManager->SettingsMain.WeatherMode.Enabled = wmEnabled;
+				TheSettingManager->ReapplyWeatherMode();
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("Multiplies weather fog/sun/night colors. Center = neutral (1,1,1).");
+
+			ImGui::Spacing();
+
+			const float padSize = 128.0f;
+			const float padGap  = 10.0f;
+
+			// Night pad — cool/dark theme
+			WmRenderPad("##wmnight", "Night", s_wmNightXY, padSize,
+				IM_COL32( 5, 10, 40, 255), IM_COL32(30, 15, 10, 255),
+				IM_COL32( 5,  5, 20, 255), IM_COL32(15,  8,  5, 255),
+				IM_COL32(220, 160, 90, 200), IM_COL32(110, 150, 220, 200));
+
+			ImGui::SameLine(0.0f, padGap);
+
+			// Fog pad — sandy/warm theme
+			WmRenderPad("##wmfog", "Fog", s_wmFogXY, padSize,
+				IM_COL32(50, 45, 20, 255), IM_COL32(70, 50, 15, 255),
+				IM_COL32(25, 28, 35, 255), IM_COL32(40, 32, 18, 255),
+				IM_COL32(220, 160, 90, 200), IM_COL32(110, 150, 220, 200));
+
+			ImGui::SameLine(0.0f, padGap);
+
+			// Sun pad — warm/bright theme
+			WmRenderPad("##wmsun", "Sun", s_wmSunXY, padSize,
+				IM_COL32(55, 40, 10, 255), IM_COL32(80, 55,  5, 255),
+				IM_COL32(20, 25, 40, 255), IM_COL32(50, 35, 10, 255),
+				IM_COL32(220, 160, 90, 200), IM_COL32(110, 150, 220, 200));
+
+			ImGui::Spacing();
+
+			// Coefficient readout
+			auto& wm = TheSettingManager->SettingsMain.WeatherMode;
+			ImGui::TextDisabled("Night  R%.2f G%.2f B%.2f    Fog  R%.2f G%.2f B%.2f    Sun  R%.2f G%.2f B%.2f",
+				wm.CoeffNight.x, wm.CoeffNight.y, wm.CoeffNight.z,
+				wm.CoeffFog.x,   wm.CoeffFog.y,   wm.CoeffFog.z,
+				wm.CoeffSun.x,   wm.CoeffSun.y,   wm.CoeffSun.z);
+
+			ImGui::Spacing();
+
+			if (ImGui::Button("Reset All to Neutral")) {
+				s_wmNightXY[0] = s_wmNightXY[1] = 0.0f;
+				s_wmFogXY[0]   = s_wmFogXY[1]   = 0.0f;
+				s_wmSunXY[0]   = s_wmSunXY[1]   = 0.0f;
+				wm.CoeffNight = { 1.0f, 1.0f, 1.0f };
+				wm.CoeffFog   = { 1.0f, 1.0f, 1.0f };
+				wm.CoeffSun   = { 1.0f, 1.0f, 1.0f };
+				TheSettingManager->ReapplyWeatherMode();
+			}
+		}
 	}
 
 	ImGui::End();

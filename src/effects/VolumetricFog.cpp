@@ -34,6 +34,11 @@ void VolumetricFogEffect::UpdateSettings(){
 	Constants.Blend.z = TheSettingManager->GetSettingF(SettingCategory, "HeightFogRolloff");
 	Constants.Blend.w = TheSettingManager->GetSettingF(SettingCategory, "SimpleFogBlend");
 
+	Constants.Waft.x = TheSettingManager->GetSettingF(SettingCategory, "FogWaftScale");
+	Constants.Waft.y = TheSettingManager->GetSettingF(SettingCategory, "FogWaftStrength");
+	Constants.Waft.z = TheSettingManager->GetSettingF(SettingCategory, "FogWaftSpeedMult");
+	Constants.Waft.w = TheSettingManager->GetSettingF(SettingCategory, "FogWaftVertical");
+
 	if (TheShaderManager->GameState.isExterior) {
 		Constants.Height.x = TheSettingManager->GetSettingF(SettingCategory, "DistantFogHeight");
 		Constants.LowFog.z = TheSettingManager->GetSettingF(SettingCategory, "DistantFogRange");
@@ -66,6 +71,7 @@ void VolumetricFogEffect::RegisterConstants(){
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogBlend", &Constants.Blend);
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogHeight", &Constants.Height);
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogData", &Constants.Data);
+	TheShaderManager->RegisterConstant("TESR_VolumetricFogWaft", &Constants.Waft);
 }
 
 

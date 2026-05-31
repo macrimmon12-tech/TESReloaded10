@@ -12,6 +12,7 @@ public:
 		D3DXVECTOR4		Blend;
 		D3DXVECTOR4		Height;
 		D3DXVECTOR4		Data;
+		D3DXVECTOR4		Waft;  // x=Scale, y=Strength, z=SpeedMult, w=VerticalDrift
 	};
 	VolumetricFogStruct	Constants;
 

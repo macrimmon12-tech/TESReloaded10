@@ -21,6 +21,8 @@ float4 TESR_VolumetricFogSimple; // Simple Fog
 float4 TESR_VolumetricFogBlend; // Blend factor for each Fog
 float4 TESR_VolumetricFogHeight; // Height of each Fog
 float4 TESR_VolumetricFogData; // General shader settings
+float4 TESR_VolumetricFogWaft; // x=Scale, y=Strength, z=SpeedMult, w=VerticalDrift
+float4 TESR_FogWind;           // x=sinDir, y=cosDir, z=normalizedSpeed (0-1), w=0
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -101,6 +103,20 @@ float3 getFog(float distance, float3 density){
 	return 1 - exp(-distance * density * 0.0001);
 }
 
+// Smooth value noise for fog waft — cheap 2D hash + bilinear blend
+float waftHash(float2 p) {
+	p = frac(p * float2(127.1, 311.7));
+	p += dot(p, p + 23.45);
+	return frac(p.x * p.y);
+}
+float waftNoise(float2 p) {
+	float2 i = floor(p);
+	float2 f = frac(p);
+	float2 u = f * f * (3.0 - 2.0 * f);
+	return lerp(lerp(waftHash(i),               waftHash(i + float2(1, 0)), u.x),
+	            lerp(waftHash(i + float2(0, 1)), waftHash(i + float2(1, 1)), u.x), u.y);
+}
+
 #define stepnum 32
 // exponential fog based on https://iquilezles.org/articles/fog/
 //  (a/b) * exp(-ro.y*b) * (1.0-exp(-t*rd.y*b))/rd.y;
@@ -109,14 +125,29 @@ float getHeightFog(float distance, float falloff, float3 worldPos, float heightO
 	float3 step = eyeVector / stepnum;
 	float stepDist = length(step);
 
+	// Waft: wind-driven noise modulates per-step density
+	float waftScale    = TESR_VolumetricFogWaft.x;
+	float waftStrength = TESR_VolumetricFogWaft.y;
+	float speedMult    = TESR_VolumetricFogWaft.z;
+	float vertDrift    = TESR_VolumetricFogWaft.w;
+	float elapsed      = TESR_GameTime.x * 0.001; // ms -> seconds
+
+	// For exteriors use game wind; for interiors (isExterior==0) use a slow diagonal drift
+	float2 windDir = lerp(float2(0.5, 0.5), TESR_FogWind.xy, isExterior);
+	float  windSpd = lerp(vertDrift, max(TESR_FogWind.z, 0.02) * speedMult, isExterior);
+	float2 drift   = normalize(windDir + 0.0001) * windSpd * elapsed;
+
 	float3 pos = TESR_CameraPosition.xyz - float3(0, 0, FOG_GROUND + heightOffset * 1000);
 	float fog = 0;
 	[unroll]
 	for (int i = 0; i < stepnum; i++){
 		pos += step;
-		fog += exp(-falloff * pos.z) * stepDist;
+		float2 noiseUV  = pos.xz * waftScale + drift;
+		float  n        = waftNoise(noiseUV);
+		float  densityMod = lerp(1.0, n, waftStrength);
+		fog += exp(-falloff * pos.z) * stepDist * densityMod;
 	}
-	
+
 	// return fog; // apply distance modifiers from weather/settings
 	return fog * (length(eyeVector) / distance); // apply distance modifiers from weather/settings
 }

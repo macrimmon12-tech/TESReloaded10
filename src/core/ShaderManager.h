@@ -26,6 +26,7 @@ struct ShaderConstants {
 	TESWeather*				pWeather;
 	float					sunGlare;
 	float					windSpeed;
+	D3DXVECTOR4				fogWind;
 	D3DXVECTOR4				fogColor;
 	D3DXVECTOR4				horizonColor;
 	D3DXVECTOR4				skyLowColor;

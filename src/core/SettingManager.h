@@ -375,6 +375,7 @@ public:
 	SettingsColoringStruct* GetSettingsColoring(const char* PlayerLocation);
 	SettingsWeatherStruct*	GetSettingsWeather(const char* WeatherName);
 	void					SetSettingsWeather(TESWeather* Weather);
+	void					ReapplyWeatherMode();
 	bool					IsShaderForced(const char* Name);
 
 	template <typename T> static std::string	ToString(const T Value);

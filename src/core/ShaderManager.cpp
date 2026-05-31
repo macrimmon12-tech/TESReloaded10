@@ -119,6 +119,7 @@ void ShaderManager::Initialize() {
 	TheShaderManager->RegisterConstant("TESR_FogData", &TheShaderManager->ShaderConst.fogData);
 	TheShaderManager->RegisterConstant("TESR_FogDistance", &TheShaderManager->ShaderConst.fogDistance);
 	TheShaderManager->RegisterConstant("TESR_FogColor", &TheShaderManager->ShaderConst.fogColor);
+	TheShaderManager->RegisterConstant("TESR_FogWind",  &TheShaderManager->ShaderConst.fogWind);
 	TheShaderManager->RegisterConstant("TESR_SunColor", &TheShaderManager->ShaderConst.sunColor);
 	TheShaderManager->RegisterConstant("TESR_SunDiskColor", &TheShaderManager->ShaderConst.sunDiskColor);
 	TheShaderManager->RegisterConstant("TESR_SunAmbient", &TheShaderManager->ShaderConst.sunAmbient);
@@ -330,6 +331,14 @@ void ShaderManager::UpdateConstants() {
 	}
 
 	ShaderConst.windSpeed = WorldSky->windSpeed;
+	{
+		float wdir = WorldSky->windDirection;
+		float wspd = WorldSky->windSpeed / 100.0f;
+		ShaderConst.fogWind.x = sinf(wdir);
+		ShaderConst.fogWind.y = cosf(wdir);
+		ShaderConst.fogWind.z = wspd;
+		ShaderConst.fogWind.w = 0.0f;
+	}
 
 	ShaderConst.fogColor.x = WorldSky->fogColor.r;
 	ShaderConst.fogColor.y = WorldSky->fogColor.g;
