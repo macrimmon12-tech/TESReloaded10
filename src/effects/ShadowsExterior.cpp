@@ -60,6 +60,7 @@ bool ShadowsExteriorEffect::UpdateSettingsFromQuality(int quality) {
 	D3DFORMAT oldFormat = Settings.ShadowMaps.Format;
 	int oldCascadeResolution = Settings.ShadowMaps.CascadeResolution;
 	bool oldMSAA = Settings.ShadowMaps.MSAA;
+	bool oldPrefilter = Settings.ShadowMaps.Prefilter;
 	
 	// Custom settings.
 	if (quality < 0 || quality > 3) {
@@ -234,6 +235,11 @@ bool ShadowsExteriorEffect::UpdateSettingsFromQuality(int quality) {
 	if (oldMSAA != Settings.ShadowMaps.MSAA)
 		cascadeSettingsChanged = true;
 
+	// The prefilter's ping-pong scratch target is only allocated when the prefilter is on,
+	// so toggling it has to go through RecreateTextures.
+	if (oldPrefilter != Settings.ShadowMaps.Prefilter)
+		cascadeSettingsChanged = true;
+
 	return cascadeSettingsChanged;
 }
 
@@ -254,6 +260,21 @@ void ShadowsExteriorEffect::UpdateSettings() {
 
 	// Generic exterior shadows settings
 	Settings.Exteriors.Enabled = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Enabled");
+	Settings.Exteriors.ForwardShadows = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows");
+
+	// Runtime half of the forward/deferred switch.
+	//
+	// The FORWARD_SHADOWS macro decides whether the forward code is COMPILED IN; this decides
+	// whether it RUNS. Both the game shaders and SunShadows.fx read it, so the two halves hand
+	// over in the same frame -- which matters, because the alternative is both paths applying
+	// shadows at once. A macro alone cannot do this: game shaders have no runtime reload path
+	// (ShaderCollection::SwitchShader is a stub), and the effect reload path is never triggered
+	// (nothing ever sets ShaderManager::EffectReloadQueued), so the macro is frozen at whatever
+	// it was when the shader was first compiled.
+	Constants.ForwardData.x = Settings.Exteriors.ForwardShadows ? 0.0f : 1.0f;
+	Constants.ForwardData.y = 0.0f;
+	Constants.ForwardData.z = 0.0f;
+	Constants.ForwardData.w = 0.0f;
 	Settings.Exteriors.Quality = std::clamp(TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Quality"), 0, 4);
 	Settings.Exteriors.Darkness = TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "Darkness");
 	Settings.Exteriors.NightMinDarkness = TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "NightMinDarkness");
@@ -341,6 +362,7 @@ void ShadowsExteriorEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_SmoothedSunDir", &Constants.SmoothedSunDir);
 	TheShaderManager->RegisterConstant("TESR_ShadowData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_ShadowFormatData", &Constants.FormatData);
+	TheShaderManager->RegisterConstant("TESR_ShadowForwardData", &Constants.ForwardData);
 	TheShaderManager->RegisterConstant("TESR_ShadowBlur", &Constants.ShadowBlur);
 	TheShaderManager->RegisterConstant("TESR_ShadowScreenSpaceData", &Constants.ScreenSpaceData);
 	TheShaderManager->RegisterConstant("TESR_OrthoData", &Constants.OrthoData);
@@ -366,6 +388,10 @@ void ShadowsExteriorEffect::RegisterTextures() {
 	ULONG ShadowAtlasSize = ShadowMapSize * 2;
 
 	TheTextureManager->InitTexture("TESR_ShadowAtlas", &ShadowAtlasTexture, &ShadowAtlasSurface, ShadowAtlasSize, ShadowAtlasSize, Settings.ShadowMaps.Format, Settings.ShadowMaps.Mipmaps);
+
+	// Intermediate for the separable prefilter. Only allocated when the prefilter is on.
+	if (Settings.ShadowMaps.Prefilter)
+		TheTextureManager->InitTexture("TESR_ShadowAtlasBlur", &ShadowAtlasBlurTexture, &ShadowAtlasBlurSurface, ShadowAtlasSize, ShadowAtlasSize, Settings.ShadowMaps.Format, false);
 
 	if (!Settings.ShadowMaps.MSAA)
 		TheRenderManager->device->CreateDepthStencilSurface(ShadowAtlasSize, ShadowAtlasSize, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, true, &ShadowAtlasDepthSurface, NULL);
@@ -438,6 +464,14 @@ void ShadowsExteriorEffect::RecreateTextures(bool cascades, bool ortho, bool cub
 			ShadowAtlasTexture->Release();
 			ShadowAtlasTexture = nullptr;
 		};
+		if (ShadowAtlasBlurSurface) {
+			ShadowAtlasBlurSurface->Release();
+			ShadowAtlasBlurSurface = nullptr;
+		}
+		if (ShadowAtlasBlurTexture) {
+			ShadowAtlasBlurTexture->Release();
+			ShadowAtlasBlurTexture = nullptr;
+		}
 		if (ShadowAtlasDepthSurface) {
 			ShadowAtlasDepthSurface->Release();
 			ShadowAtlasDepthSurface = nullptr;
@@ -451,6 +485,9 @@ void ShadowsExteriorEffect::RecreateTextures(bool cascades, bool ortho, bool cub
 		ULONG ShadowAtlasSize = ShadowMapSize * 2;
 
 		TheTextureManager->InitTexture("TESR_ShadowAtlas", &ShadowAtlasTexture, &ShadowAtlasSurface, ShadowAtlasSize, ShadowAtlasSize, Settings.ShadowMaps.Format, Settings.ShadowMaps.Mipmaps);
+
+		if (Settings.ShadowMaps.Prefilter)
+			TheTextureManager->InitTexture("TESR_ShadowAtlasBlur", &ShadowAtlasBlurTexture, &ShadowAtlasBlurSurface, ShadowAtlasSize, ShadowAtlasSize, Settings.ShadowMaps.Format, false);
 
 		if (!Settings.ShadowMaps.MSAA)
 			TheRenderManager->device->CreateDepthStencilSurface(ShadowAtlasSize, ShadowAtlasSize, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, true, &ShadowAtlasDepthSurface, NULL);
@@ -469,6 +506,13 @@ void ShadowsExteriorEffect::RecreateTextures(bool cascades, bool ortho, bool cub
 		Constants.ShadowBlur.x = 1.0f / (float)ShadowAtlasSize;
 
 		TheShaderManager->Effects.SunShadows->ClearSampler("TESR_ShadowAtlas", 16);
+
+		// Game shaders sample the atlas too when forward sun shadows are on, and each holds
+		// its own cached pointer to the texture just released above. Clearing only the
+		// deferred effect leaves every object/terrain/parallax shader reading the dead
+		// texture, which the device still references -- so the shadows freeze at whatever
+		// was last rendered into it instead of failing outright.
+		TheShaderManager->ClearShaderSamplers("TESR_ShadowAtlas", 16);
 	}
 
 	if (ortho) {
@@ -479,6 +523,11 @@ void ShadowsExteriorEffect::RecreateTextures(bool cascades, bool ortho, bool cub
 		if (ShadowMapOrthoTexture) {
 			ShadowMapOrthoTexture->Release();
 			ShadowMapOrthoTexture = nullptr;
+		}
+		// Released here because it is recreated below.
+		if (ShadowMapOrthoDepthSurface) {
+			ShadowMapOrthoDepthSurface->Release();
+			ShadowMapOrthoDepthSurface = nullptr;
 		}
 
 		ULONG orthoMapRes = Settings.OrthoMap.Resolution;

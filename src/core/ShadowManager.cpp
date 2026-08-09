@@ -887,8 +887,15 @@ void ShadowManager::BlurShadowAtlas() {
 	
 	IDirect3DDevice9* Device = TheRenderManager->device;
     NiDX9RenderState* RenderState = TheRenderManager->renderState;
-    IDirect3DTexture9* SourceShadowMap = Shadows->ShadowAtlasTexture;
-    IDirect3DSurface9* TargetShadowMap = Shadows->ShadowAtlasSurface;
+
+	// Ping-pong: horizontal pass atlas -> scratch, vertical pass scratch -> atlas.
+	//
+	// Neither pass may sample the atlas while ShadowAtlasSurface -- level 0 of that same
+	// texture -- is the bound render target. Reading a bound render target is undefined in
+	// D3D9 and a read/write feedback loop on Vulkan under DXVK. This Gaussian is the only
+	// filtering the shadow maps get (the cascade lookup is a single tap), so anything that
+	// compromises it shows up directly as hard, unfiltered texels along every shadow edge.
+	if (!Shadows->ShadowAtlasBlurTexture || !Shadows->ShadowAtlasBlurSurface) return;
 
     Device->SetDepthStencilSurface(NULL);
     RenderState->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE, RenderStateArgs);
@@ -897,25 +904,32 @@ void ShadowManager::BlurShadowAtlas() {
     RenderState->SetPixelShader(ShadowMapBlurPixel->ShaderHandle, false);
 	RenderState->SetFVF(FrameFVF, false);
 	Device->SetStreamSource(0, Shadows->ShadowAtlasVertexBuffer, 0, sizeof(FrameVS));
-	Device->SetRenderTarget(0, TargetShadowMap);
-	
+
 	// Pass map resolution to shader as a constant
 	ShadowMapBlurPixel->SetShaderConstantF(0, &Shadows->Constants.ShadowBlur, 1);
-	RenderState->SetTexture(0, SourceShadowMap);
 
-	// blur in two passes, vertically and horizontally
+	// blur in two passes, horizontally then vertically
 	D3DXVECTOR4 Blur[2] = {
 		D3DXVECTOR4(1.0f, 0.0f, 0.0f, 0.0f),
 		D3DXVECTOR4(0.0f, 1.0f, 0.0f, 0.0f),
 	};
+	IDirect3DTexture9* Source[2] = { Shadows->ShadowAtlasTexture, Shadows->ShadowAtlasBlurTexture };
+	IDirect3DSurface9* Target[2] = { Shadows->ShadowAtlasBlurSurface, Shadows->ShadowAtlasSurface };
 
 	for (int i = 0; i < 2; i++) {
+		// Unbind the previous pass's target before it becomes this pass's source, so the
+		// two are never bound as texture and render target at the same time.
+		RenderState->SetTexture(0, nullptr);
+		Device->SetRenderTarget(0, Target[i]);
+		RenderState->SetTexture(0, Source[i]);
+
 		// set blur direction shader constants
 		ShadowMapBlurPixel->SetShaderConstantF(1, &Blur[i], 1);
 
 		Device->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2); // draw call to execute the shader
 	}
 
+	RenderState->SetTexture(0, nullptr);
 	RenderState->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE, RenderStateArgs);
     RenderState->SetRenderState(D3DRS_ZWRITEENABLE, D3DZB_TRUE, RenderStateArgs);
 }

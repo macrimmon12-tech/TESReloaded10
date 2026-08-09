@@ -24,6 +24,28 @@ ShaderRecord::ShaderRecord() {
 }
 ShaderRecord::~ShaderRecord() {}
 
+/*
+ * Unbinds a named sampler's cached texture so it is re-resolved on the next SetCT.
+ *
+ * TextureRecord caches a raw IDirect3DTexture9* and SetCT only calls BindTexture when that
+ * pointer is null, so a texture that gets Release()d and recreated leaves every consumer
+ * holding a dangling pointer. Each ShaderTextureValue owns its own TextureRecord (see
+ * ShaderTextureValue::GetTextureRecord), so there is no shared record to invalidate -- every
+ * consumer has to be cleared individually.
+ */
+void ShaderProgram::ClearSampler(const char* TextureName, size_t Length) {
+	ShaderTextureValue* Sampler;
+	for (UInt32 c = 0; c < TextureShaderValuesCount; c++) {
+		Sampler = &TextureShaderValues[c];
+		// GetTextureRecord bails without assigning Texture when the sampler type is
+		// unrecognised, so this can legitimately be null.
+		if (!Sampler->Texture) continue;
+		if (!memcmp(Sampler->Name, TextureName, Length) && Sampler->Texture->Texture) {
+			Sampler->Texture->Texture = nullptr;
+		}
+	}
+}
+
 void ShaderProgram::ReportError(HRESULT result) {
 	if (result == E_ABORT) Logger::Log("Operation aborted");
 	if (result == E_ACCESSDENIED) Logger::Log("Access Denied");
@@ -133,16 +155,28 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	strcat(ShaderCompiledPath, Name);
 
 	D3DXMACRO* Macros = &(Template.Defines[0]);
-	if (TheRenderManager->IsReversedDepth()) {
+
+	// Append a define to the template, keeping the array null-terminated.
+	auto AppendDefine = [&Template](const char* Name, const char* Definition) {
 		int i = 0;
-		bool nullFound = false;
-		while (!nullFound && i < 28) {
-			nullFound = Template.Defines[i].Name == NULL;
-			if (!nullFound) i++;
-		}
-		Template.Defines[i] = { "REVERSED_DEPTH", "" };
-		Template.Defines[i + 1] = { NULL, NULL }; // Ensure null termination
-	}
+		while (i < 28 && Template.Defines[i].Name != NULL) i++;
+		if (i >= 28) return;  // out of room; silently skip rather than overrun
+		Template.Defines[i] = { Name, Definition };
+		Template.Defines[i + 1] = { NULL, NULL };
+	};
+
+	if (TheRenderManager->IsReversedDepth())
+		AppendDefine("REVERSED_DEPTH", "");
+
+	// Forward sun shadows. Read straight from the setting manager rather than from the
+	// ShadowsExteriors effect, because shaders can be loaded before that effect is built.
+	//
+	// This governs whether the forward path is compiled in at all, so that builds which do not
+	// want it pay nothing for it. Whether it RUNS is a separate, runtime decision made by
+	// TESR_ShadowForwardData -- see ShadowsExteriorEffect::UpdateSettings. Changing the setting
+	// alters the preprocessed source, so CheckPreprocessResult recompiles on next load.
+	AppendDefine("FORWARD_SHADOWS",
+		TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows") ? "1" : "0");
 
 	HRESULT prepass = D3DXPreprocessShaderFromFileA(ShaderSourcePath, Macros, NULL, &ShaderSource, &Errors);
 	if (prepass == D3D_OK) {

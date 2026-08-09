@@ -66,6 +66,11 @@ public:
 	static bool				FileExists(const char* path);
 	static bool				CheckPreprocessResult(const char* CachedPreprocessPath, ID3DXBuffer* ShaderSource);
 
+	// Drops the cached IDirect3DTexture9* for a named sampler so that SetCT re-resolves it
+	// on the next draw. MUST be called on every consumer of a texture that is released and
+	// recreated -- see ShaderManager::ClearShaderSamplers. Lives on ShaderProgram rather
+	// than EffectRecord because game shaders need it too.
+	void					ClearSampler(const char* TextureName, size_t Length);
 
 	ShaderFloatValue*		FloatShaderValues;
 	UInt32					FloatShaderValuesCount;

@@ -177,6 +177,34 @@ template <typename T> void ShaderManager::RegisterShaderCollection(T** Pointer)
 }
 
 
+/*
+ * Drops the cached texture pointer for a named sampler across EVERY loaded game shader.
+ *
+ * Counterpart to EffectRecord's per-effect ClearSampler. Call both whenever a TESR_ texture
+ * is released and recreated (see ShadowsExteriorEffect::RecreateTextures): each shader owns
+ * a private TextureRecord holding a raw IDirect3DTexture9*, which SetCT only re-resolves
+ * when it is null. Miss one and it keeps sampling the released texture -- which the D3D9
+ * device is usually still holding a reference to, so instead of failing it quietly returns
+ * the last contents that were rendered into it.
+ */
+void ShaderManager::ClearShaderSamplers(const char* TextureName, size_t Length)
+{
+	for (const auto& Entry : ShaderNames) {
+		ShaderCollection* Collection = Entry.second ? *Entry.second : nullptr;
+		if (!Collection) continue;
+
+		for (auto& VertexShader : Collection->VertexShaderList) {
+			for (int i = 0; i < 3; i++)  // Default / Exterior / Interior
+				if (VertexShader->ShaderProg[i]) VertexShader->ShaderProg[i]->ClearSampler(TextureName, Length);
+		}
+		for (auto& PixelShader : Collection->PixelShaderList) {
+			for (int i = 0; i < 3; i++)
+				if (PixelShader->ShaderProg[i]) PixelShader->ShaderProg[i]->ClearSampler(TextureName, Length);
+		}
+	}
+}
+
+
 void ShaderManager::RegisterConstant(const char* Name, D3DXVECTOR4* FloatValue)
 {
 	ConstantsTable[Name] = FloatValue;

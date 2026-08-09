@@ -582,6 +582,13 @@ Enabled = true                       # Rain effect that is blocked by objects ab
 [_Shaders.ShadowsExteriors.Main]
 Quality = 4                          # Quality preset - 0: Low, 1: Medium, 2: High, 3: Full, 4: Custom
 Enabled = true                       # Enable sun shadows using rendered shadow maps.
+ForwardShadows = true                # Evaluate sun shadows per-object in the lighting shaders
+                                     # instead of as a screen-space composite. Scales only the
+                                     # sun term, so shadowed surfaces keep correct ambient/sky
+                                     # light. Takes effect immediately: turning it off hands the
+                                     # cascades back to the deferred pass in the same frame.
+                                     # Starting the game with it false compiles the forward path
+                                     # out entirely, so turning it on then needs a restart.
 Darkness = 0.75                      # Darkness of shadows.
 NightMinDarkness = 0.35              # Darkness of shadows during dark moon phase. Set to 0 to disable shadows completely when there is no moon.
 OrthoMapResolution = 256             # Resolution of the texture used to store the ortho map.

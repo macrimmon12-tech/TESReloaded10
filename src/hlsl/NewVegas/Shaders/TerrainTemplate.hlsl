@@ -21,6 +21,12 @@
 #include "includes/Terrain.hlsl"
 #include "includes/Parallax.hlsl"
 
+// BaseMap[7] holds s0-s6 and NormalMap[7] holds s7-s13, so the atlas cannot use the s9
+// default. s14/s15 are the only free sampler slots in ps_3_0 here.
+#define SHADOW_ATLAS_SAMPLER_REG s14
+#include "includes/Shadow.hlsl"
+
+
 struct VS_INPUT {
     float4 position : POSITION;
     float3 tangent : TANGENT;
@@ -116,6 +122,7 @@ float4 PointLightPosition[NUM_PT_LIGHTS] : register(c63);
 float PointLightCount : register(c88);
 #endif
 
+
 PS_OUTPUT main(PS_INPUT IN) {
     PS_OUTPUT OUT;
     
@@ -144,7 +151,19 @@ PS_OUTPUT main(PS_INPUT IN) {
 
     float3 lightTS = mul(tbn, SunDir.xyz);
     float parallaxShadowMultiplier = getParallaxShadowMultipler(dist, offsetUV, dx, dy, lightTS, texCount, blends, heightStatus, BaseMap);
-    
+
+    // Forward sun shadows. Folded into parallaxShadowMultiplier, which getSunLighting
+    // applies to the sun colour only -- ambient is added afterwards and stays untouched.
+    //
+    // No extra interpolator needed: projectionPosition is already the clip-space position,
+    // and clip position is affine in object space, so it interpolates exactly.
+    // ddx/ddy must stay at top level, outside dynamic flow control.
+    float3 shadowWorldPos = GetShadowWorldPos(IN.projectionPosition);
+    float3 shadowNormal = GetShadowGeometricNormal(shadowWorldPos);
+    #if FORWARD_SHADOWS
+    parallaxShadowMultiplier *= GetSunShadow(shadowWorldPos, shadowNormal);
+    #endif
+
     float3 lighting = getSunLighting(lightTS, SunColor.rgb, eyeDir, combinedNormal, AmbientColor.rgb, baseColor, gloss, specExponent, 1.0, parallaxShadowMultiplier);
 
     #if defined(NUM_PT_LIGHTS)

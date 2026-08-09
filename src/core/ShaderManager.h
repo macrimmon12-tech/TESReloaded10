@@ -59,6 +59,7 @@ public:
 	template <typename T> void RegisterShaderCollection(T** Pointer);
 	EffectRecord*			GetEffectByName(const char* Name);
 	ShaderCollection*		GetShaderCollectionByName(const char* Name);
+	void					ClearShaderSamplers(const char* TextureName, size_t Length);
 	void					RegisterConstant(const char* Name, D3DXVECTOR4* FloatValue);
 	void					CreateFrameVertex(UInt32 Width, UInt32 Height, IDirect3DVertexBuffer9** FrameVertex);
 	void					InitializeConstants();
