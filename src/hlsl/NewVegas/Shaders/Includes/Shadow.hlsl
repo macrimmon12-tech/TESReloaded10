@@ -2,38 +2,27 @@
 //
 // All four cascades live in one 2x2 atlas (TESR_ShadowAtlas).
 //
-// The maths here mirrors Effects/SunShadows.fx.hlsl so that the forward and deferred paths
-// produce the same value for the same point. If you change the cascade selection, bias, or
-// bleed-reduction constants in one, change them in the other.
+// Mirrors Effects/SunShadows.fx.hlsl. Cascade selection, bias and bleed-reduction constants
+// must be changed in both.
 //
-// SPACE CONVENTION
-//   TESR_ShadowCameraToLightTransform* consume CAMERA-RELATIVE WORLD space (i.e.
-//   reconstructWorldPosition(), which does NOT add TESR_CameraPosition). Game object shaders
-//   are model-space, so the caller must reconstruct it -- see GetShadowWorldPos(), intended
-//   for use in the vertex shader.
+// TESR_ShadowCameraToLightTransform* consume CAMERA-RELATIVE world space (no
+// TESR_CameraPosition added). Build it with GetShadowWorldPos() in the VS.
 //
-// USAGE
 //   VS:  OUT.shadowWorldPos = GetShadowWorldPos(OUT.sPosition);
 //   PS:  sunLight *= GetSunShadow(IN.shadowWorldPos, worldNormal);
-//   Both are compiled out entirely when FORWARD_SHADOWS is 0.
 
 // ---------------------------------------------------------------------------
-// Constants. Bound by name via ShaderRecord::CreateCT; the register assignments below do not
-// affect binding, only where the values live.
+// Bound by name via ShaderRecord::CreateCT; registers only decide where the values live.
 //
-// EVERY constant here must stay pinned to an explicit register. Left unpinned, the compiler
-// packs them into the gaps between the host shader's declared constants, and those gaps are
-// not free -- they are registers the engine still writes for the vanilla shader, which NVR's
-// replacement simply doesn't declare. The engine then overwrites them mid-frame and cascade
-// selection reads garbage.
+// EVERY constant must stay explicitly pinned. Unpinned, the compiler packs them into gaps
+// between the host's declared constants -- registers the engine still writes for the vanilla
+// shader -- and overwrites them mid-frame.
 //
-// c100+ is clear: the heaviest host is TerrainTemplate's pixel shader at c93, and the skinned
-// vertex shader's Bones[54] ends at c97. ps_3_0 allows 224 float constants and vs_3_0 allows
-// 256, so c100-c133 is inside both.
+// c100-c133 is clear in both profiles: heaviest host is TerrainTemplate's PS at c93 and the
+// skinned VS Bones[54] ending at c97; ps_3_0 allows 224 constants, vs_3_0 256.
 //
-// The two matrices the VERTEX side needs are relocatable, because c100+ is not universally
-// safe in a vertex shader: GRASS23x00*.vso indexes InstanceData relatively from c20 and the
-// batch can run far past c100.
+// The VS matrices are relocatable: GRASS23x00*.vso indexes InstanceData from c20 well past
+// c100.
 // ---------------------------------------------------------------------------
 #ifndef SHADOW_INVPROJ_REG
     #define SHADOW_INVPROJ_REG c100
@@ -62,23 +51,19 @@ float4 TESR_SmoothedSunDir    : register(c131);
 float4 TESR_ShadowBlur        : register(c132); // x: 1 / atlas resolution, y: lod cascade updated
 float4 TESR_ShadowForwardData : register(c133); // x: 1 when the forward path is SUPPRESSED
 
-// s9 suits the object templates, which top out at s7. Templates with wider sampler arrays
-// must override this BEFORE including: TerrainTemplate has NormalMap[7] spanning s7-s13.
+// Object templates top out at s7. Override BEFORE including for wider sampler arrays --
+// TerrainTemplate's NormalMap[7] spans s7-s13.
 #ifndef SHADOW_ATLAS_SAMPLER_REG
     #define SHADOW_ATLAS_SAMPLER_REG s9
 #endif
 
-sampler2D TESR_ShadowAtlas : register(SHADOW_ATLAS_SAMPLER_REG) = sampler_state {
-    ADDRESSU = CLAMP; ADDRESSV = CLAMP;
-    MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE;
-};
+// MUST stay on ONE line, closing brace included. ShaderTextureValue::GetSamplerStateString
+// finds "register ( sN )" and reads only to the end of that line. Split, it silently falls
+// back to TextureRecord's POINT/WRAP defaults. Game shaders only; Effects parse their own.
+sampler2D TESR_ShadowAtlas : register(SHADOW_ATLAS_SAMPLER_REG) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 
-// Atlas encoding, fixed at compile time. The deferred path can afford to branch on
-// TESR_ShadowFormatData.x at runtime because it runs once per screen pixel; this runs per
-// fragment with overdraw, and ps_3_0 would flatten the branch across all three VSM/EVSM
-// variants.
-//
-// Must match [_Shaders.ShadowsExteriors.ShadowMaps] Mode in the toml.
+// Atlas encoding, compile-time: ps_3_0 would flatten a runtime branch across all three
+// variants. Must match [_Shaders.ShadowsExteriors.ShadowMaps] Mode.
 //   0 = VSM, 1 = EVSM2, 2 = EVSM4 (toml default)
 #ifndef SHADOW_FIXED_MODE
     #define SHADOW_FIXED_MODE 2
@@ -86,34 +71,23 @@ sampler2D TESR_ShadowAtlas : register(SHADOW_ATLAS_SAMPLER_REG) = sampler_state 
 
 static const float SHADOW_FORMAT = TESR_ShadowFormatData.y;
 
-// Normal-offset bias, in SHADOW MAP TEXELS -- not world units.
-//
-// A texel's world size is 2*radius/cascadeResolution, and the cascade radii span two orders of
-// magnitude: at Distance 6000 / CascadeLambda 0.95 / CascadeResolution 2048 the Near cascade
-// texel is roughly 0.15 world units and the Lod cascade texel roughly 3. A fixed world-space
-// offset is therefore several texels up close (peter-panning) and a fraction of one at range,
-// well below the one texel needed to escape the quantised depth of the receiving surface.
-// Expressed in texels the offset is scale-invariant and correct in every cascade.
-//
-// It has to clear the prefilter kernel as well as the texel grid: ShadowMapBlur.pso reaches
-// +/-3.23 texels on the near cascade (Blur9) and +/-1.33 on the others (Blur5), so a filtered
-// moment describes a neighbourhood several texels wide.
+// Normal-offset bias in SHADOW MAP TEXELS, not world units -- cascade texels span two orders
+// of magnitude (~0.15 to ~3 world units at Distance 6000 / Lambda 0.95 / Resolution 2048).
+// Must also clear the prefilter kernel: ShadowMapBlur.pso reaches +/-3.23 texels on Near
+// (Blur9) and +/-1.33 elsewhere (Blur5).
 #ifndef SHADOW_NORMAL_BIAS_TEXELS
-    #define SHADOW_NORMAL_BIAS_TEXELS 2.5f
+    #define SHADOW_NORMAL_BIAS_TEXELS 0.0f
 #endif
 
-// Extra widening of the VSM/EVSM minimum variance at grazing incidence. The Chebyshev bound
-// needs more slack where a single texel spans a long run of depth across the receiver, which
-// is precisely the grazing case. 0 disables it and restores a constant bias.
+// Widens the VSM/EVSM minimum variance at grazing incidence, where one texel spans a long run
+// of receiver depth. 0 gives a constant bias.
 #ifndef SHADOW_SLOPE_BIAS
     #define SHADOW_SLOPE_BIAS 1.0f
 #endif
 
-// Lookup-time filtering, in taps per cascade, on top of the Gaussian prefilter. 1 matches the
-// deferred path. 4 costs 12 extra texture fetches per shaded fragment.
-//
-// Above 1, average the MOMENTS and run Chebyshev once, as SampleShadowMoments does. Averaging
-// independent Chebyshev results is not equivalent -- the bound is not linear in the moments.
+// Taps per cascade, on top of the Gaussian prefilter. 1 matches deferred; 4 costs 12 extra
+// fetches per fragment. Above 1, average the MOMENTS and run Chebyshev once -- the bound is
+// not linear in the moments.
 #ifndef SHADOW_FILTER_TAPS
     #define SHADOW_FILTER_TAPS 1
 #endif
@@ -123,31 +97,22 @@ static const float SHADOW_FORMAT = TESR_ShadowFormatData.y;
     #define SHADOW_FILTER_SPREAD 1.0f
 #endif
 
-// Vertex-shader presence sentinel.
-//
-// NVR replaces far more PIXEL shaders than VERTEX shaders -- for objects roughly 134 vs 51,
-// for terrain 29 vs 2 -- and the game pairs the two independently by lighting configuration,
-// so an NVR pixel shader frequently runs against a VANILLA vertex shader. Vanilla does not
-// write the camera-relative world position this path needs, leaving that interpolator holding
-// undefined data.
-//
-// NVR's vertex shaders stamp this sentinel alongside the position; the pixel shader checks it
-// and declines to shadow rather than reading garbage.
+// VS presence sentinel. NVR replaces many more pixel than vertex shaders (objects ~134 vs 51,
+// terrain 29 vs 2) and the game pairs them independently, so an NVR PS often runs against a
+// vanilla VS whose interpolator holds undefined data. NVR vertex shaders stamp this; the PS
+// checks it before shadowing.
 #define SHADOW_VS_SENTINEL 1.0f
 #define SHADOW_VS_PRESENT(w) (abs((w) - SHADOW_VS_SENTINEL) < 0.001f)
 
-// Master switch, injected as a D3DXMACRO by ShaderRecord::LoadShader from the
-// [Shaders.ShadowsExteriors.Main] ForwardShadows setting, the same way REVERSED_DEPTH is.
-// Governs whether the forward path is compiled in at all; TESR_ShadowForwardData.x governs
-// whether it runs. Defaults to 0 so these shaders are stock behaviour if nothing injects it.
+// D3DXMACRO from ShaderRecord::LoadShader, off [Shaders.ShadowsExteriors.Main]
+// ForwardShadows. Compile-time gate; TESR_ShadowForwardData.x is the runtime one.
 #ifndef FORWARD_SHADOWS
     #define FORWARD_SHADOWS 0
 #endif
 
 // ---------------------------------------------------------------------------
-// VSM / EVSM evaluation. Mirrors Effects/Includes/Shadows.hlsl.
-// Duplicated rather than cross-included: the Effects and Shaders trees are compiled
-// independently, and that file also pulls in point-light cube helpers this path has no use for.
+// VSM / EVSM evaluation. Mirrors Effects/Includes/Shadows.hlsl, duplicated because the two
+// trees compile independently.
 // ---------------------------------------------------------------------------
 float ShadowLinstep(float a, float b, float v) {
     return saturate((v - a) / (b - a));
@@ -184,22 +149,19 @@ float2 ShadowWarpDepth(float depth, float2 exponents) {
 //   Near (0.0, 0.0)   Middle (0.5, 0.0)
 //   Far  (0.0, 0.5)   Lod    (0.5, 0.5)
 // ---------------------------------------------------------------------------
-// tex2Dlod, not tex2D: the cascade selection below is a dynamic branch, and a gradient-taking
-// sample inside one is illegal in ps_3_0 (error X3528). The atlas has no mipmaps
-// (ShadowMaps.Mipmaps = false), so an explicit LOD 0 is exactly equivalent.
+// tex2Dlod, not tex2D: gradients inside the dynamic cascade branch are illegal in ps_3_0
+// (X3528). The atlas has no mipmaps, so LOD 0 is equivalent.
 float4 SampleShadowMoments(float2 uv, float2 quadrantOffset) {
 #if SHADOW_FILTER_TAPS <= 1
     return tex2Dlod(TESR_ShadowAtlas, float4(uv, 0.0f, 0.0f));
 #else
-    // Every tap must stay inside its own quadrant. The atlas packs four unrelated cascades
-    // into one texture, so a tap that crosses a quadrant border reads another cascade's depths
-    // as if they belonged to this one. Half a texel of inset keeps bilinear off the seam.
+    // Taps must stay inside their quadrant: crossing a border reads another cascade's depths.
+    // Half a texel of inset keeps bilinear off the seam.
     float texel = TESR_ShadowBlur.x;
     float2 lo = quadrantOffset + texel * 0.5f;
     float2 hi = quadrantOffset + 0.5f - texel * 0.5f;
 
-    // Rotated grid: four taps on the diagonals cover the texel footprint more evenly than four
-    // on the axes, for the same cost.
+    // Rotated grid: diagonals cover the texel footprint more evenly than axes.
     float2 d = texel * SHADOW_FILTER_SPREAD;
     float4 m;
     m  = tex2Dlod(TESR_ShadowAtlas, float4(clamp(uv + d * float2( 1.0f,  0.5f), lo, hi), 0.0f, 0.0f));
@@ -243,9 +205,8 @@ float SampleShadowAtlas(float4 lightSpace, float2 quadrantOffset, float bias, fl
 }
 
 // ---------------------------------------------------------------------------
-// Camera-relative world position from a clip-space position.
-// Call in the VERTEX shader and interpolate the result: perspective-correct interpolation of
-// world position is exact, and this costs one interpolator rather than four.
+// Camera-relative world position from clip space. Call in the VS and interpolate: it is exact
+// under perspective-correct interpolation and costs one interpolator.
 // ---------------------------------------------------------------------------
 float3 GetShadowWorldPos(float4 clipPos) {
     float4 viewPos = mul(clipPos, TESR_InvProjectionTransform);
@@ -254,67 +215,46 @@ float3 GetShadowWorldPos(float4 clipPos) {
 }
 
 // ---------------------------------------------------------------------------
-// Geometric world normal, from screen-space derivatives of the interpolated world position.
+// Flat face normal from screen-space derivatives of the interpolated world position. Object
+// shaders carry their normal in TANGENT space, so no world normal is available to the bias.
 //
-// Object shaders carry their per-pixel normal in TANGENT space (lights are pushed through the
-// TBN in the vertex shader), so there is no world normal available to hand to the bias, and
-// passing one would cost three floats the MAX_LIGHTS > 4 permutation has no room for. Deriving
-// it costs no interpolators and works in every permutation.
-//
-// This is the flat face normal rather than the normal-mapped one, which is what the offset
-// bias wants: the bias is about escaping the depth of the surface the fragment sits on, not
-// its shading detail.
-//
-// MUST be called from the top level of the pixel shader -- ddx/ddy are gradient instructions
-// and are illegal inside dynamic flow control.
+// MUST be called from the top level of the pixel shader: ddx/ddy are illegal inside dynamic
+// flow control.
 // ---------------------------------------------------------------------------
 float3 GetShadowGeometricNormal(float3 worldPos) {
     float3 n = normalize(cross(ddx(worldPos), ddy(worldPos)));
 
-    // worldPos is camera-relative, so the camera sits at the origin: the outward-facing normal
-    // is the one pointing back towards it. Removes any winding/handedness doubt.
+    // worldPos is camera-relative, so the camera is at the origin and the outward normal is
+    // the one facing it. Independent of winding.
     return n * sign(dot(n, -worldPos));
 }
 
 // ---------------------------------------------------------------------------
-// Main entry point. Returns 1.0 in full light, falling towards 0 in full shadow.
-// Multiply the SUN term by this, before ambient is added.
+// 1.0 in full light, towards 0 in shadow. Multiply the SUN term by it, before ambient.
 // ---------------------------------------------------------------------------
 float GetSunShadow(float3 worldPos, float3 worldNormal) {
-    // Forward path suppressed at runtime. SunShadows.fx picks the cascades up deferred in the
-    // same frame, reading the same constant, so exactly one of the two ever applies shadows.
-    //
-    // Note the sense of the test: nonzero means SUPPRESSED. A constant that fails to arrive
-    // reads as zero and leaves the forward path running, which is the safe failure mode.
+    // Nonzero SUPPRESSES the forward path; SunShadows.fx reads the same constant and takes
+    // over deferred. A missing constant reads zero and leaves forward running.
     if (TESR_ShadowForwardData.x) return 1.0f;
 
     // Shadow maps switched off entirely (setting), or sun below horizon.
     if (!TESR_ShadowFade.y) return 1.0f;
 
-    // Atlas encoding guard. ShadowMap.pso writes a different channel layout per [ShadowMaps]
-    // Mode -- raw moments for VSM, exponentially warped pairs for EVSM2, those plus their
-    // squares for EVSM4. Decoding with the wrong one produces garbage rather than a subtle
-    // difference, so fail cleanly (unshadowed) instead.
+    // ShadowMap.pso's channel layout differs per Mode. Fail unshadowed on a mismatch.
     if (TESR_ShadowFormatData.x != (float)SHADOW_FIXED_MODE) return 1.0f;
 
-    // Normal offset: push the sample point along the surface normal, scaled by how grazing the
-    // sun is.
+    // Push the sample along the normal, scaled by how grazing the sun is.
     float NdotL = dot(worldNormal, TESR_SmoothedSunDir.xyz);
     float offsetScale = saturate(1.0f - NdotL);
 
     float4 radii = float4(TESR_ShadowNearCenter.w, TESR_ShadowMiddleCenter.w,
                           TESR_ShadowFarCenter.w,  TESR_ShadowLodCenter.w);
 
-    // World size of one shadow map texel, per cascade.
-    //
-    // GetCascadeViewProj builds each cascade's ortho box as [-sphereRadius, +sphereRadius] in
-    // x and y, so the box is 2*radius across and one texel is 2*radius/cascadeResolution.
-    // cascadeResolution is not published to shaders, but TESR_ShadowBlur.x is the reciprocal of
-    // the ATLAS resolution and the atlas is exactly two cascades wide:
+    // Texel world size per cascade. GetCascadeViewProj's ortho box is 2*radius across, and the
+    // atlas is two cascades wide, so with TESR_ShadowBlur.x = 1/atlasResolution:
     //     cascadeResolution = 0.5 / TESR_ShadowBlur.x
     //     texelWorldSize    = 4 * radius * TESR_ShadowBlur.x
-    // The floor guards against the constant arriving as zero, keeping the offset small rather
-    // than infinite.
+    // The floor keeps a zero constant from producing an infinite offset.
     float4 texelWorld = 4.0f * radii * max(TESR_ShadowBlur.x, 1.0f / 16384.0f);
     float4 offsetDistance = offsetScale * SHADOW_NORMAL_BIAS_TEXELS * texelWorld;
 
@@ -324,35 +264,29 @@ float GetSunShadow(float3 worldPos, float3 worldNormal) {
     const float baseBias = 0.01f;
 #endif
 
-    // Slope-scaled variance floor. bias drives minVariance, the slack the Chebyshev bound is
-    // allowed before it calls a texel occluded. A grazing texel spans a long run of receiver
-    // depth and so needs more of it.
+    // Slope-scaled variance floor: bias drives minVariance, the slack Chebyshev gets before
+    // calling a texel occluded.
     float bias = baseBias * (1.0f + SHADOW_SLOPE_BIAS * offsetScale);
 
     // Fraction of the way to a cascade's border at which the cross-fade into the next begins.
     const float blend = 0.9f;
 
-    // Each cascade gets its OWN offset, in its own texel scale. A single shared sample position
-    // cannot suit all four when their texels differ by more than an order of magnitude: an
-    // offset that clears the Lod cascade's 3-unit texels would lift the sample some 20 texels
-    // off the surface in the Near cascade.
+    // Per-cascade offset, each in its own texel scale.
     float4 shadows = float4(
         SampleShadowAtlas(mul(float4(worldPos + offsetDistance.x * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformNear),   float2(0.0f, 0.0f), bias, 0.1f),
         SampleShadowAtlas(mul(float4(worldPos + offsetDistance.y * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformMiddle), float2(0.5f, 0.0f), bias, 0.2f),
         SampleShadowAtlas(mul(float4(worldPos + offsetDistance.z * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformFar),    float2(0.0f, 0.5f), bias, 0.6f),
         SampleShadowAtlas(mul(float4(worldPos + offsetDistance.w * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformLod),    float2(0.5f, 0.5f), bias, 0.8f));
 
-    // Select by distance to each cascade's centre, cross-fading over the outer 10%. Circular
-    // boundaries, matching SunShadows.fx -- the light-space NDC box is square, so selecting on
-    // it instead puts visible square-edged steps on the ground normal to the sun.
+    // Distance to each cascade centre, cross-faded over the outer 10%. Circular boundaries,
+    // matching SunShadows.fx: selecting on the square light-space NDC box steps visibly.
     float4 distances = float4(
         length(worldPos - TESR_ShadowNearCenter.xyz),
         length(worldPos - TESR_ShadowMiddleCenter.xyz),
         length(worldPos - TESR_ShadowFarCenter.xyz),
         length(worldPos - TESR_ShadowLodCenter.xyz));
 
-    // Initialised, not merely assigned in every branch: a point beyond the last cascade falls
-    // through all of them.
+    // Initialised: a point beyond the last cascade falls through every branch.
     float shadow = 1.0f;
     if (distances.x < radii.x) {
         shadow = (distances.x < radii.x * blend) ? shadows.x

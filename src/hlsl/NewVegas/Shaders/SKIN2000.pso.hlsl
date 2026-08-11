@@ -34,8 +34,11 @@ float4 TESR_DebugVar;
 
 // Structures:
 
+#include "Includes/PBRScale.hlsl"
+
 struct VS_INPUT {
-    float2 BaseUV : TEXCOORD0;			            // UV
+    float2 BaseUV : TEXCOORD0;
+    float4 shadowWorldPos : TEXCOORD4;   // from ObjectTemplate VS			            // UV
     float3 texcoord_1 : TEXCOORD1;			// light data in tangent space
     float3 texcoord_6 : TEXCOORD6;			// eye data in tangent space
     float3 position : SV_POSITION;			// light data in tangent space
@@ -47,27 +50,42 @@ struct VS_OUTPUT {
     float4 color_0 : COLOR0;
 };
 
+#include "Includes/Shadow.hlsl"
 #include "Includes/Skin.hlsl"
 
 
 VS_OUTPUT main(VS_INPUT IN) {
     VS_OUTPUT OUT;
 
-    // base geometry information
+
     float3 lightDirection = normalize(IN.texcoord_1);
     float3 eyeDirection = normalize(IN.texcoord_6);
     float3 normal = getNormal(IN.BaseUV);
 
-    // calculate lighting components
-    float3 lighting = GetLighting(lightDirection, eyeDirection, normal, PSLightColor[0].rgb);
-    float3 sss = GetSSS(lightDirection, normal) * float3(0.5, 0.2, 0.3) * AmbientColor.rgb;
-    float spec = GetSpecular(lightDirection, eyeDirection, normal, PSLightColor[0].rgb);
+
+    float3 lighting = GetLighting(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[0]).rgb);
+    float spec = GetSpecular(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[0]).rgb);
+
+
+#if FORWARD_SHADOWS
+    // Forward sun shadow. Scales the SUN terms only; ambient-driven terms are untouched.
+    // ddx/ddy must stay at top level, outside dynamic flow control.
+    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
+                    ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
+                    : 1.0f;
+    lighting *= sunShadow;
+    spec     *= sunShadow;
+#endif
 
     float4 baseColor = getBaseColor(IN.BaseUV, FaceGenMap0, FaceGenMap1, BaseMap);
     baseColor.rgb = ApplyVertexColor(baseColor.rgb, IN.color_0.rgb, Toggles);
 
     float4 color = AmbientColor.a >= 1 ? 0 : (baseColor.a - Toggles.w);
-    float3 finalColor = lighting * baseColor.rgb + sss + spec;
+    // Vanilla: max(0, sun*NdotL + sun*0.5*sat(dot(E,-L))*(1-NdotV)^2 + Ambient) * albedo
+    // The middle term is backscatter; GetLighting's fresnel covers it.
+    // Specular sits outside the albedo multiply. SKIN_SPECULAR_STRENGTH defaults to 0.
+    float3 finalColor = max(lighting + PBRAmbient(AmbientColor.rgb), 0) * baseColor.rgb + spec;
 
     color.rgb = ApplyFog(finalColor, IN.color_1, Toggles);
     color.a = baseColor.a * AmbientColor.a;

@@ -437,6 +437,11 @@ void ShaderManager::UpdateConstants() {
 		}
 	}
 
+	// The skin, hair and grass shaders route their light and ambient terms through
+	// TESR_PBRData (see Shaders/Includes/PBRScale.hlsl) and render black at a zero scale, so
+	// these constants stay current whether or not the PBR collection is enabled.
+	if (!Shaders.PBR->Enabled) Shaders.PBR->UpdateConstants();
+
 	// Underwater effect uses constants from the water shader
 	if (Effects.Underwater->Enabled && !Shaders.Water->Enabled) Shaders.Water->UpdateConstants();
 	if (!Effects.ShadowsExteriors->Enabled && Effects.ShadowsInteriors->Enabled) Effects.ShadowsExteriors->UpdateConstants(); // Interior and exterior shadows share settings
@@ -462,7 +467,13 @@ ShaderCollection* ShaderManager::GetShaderCollection(const char* Name) {
 	if (!memcmp(Name, "GRASS", 5)) return Shaders.Grass;
 	if (!memcmp(Name, "ISHDR", 5) || !memcmp(Name, "HDR", 3)) return Shaders.Tonemapping; // tonemapping shaders have different names between New vegas and Oblivion
 	if (!memcmp(Name, "PAR", 3)) return Shaders.POM;
-	//if (!memcmp(Name, "SKIN", 4)) return Shaders.Skin; // temporarily disabled, the shaders are half broken
+	if (!memcmp(Name, "SKIN", 4)) return Shaders.Skin;
+	// Hair (BSSM_3XLIGHTING_*) lives in the SM3 family, not HAIR*. Only SM3003 has a
+	// replacement on disk; the rest resolve to no file and fall through to vanilla.
+	if (!memcmp(Name, "SM3", 3)) return Shaders.PBR;
+	// SpeedTree leaves. STLEAF001/003.vso are vs_3_0 replacements, so every leaf PS must have
+	// a ps_3_0 replacement too: D3D9 rejects a 2.x VS paired with a 3.0 PS.
+	if (!memcmp(Name, "STLEAF", 6)) return Shaders.PBR;
 	if (!memcmp(Name, "SKY", 3)) return Shaders.Sky;
 	if (strstr(BloodShaders, Name)) return Shaders.Blood;
 

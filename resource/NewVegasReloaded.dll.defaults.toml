@@ -329,17 +329,12 @@ Enabled = false                         # Replace the pipboy light with a post p
 
 
 [_Shaders.Grass.Main]
-WindEnabled = false
-GrassDensity = 1
-WindCoefficient = 0.0
 ScaleX = 1.0
 ScaleY = 1.0
 ScaleZ = 1.0
-MinDistance = 0
-MaxDistance = 0
 
 [_Shaders.Grass.Status]
-Enabled = false                       # Not currently used. Replaces grass shaders and game options.  
+Enabled = false                       # Replaces the grass shaders.
 
 [_Shaders.GodRays.Main]
 DayMultiplier = 1.0                   # Strength of godrays during the day.
@@ -693,7 +688,11 @@ Intensity = 2.0                      # Rescale the intensity of screenspace shad
 [_Shaders.ShadowsExteriors.ShadowMaps]
 Mode = 2							 # Shadow mode, higher means higher quality, but higher computational cost. 0: VSM, 1: EVSM2, 2: EVSM4
 Format = 0							 # Texture format, higher means higher quality, but higher bandwidth cost. 0: 16 bit, 1: 32 bit
-CascadeResolution = 2				 # Resolution used for shadow cascades. 0: 1024, 1: 1536, 2: 2048
+CascadeResolution = 2				 # Resolution used for shadow cascades. 0: 1024, 1: 1536, 2: 2048,
+                                     # 3: 2560, 4: 3072, 5: 3584. The atlas holds 2x2 cascades, so
+                                     # VRAM and shadow-pass bandwidth scale with the square of this:
+                                     # 3 is ~2.6x the cost of 2, and 5 is ~5x. Clamped down if it
+                                     # exceeds the device's maximum texture size.
 Prefilter = true					 # Enable prefiltering the shadow maps. Prefiltering is a blur.
 MSAA = true							 # Enable multisample antialiasing for shadow maps.
 Mipmaps = false						 # DISABLED. Enable mipmaps for the shadow maps.

@@ -32,6 +32,8 @@ float4 TESR_DebugVar;
 
 // Structures:
 
+#include "Includes/PBRScale.hlsl"
+
 struct VS_INPUT {
     float2 BaseUV : TEXCOORD0;
     float3 texcoord_1 : TEXCOORD1_centroid;			// eyeDirection for pointlight1
@@ -78,9 +80,9 @@ VS_OUTPUT main(VS_INPUT IN) {
     float3 r6;
     float4 texel0;
 
-    const float4 SunLightColor = PSLightColor[1];
-    const float4 PointLight1Color = PSLightColor[2];
-    const float4 PointLight2Color = PSLightColor[3];
+    const float4 SunLightColor = PBRLight(PSLightColor[1]);
+    const float4 PointLight1Color = PBRLight(PSLightColor[2]);
+    const float4 PointLight2Color = PBRLight(PSLightColor[3]);
 
     noxel2.xyz = tex2D(NormalMap, IN.BaseUV.xy);			// partial precision
     r4.xyzw = tex2D(GlowMap, IN.BaseUV.xy);			// partial precision
@@ -108,9 +110,11 @@ VS_OUTPUT main(VS_INPUT IN) {
     r0.yzw = (PointLight2Color.xyzw * q18.x) + r2.xyzw;			// partial precision
     r5.yzw = ((q13.x * shades(q5.xyz, -IN.texcoord_1)) * SunLightColor.xyzw) * 0.5;			// partial precision
     r1.yzw = (saturate((1 - att3.x) - att4.x) * q40.xyz) + ((SunLightColor.xyzw * shades(q6.xyz, IN.texcoord_1.xyz)) + r5.yzw);			// partial precision
-    r6.xyz = ((r2.w * ((q19.x * r4.yzw) + r0.yzw)) + r1.yzw) + AmbientColor.rgb;			// partial precision
+    r6.xyz = ((r2.w * ((q19.x * r4.yzw) + r0.yzw)) + r1.yzw) + PBRAmbient(AmbientColor.rgb);			// partial precision
 
-    OUT.color_0.rgba = selectColor(TESR_DebugVar.x, float4(r6, 1), PSLightColor[0], PSLightColor[1], PSLightColor[2], PSLightColor[3], PSLightColor[4], PSLightColor[5], PSLightColor[6], PSLightColor[7], PSLightColor[8]);
+    // Was a debug override: selectColor(TESR_DebugVar.x, ...) emitted a flat light colour
+    // unless the dev var was zero. Kept only the real result.
+    OUT.color_0.rgba = float4(r6, 1);
     return OUT;
 };
 

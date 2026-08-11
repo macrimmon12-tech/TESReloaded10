@@ -9,7 +9,6 @@ sampler2D FaceGenMap0 : register(s2);
 sampler2D FaceGenMap1 : register(s3);
 sampler2D NormalMap : register(s1);
 float4 PSLightColor[10] : register(c3);
-float4 PSLightPosition[8];
 float4 Toggles : register(c27);
 
 
@@ -29,7 +28,28 @@ float4 Toggles : register(c27);
 //
 
 
+// --- register aliases --------------------------------------------------------
+// const_N names a raw register cN. Engine constants are aliased to their declared names
+// below; def immediates are recovered from the vanilla bytecode. A register the shader
+// defs takes the literal, NOT the engine constant that shares its number.
+float4 PSLightPosition[8] : register(c19);
+static const float4 const_0 = float4(-0.5, 2, 1, 0.3);
+#define const_1 AmbientColor
+#define const_2 EmittanceColor
+#define const_3 PBRLight(PSLightColor[0])
+#define const_4 PBRLight(PSLightColor[1])
+#define const_5 PBRLight(PSLightColor[2])
+#define const_6 PBRLight(PSLightColor[3])
+static const float4 const_8 = float4(0.3, 0, 0, 1);
+#define const_19 PSLightPosition[0]
+#define const_20 PSLightPosition[1]
+#define const_21 PSLightPosition[2]
+#define const_27 Toggles
+// -----------------------------------------------------------------------------
+
 // Structures:
+
+#include "Includes/PBRScale.hlsl"
 
 struct VS_INPUT {
     float3 texcoord_3 : TEXCOORD3;
@@ -104,7 +124,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     q6.xyz = normalize(IN.texcoord_4.xyz);			// partial precision
     q0.xyz = normalize(IN.texcoord_2.xyz);			// partial precision
     r1.xyz = const_0.xyz;
-    clip(r2.xyzw);
+    // The texkill belongs below: r2 is not assigned until the alpha test.
     noxel4.xyz = tex2D(NormalMap, IN.BaseUV.xy);			// partial precision
     r4.xyzw = tex2D(FaceGenMap1, IN.BaseUV.xy);			// partial precision
     r3.xyzw = tex2D(FaceGenMap0, IN.BaseUV.xy);			// partial precision
@@ -125,7 +145,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     q27.xyz = 2 * ((expand(r3.xyz) + r0.xyz) * (2 * r4.xyz));			// partial precision	// [0,1] to [-1,+1]
     q1.xyz = (const_19.xyz - IN.texcoord_1.xyz) / const_19.w;			// partial precision
     q12.x = sqr(1 - shades(q5.xyz, q0.xyz));			// partial precision
-    q14.xyz = shades(q5.xyz, IN.texcoord_3.xyz) * PSLightColor[0].rgb;			// partial precision
+    q14.xyz = shades(q5.xyz, IN.texcoord_3.xyz) * PBRLight(PSLightColor[0]).rgb;			// partial precision
     r5.x = shades(q1.xyz, q1.xyz);			// partial precision
     q10.x = saturate(((3 - (q9.x * 2)) * sqr(q9.x)) - ((3 - (q8.x * 2)) * sqr(q8.x)));			// partial precision
     q15.xyz = normalize(IN.texcoord_5.xyz);			// partial precision
@@ -139,13 +159,14 @@ VS_OUTPUT main(VS_INPUT IN) {
     q18.xyz = (q17.x * const_5.xyz) + ((q12.x * shades(q0.xyz, -q15.xyz)) * lerp(const_5.xyz, const_8.xyz, -r1.x));			// partial precision
     q28.xyz = (Toggles.x <= 0.0 ? q27.xyz : (q27.xyz * IN.color_0.rgb));			// partial precision
     r2.xyzw = (AmbientColor.a >= r1.z ? 0 : (r0.w - Toggles.w));
+    clip(r2.xyzw);   // texkill, moved down from the top of the shader
     r2.w = r1.y - EmittanceColor.a;
     r2.xyz = (r1.z >= EmittanceColor.a ? q14.xyz : ((r5.x * ((q10.x * const_8.xyz) + q13.xyz)) + q14.xyz));			// partial precision
     r8.xyz = (r5.y * ((q20.x * const_8.xyz) + q18.xyz)) + r2.xyz;			// partial precision
-    r1.yzw = (r2.w >= 0.0 ? r2.wzyx : r8.wzyx);			// partial precision
+    r1.yzw = (r2.w >= 0.0 ? r2.zyx : r8.zyx);			// partial precision
     q56.xyz = (3 >= EmittanceColor.a ? r1.wzyx : ((r5.z * ((q26.x * const_8.xyz) + q25.xyz)) + r1.wzy));			// partial precision
     r1.w = r0.w * AmbientColor.a;			// partial precision
-    q57.xyz = max(q56.xyz + AmbientColor.rgb, 0);			// partial precision
+    q57.xyz = max(q56.xyz + PBRAmbient(AmbientColor.rgb), 0);			// partial precision
     q60.xyz = q57.xyz * q28.xyz;			// partial precision
     r1.xyz = (Toggles.y <= 0.0 ? q60.xyz : ((IN.color_1.a * (IN.color_1.rgb - (q28.xyz * q57.xyz))) + q60.xyz));			// partial precision
     OUT.color_0.rgba = r1.xyzw;			// partial precision

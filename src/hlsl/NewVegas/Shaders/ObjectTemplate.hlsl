@@ -203,9 +203,7 @@ struct VS_OUTPUT {
     
     float3 viewDir : TEXCOORD6;
 
-    // TEXCOORD4 and TEXCOORD5 are unconditionally free in this variant (LIGHTS < 4).
-    // .w carries SHADOW_VS_SENTINEL so the pixel shader can tell whether an NVR vertex
-    // shader actually ran, or whether it is looking at a vanilla VS's leftovers.
+    // TEXCOORD4/5 are free at LIGHTS < 4. .w carries SHADOW_VS_SENTINEL.
     float4 shadowWorldPos : TEXCOORD4;
 
 #ifdef PROJ_SHADOW
@@ -308,10 +306,8 @@ VS_OUTPUT main(VS_INPUT IN) {
         OUT.shadowUVs.zw = ((shadowUV.xy - ShadowProjData.xy) / ShadowProjData.w) * float2(1, -1) + float2(0, 1);
     #endif
 
-    // Object shaders are model-space, so recover a camera-relative world position from
-    // the clip position for the forward shadow lookup. Unconditional: the branch on
-    // FORWARD_SHADOWS is compile-time, but the write is unconditional: skipping it would
-    // leave the interpolator undefined.
+    // Model-space shaders: recover a camera-relative world position from the clip position.
+    // Written unconditionally, or the interpolator is left undefined.
     OUT.shadowWorldPos = float4(GetShadowWorldPos(OUT.sPosition), SHADOW_VS_SENTINEL);
 
     return OUT;
@@ -327,11 +323,9 @@ VS_OUTPUT main(VS_INPUT IN) {
     #define MAX_LIGHTS 3
 #endif
 
-// Carrier for the camera-relative world position the forward shadow lookup needs.
-// At MAX_LIGHTS 6 every TEXCOORD is occupied, so it rides in the .w channels of
-// light4/light5/light6: the vertex shader writes a light radius there, but the pixel
-// shader never reads it -- attenuation uses PSLightPosition[i].w instead. Below that
-// there is a whole free interpolator.
+// Camera-relative world position carrier. At MAX_LIGHTS 6 every TEXCOORD is taken, so it
+// rides in light4/5/6's .w -- a light radius the PS never reads, since attenuation uses
+// PSLightPosition[i].w. Below that, a free interpolator.
 #if MAX_LIGHTS > 4
     // No fourth channel spare here, so the sentinel rides in lPosition.w. The vertex shader
     // normally puts LightData[0].w there and this pixel shader never reads it.
@@ -470,9 +464,8 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.fogColor.a = exp2(fogStrength * FogParam.z);
     OUT.fogColor.rgb = FogColor.rgb;
 
-    // See the LIGHTS < 4 variant. Written through SHADOW_WP_STORE because at MAX_LIGHTS 6
-    // there is no spare interpolator and this has to ride in light4/5/6's unused .w.
-    // Note this deliberately overwrites those .w values, which the pixel shader ignores.
+    // Through SHADOW_WP_STORE: at MAX_LIGHTS 6 this overwrites light4/5/6's .w, which the PS
+    // ignores.
     float3 shadowWorldPos = GetShadowWorldPos(OUT.sPosition);
     SHADOW_WP_STORE(OUT, shadowWorldPos);
 
@@ -603,10 +596,8 @@ PS_OUTPUT main(PS_INPUT IN) {
         shadowMultiplier = lerp(1, shadow, shadowMask);
     #endif
     
-    // Forward sun shadows. Applied to PSLightColor[0] -- the sun -- and nothing else, so
-    // ambient, emittance and the point lights below are untouched. This is the whole point
-    // of the forward path: the deferred composite can only scale the finished pixel.
-    // ddx/ddy must stay at top level, outside any dynamic branch.
+    // Applied to PSLightColor[0], the sun, only: ambient, emittance and point lights are
+    // untouched. ddx/ddy must stay at top level, outside any dynamic branch.
     #if !defined(DIFFUSE) && !defined(POINT)
         float3 sunShadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
         // Decline to shadow if a vanilla vertex shader ran: the interpolator is undefined.
@@ -633,9 +624,13 @@ PS_OUTPUT main(PS_INPUT IN) {
     #endif
     
     #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
-        lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb);
+        // ddx/ddy must stay at pixel-shader top level, so derive the world normal here rather
+        // than inside getAmbientLighting.
+        float3 ambNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+        lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
+                                       SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
     #endif
-    
+
     // Other light sources.
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
         lighting += getPointLightLighting(IN.light2Dir.xyz, IN.light2Dir.w, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
@@ -686,11 +681,9 @@ PS_OUTPUT main(PS_INPUT IN) {
     #define MAX_LIGHTS 3
 #endif
 
-// Carrier for the camera-relative world position the forward shadow lookup needs.
-// At MAX_LIGHTS 6 every TEXCOORD is occupied, so it rides in the .w channels of
-// light4/light5/light6: the vertex shader writes a light radius there, but the pixel
-// shader never reads it -- attenuation uses PSLightPosition[i].w instead. Below that
-// there is a whole free interpolator.
+// Camera-relative world position carrier. At MAX_LIGHTS 6 every TEXCOORD is taken, so it
+// rides in light4/5/6's .w -- a light radius the PS never reads, since attenuation uses
+// PSLightPosition[i].w. Below that, a free interpolator.
 #if MAX_LIGHTS > 4
     // No fourth channel spare here, so the sentinel rides in lPosition.w. The vertex shader
     // normally puts LightData[0].w there and this pixel shader never reads it.
@@ -818,8 +811,11 @@ PS_OUTPUT main(PS_INPUT IN) {
         lighting += (5 > lightsUsed ? 0.0 : 1.0) * getPointLightLightingAtt(IN.light6.xyz, att, PSLightColor[5].rgb, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
-    lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb);
-    
+    // ddx/ddy must stay at pixel-shader top level.
+    float3 ambNormal = GetShadowGeometricNormal(SHADOW_WP_LOAD(IN));
+    lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
+                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f);
+
     // TODO: Vanilla attenuates the full specular term by IN.lPosition.w for some reason. Is this a problem?
     float3 finalColor = lighting;
     
