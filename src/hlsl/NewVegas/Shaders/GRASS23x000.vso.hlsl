@@ -1,9 +1,9 @@
-// Grass VS -- vanilla GRASS23x002.vso (BSSM_GRASS_DIRONLY_LFS), plus shadowWorldPos.
+// Grass VS -- vanilla GRASS23x000.vso (BSSM_GRASS_DIRONLY_LF), plus shadowWorldPos.
+// No per-instance rotation basis: the card sits on world axes. Sun term from the instance
+// orientation packed in frac(inst).xyz.
 //
 // REGISTER HAZARD
-// Instanced: `mova a0.x` from TEXCOORD1 indexes c20[a0.x], so InstanceData spans c20..c247 and
-// the shadow matrices are relocated to c248/c252. Compiled map: ModelViewProj c9, InstanceData
-// c20-c247, matrices c248-c255. Any TESR_ constant added here must be checked against it.
+// As 002: InstanceData spans c20..c247, shadow matrices relocated to c248/c252.
 #define SHADOW_INVPROJ_REG c248
 #define SHADOW_INVVIEW_REG c252
 #include "includes/Shadow.hlsl"
@@ -19,7 +19,6 @@ row_major float4x4 ModelViewProj : register(c9);
 float4 FogColor     : register(c14);
 float4 FogParam     : register(c15);
 
-// c20..c247, below the relocated matrices.
 #ifndef GRASS_INSTANCE_COUNT
     #define GRASS_INSTANCE_COUNT 228
 #endif
@@ -35,7 +34,7 @@ struct VS_INPUT {
 struct VS_OUTPUT {
     float4 position       : POSITION;
     float2 uv             : TEXCOORD0;
-    float4 shadowWorldPos : TEXCOORD1;   // vanilla leaves TEXCOORD1 unused on this pair
+    float4 shadowWorldPos : TEXCOORD1;
     float4 ambient        : TEXCOORD4;
     float4 sun            : TEXCOORD5;   // .w = distance fade
     float4 fog            : COLOR0;      // .w = fog amount
@@ -44,58 +43,38 @@ struct VS_OUTPUT {
 VS_OUTPUT main(VS_INPUT IN) {
     VS_OUTPUT OUT;
 
-
     int idx = (int)(IN.instance.x - frac(IN.instance.x));
     float4 inst = InstanceData[idx];
 
-    // Fade on the instance origin. 4-component length (dp4 r2, r2), not xyz.
+    // Both distances measure (x, y, w - z), not xyz.
     float4 instClip = mul(ModelViewProj, float4(inst.xyz, 1.0f));
     float instDist = length(float4(instClip.xy, instClip.w - instClip.z, instClip.w));
     OUT.sun.w = 1.0f - saturate((instDist - AlphaParam.z) / AlphaParam.w);
 
-    // Orientation and light scale are packed into the fractional parts.
-    float4 f = frac(inst);
-    float3 orient = (f.xyz - 0.5f) * 2.0f;      // -1 .. 1
-    float lightScale = f.w * 0.75f + 0.25f;
-
-    // Better-conditioned perpendicular: (0,-z,y) when |y|>=|x| and |z|>=|x|, else (-z,0,x).
-    bool useAlt = (abs(orient.y) >= abs(orient.x)) && (abs(orient.z) >= abs(orient.x));
-    float3 perp = useAlt ? float3(0.0f, -orient.z, orient.y)
-                         : float3(-orient.z, 0.0f, orient.x);
-
-    float3 tangent  = normalize(perp);
-    float3 binormal = cross(tangent, orient);
-
-    // Scale, then place on the billboard basis.
-    float3 scale = (0.01f * inst.w) * ScaleMask.xyz + 1.0f;
-    float3 local = scale * IN.position.xyz;
-    float3 pos = binormal * local.x + tangent * local.y + orient * local.z;
-
-    // Sun off the card orientation.
-    float NdotL = saturate(dot(DiffuseDir, orient));
-
-    // Per-instance phase from inst.xy, stiffness from vertex alpha squared.
     float phase = (inst.x + inst.y) * 0.0078125f + WindData.w;
-    phase = frac(phase * 0.159154937f + 0.5f) * 6.28318548f - 3.14159274f;   // wrap to -pi..pi
+    phase = frac(phase * 0.159154937f + 0.5f) * 6.28318548f - 3.14159274f;
     float sway = sin(phase) * WindData.z * (IN.color.w * IN.color.w);
-    pos.xy += sway * WindData.xy;
+
+    float3 scale = (0.01f * inst.w) * ScaleMask.xyz + 1.0f;
+    float3 pos = IN.position.xyz * scale + float3(sway * WindData.xy, 0.0f);
 
     float4 worldPos = float4(pos + inst.xyz, 1.0f);
     OUT.position = mul(ModelViewProj, worldPos);
 
-    // Kept separate so the PS can shadow the sun alone.
+    float4 f = frac(inst);
+    float lightScale = f.w * 0.75f + 0.25f;
+    float3 orient = (f.xyz - 0.5f) * 2.0f;
+    float NdotL = saturate(dot(DiffuseDir, orient));
+
     OUT.ambient = lightScale * AmbientColor;
     OUT.sun.xyz = ((lightScale * IN.color.rgb) * NdotL) * DiffuseColor * AddlParams.x;
 
-    // Fog from clip-space xyz distance.
     float fogDist = length(float3(OUT.position.xy, OUT.position.w - OUT.position.z));
     float fogStrength = 1.0f - saturate((FogParam.x - fogDist) / FogParam.y);
     OUT.fog.rgb = FogColor.rgb;
     OUT.fog.w = pow(fogStrength, FogParam.z);
 
     OUT.uv = IN.uv;
-
-
     OUT.shadowWorldPos = float4(GetShadowWorldPos(OUT.position), SHADOW_VS_SENTINEL);
 
     return OUT;

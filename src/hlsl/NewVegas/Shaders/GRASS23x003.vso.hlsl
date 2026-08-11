@@ -49,7 +49,7 @@ VS_OUTPUT main(VS_INPUT IN) {
 
     // Fade on the instance origin. 4-component length (dp4 r2, r2), not xyz.
     float4 instClip = mul(ModelViewProj, float4(inst.xyz, 1.0f));
-    float instDist = length(instClip);
+    float instDist = length(float4(instClip.xy, instClip.w - instClip.z, instClip.w));
     OUT.sun.w = 1.0f - saturate((instDist - AlphaParam.z) / AlphaParam.w);
 
     float4 f = frac(inst);
@@ -82,7 +82,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.ambient = lightScale * AmbientColor;
     OUT.sun.xyz = ((lightScale * IN.color.rgb) * NdotL) * DiffuseColor * AddlParams.x;
 
-    float fogDist = length(OUT.position.xyz);
+    float fogDist = length(float3(OUT.position.xy, OUT.position.w - OUT.position.z));
     float fogStrength = 1.0f - saturate((FogParam.x - fogDist) / FogParam.y);
     OUT.fog.rgb = FogColor.rgb;
     OUT.fog.w = pow(fogStrength, FogParam.z);
