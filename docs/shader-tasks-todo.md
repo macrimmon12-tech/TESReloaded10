@@ -202,8 +202,162 @@ dedicated sessions per task. Check items off as they land.
   - **Properties.** Near-zero cost; not light-direction dependent (static
     darken/lighten regardless of sun angle) — this is the key difference
     from NMS, which is dynamic and shifts with the sun.
-- [ ] **Animating volumetric fog** — investigate animation of volumetric
-  fog; consider whether this warrants a separate lowfog/mist shader.
+- [ ] **Animating volumetric fog** — add slow ambient drift motion to
+  volumetric fog; not reactive to player movement, just passive atmosphere.
+
+  <details>
+  <summary>Design plan</summary>
+
+  **Feasibility.** High — all infrastructure exists. `TESR_GameTime` is a
+  registered constant already used in WetWorld, Underwater, Snow, Rain, and
+  GodRays shaders. Its `.x` component (game time in milliseconds) is an
+  ever-accumulating value ideal for slow continuous scrolling.
+
+  **Approach: time-driven world-space offset inside `getHeightFog()`.**
+  `VolumetricFog.fx.hlsl`'s `getHeightFog()` (line 105) already ray-marches
+  in world space, accumulating exponential density at each step's `pos`. A
+  small XY translation driven by `TESR_GameTime.x` makes the density field
+  appear to slowly drift without touching the shader's structure:
+
+  ```hlsl
+  // inside getHeightFog(), before the unrolled loop:
+  float2 drift = float2(TESR_GameTime.x * FogDriftSpeed,
+                        TESR_GameTime.x * FogDriftSpeed * 0.6) * 0.00001;
+  pos.xy += drift;
+  ```
+
+  The `0.6` asymmetry on the Y axis breaks the drift out of a perfectly
+  diagonal line. Layering a second sine-modulated term at a different
+  frequency adds organic turbulence without a noise texture:
+
+  ```hlsl
+  pos.xy += float2(sin(TESR_GameTime.x * 0.0003), cos(TESR_GameTime.x * 0.00019)) * FogDriftAmplitude;
+  ```
+
+  **CPU side.** Add `FogDriftSpeed` (and optionally `FogDriftAmplitude`) to
+  `VolumetricFogStruct::Data` in `VolumetricFog.h` — `Constants.Data.y` and
+  `.w` are currently unused (`Data.x` = MinimumBaseFog, `Data.z` = Amount).
+  Read from settings in `UpdateSettings()`. Register nothing new — the
+  existing `TESR_VolumetricFogData` constant covers the whole `Data` vector.
+
+  Add `TESR_GameTime` to `VolumetricFog.fx.hlsl`'s uniform list (one line,
+  same pattern as every other effect that uses it).
+
+  **Config.** Add under `[Shaders.VolumetricFog.Main]` in
+  `NewVegasReloaded.dll.defaults.toml`:
+  ```toml
+  FogDriftSpeed = 1.0      # 0 = static, higher = faster drift
+  FogDriftAmplitude = 1.0  # scale of the sine turbulence layer
+  ```
+
+  **Status.** Discussed/planned only — not yet implemented or tested in-game.
+  No code exists for this yet.
+
+  </details>
+
+- [ ] **Water: caustics visible from above** — project animated caustic
+  patterns onto the underwater floor as seen by the player standing above
+  the water surface.
+
+  <details>
+  <summary>Design plan</summary>
+
+  **What exists.** `Underwater.fx.hlsl`'s `Water()` pass already applies
+  caustics to underwater pixels via `getCaustics(worldPos)` (line 199). The
+  `getCaustics()` function (lines 101–113) is fully working — sun-angle
+  projected, dual-layer animated, with floor-angle and depth fading. The
+  caustics texture is `Water\caust_001.dds` at sampler s6. All the
+  parameters are correct.
+
+  **The problem.** `UnderwaterEffect::ShouldRender()` (`Underwater.cpp`)
+  returns true only when `GameState.isUnderwater || Player->inWater`. When
+  the camera is above water, the entire effect (all 5 passes) never runs, so
+  the `Water()` pass and its caustics never execute.
+
+  **Fix.** Widen the trigger condition so the effect also runs when water
+  shaders are active in the scene (water is present to look at):
+
+  ```cpp
+  // Underwater.cpp — ShouldRender():
+  return TheShaderManager->GameState.isUnderwater
+      || Player->inWater
+      || TheShaderManager->Shaders.Water->Enabled;
+  ```
+
+  The `Water()` pixel shader already guards itself with `aboveWater()` —
+  it returns early for any pixel above the water surface, so sky and
+  above-water geometry are untouched. Only underwater floor pixels get
+  the caustics treatment.
+
+  **Godrays pass caveat.** Running the effect above water also runs the
+  `Godrays()` pass (pass 0), which shoots volumetric rays downward. Test
+  whether `samplingDepthFade = smoothstep(800, 0, TESR_WaterSettings.x -
+  samplingUV.z)` naturally zeros out when the camera is above water (it
+  should, since `samplingUV.z` starts above water height), but if it
+  produces visible artifacts, guard the pass with an `isUnderwater` check.
+
+  **Ceiling caustics (interiors, bonus).** A separate, harder problem —
+  detecting surfaces above the water body in an interior and projecting
+  caustics upward (reflected off the water surface onto ceilings). Needs:
+  a new post-process pass, a heuristic to identify "above water in interior"
+  pixels (surface faces downward + within some height above water level +
+  `!isExterior`), and an upward-projected caustics sample. Requires its own
+  implementation session; do not conflate with the above-water floor
+  caustics fix.
+
+  **Status.** Discussed/planned only — no code written, not yet tested.
+
+  </details>
+
+- [ ] **Water: specular streak width and distance falloff** — the GGX
+  specular at roughness 0.02 produces a geometrically narrow streak and
+  goes sub-pixel (invisible) at range.
+
+  <details>
+  <summary>Design plan and attempt</summary>
+
+  **Root cause.** `getSpecular()` in `Water.hlsl` calls `BRDF(0.02, ...)`
+  with a hardcoded near-mirror roughness. At roughness 0.02, the GGX lobe
+  subtends ~±1° — only wave normals within that deviation of the perfect
+  reflection direction contribute. That produces a narrow streak and, at
+  distance where wave detail is sub-pixel, produces nothing at all.
+
+  **Approach: dual-lobe specular.**
+  - **Sharp lobe** (roughness 0.02, full boost): preserves the pinpoint
+    highlights the user likes at close range.
+  - **Broad lobe** (roughness scales from 0.12 near to 0.45 at 8000 units,
+    8% of sharp boost): widens the streak and maintains a visible shimmer at
+    distance. Physically motivated — many sub-pixel wave normals statistically
+    average to a coarser macrosurface at range.
+
+  `getSpecular()` was updated to accept a `distance` parameter (already
+  computed as `length(eyeVector.xy)` in every caller). All five callers
+  — WATER000, WATER001, WATER017, WATER018, WATER033 — were updated to pass
+  it.
+
+  **Tuning knobs in `Water.hlsl:getSpecular()`:**
+  - `0.08` (broad boost multiplier) — raise if streak feels faint, lower if
+    it washes out pinpoints
+  - `0.12` (near roughness of broad lobe) — controls streak width at close
+    range; higher = wider streak
+  - `0.45` (far roughness of broad lobe) — controls shimmer width at max
+    distance
+  - `8000.0` (distance ramp endpoint) — raise if the transition to broader
+    highlights happens too close to camera
+
+  **Status.** Code written and pushed (commit `d39263d` on branch
+  `claude/animate-volumetric-fog-eGxG7`). **Not verified in-game** — the
+  numbers above are starting estimates and will almost certainly need tuning
+  after a real test session.
+
+  **Possible next step.** If dual-lobe isn't sufficient at extreme distance,
+  consider `PBRSunSpecular()` (already in `PBR.hlsl:138`) which models the
+  sun as a disk light of known angular radius — this widens the highlight
+  streak to a physically correct width without needing the second lobe,
+  at the cost of the streak being wide rather than pinpoint. Could replace
+  or supplement the sharp lobe.
+
+  </details>
 
 ## Notes
 
