@@ -223,7 +223,7 @@ void OcclusionManager::Render(NiGeometry* Geo) {
 				}
 			}
 			else if (ShaderProperty->IsWaterProperty()) {
-				if (!WaterTexture) D3DXCreateTextureFromFileA(TheRenderManager->device, ".\\Data\\Textures\\Water\\water00.dds", &WaterTexture);
+				if (!WaterTexture) WaterTexture = (IDirect3DTexture9*)TheTextureManager->GetFileTexture(".\\Data\\Textures\\Water\\water00.dds", TextureRecord::PlanarBuffer);
 				RenderState->SetTexture(0, WaterTexture);
 				RenderState->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP, false);
 				RenderState->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP, false);

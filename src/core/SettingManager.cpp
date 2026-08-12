@@ -1220,7 +1220,7 @@ bool SettingManager::GetMenuShaderEnabled(const char* Name) {
 	}
 
 	strcat(settingString, ".Status");
-	bool enabled = (bool*)GetSettingI(settingString, "Enabled");
+	bool enabled = (bool)GetSettingI(settingString, "Enabled");
 	if (!enabled && IsShaderForced(Name)) {
 		SetMenuShaderEnabled(Name, true);
 		enabled = true;
@@ -1240,7 +1240,7 @@ void SettingManager::SetMenuShaderEnabled(const char* Name, bool enabled) {
 bool SettingManager::GetMenuMiscEnabled(const char* Name) {
 	char settingString[256];
 	strcpy(settingString, "Main.Main.Misc");
-	return (bool*)GetSettingI(settingString, Name);
+	return (bool)GetSettingI(settingString, Name);
 }
 
 
