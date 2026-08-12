@@ -271,13 +271,6 @@ float GetSunShadow(float3 worldPos, float3 worldNormal) {
     // Fraction of the way to a cascade's border at which the cross-fade into the next begins.
     const float blend = 0.9f;
 
-    // Per-cascade offset, each in its own texel scale.
-    float4 shadows = float4(
-        SampleShadowAtlas(mul(float4(worldPos + offsetDistance.x * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformNear),   float2(0.0f, 0.0f), bias, 0.1f),
-        SampleShadowAtlas(mul(float4(worldPos + offsetDistance.y * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformMiddle), float2(0.5f, 0.0f), bias, 0.2f),
-        SampleShadowAtlas(mul(float4(worldPos + offsetDistance.z * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformFar),    float2(0.0f, 0.5f), bias, 0.6f),
-        SampleShadowAtlas(mul(float4(worldPos + offsetDistance.w * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformLod),    float2(0.5f, 0.5f), bias, 0.8f));
-
     // Distance to each cascade centre, cross-faded over the outer 10%. Circular boundaries,
     // matching SunShadows.fx: selecting on the square light-space NDC box steps visibly.
     float4 distances = float4(
@@ -286,23 +279,45 @@ float GetSunShadow(float3 worldPos, float3 worldNormal) {
         length(worldPos - TESR_ShadowFarCenter.xyz),
         length(worldPos - TESR_ShadowLodCenter.xyz));
 
+    // Sample inside the branch, not before it. A pixel needs one cascade, or two in the outer
+    // 10% where they cross-fade; sampling all four up front cost four atlas fetches and four
+    // matrix transforms on every shadowed pixel, and the forward path pays that per object.
+    //
+    // Legal here only because SampleShadowAtlas uses tex2Dlod -- a gradient instruction under
+    // dynamic flow control is X3528 in ps_3_0. The atlas has no mipmaps, so LOD 0 is exact.
+#define SHADOW_TAP_NEAR   SampleShadowAtlas(mul(float4(worldPos + offsetDistance.x * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformNear),   float2(0.0f, 0.0f), bias, 0.1f)
+#define SHADOW_TAP_MIDDLE SampleShadowAtlas(mul(float4(worldPos + offsetDistance.y * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformMiddle), float2(0.5f, 0.0f), bias, 0.2f)
+#define SHADOW_TAP_FAR    SampleShadowAtlas(mul(float4(worldPos + offsetDistance.z * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformFar),    float2(0.0f, 0.5f), bias, 0.6f)
+#define SHADOW_TAP_LOD    SampleShadowAtlas(mul(float4(worldPos + offsetDistance.w * worldNormal, 1.0f), TESR_ShadowCameraToLightTransformLod),    float2(0.5f, 0.5f), bias, 0.8f)
+
     // Initialised: a point beyond the last cascade falls through every branch.
     float shadow = 1.0f;
-    if (distances.x < radii.x) {
-        shadow = (distances.x < radii.x * blend) ? shadows.x
-               : lerp(shadows.x, shadows.y, smoothstep(radii.x * blend, radii.x, distances.x));
+    [branch] if (distances.x < radii.x) {
+        [branch] if (distances.x < radii.x * blend)
+            shadow = SHADOW_TAP_NEAR;
+        else
+            shadow = lerp(SHADOW_TAP_NEAR, SHADOW_TAP_MIDDLE, smoothstep(radii.x * blend, radii.x, distances.x));
     }
     else if (distances.y < radii.y) {
-        shadow = (distances.y < radii.y * blend) ? shadows.y
-               : lerp(shadows.y, shadows.z, smoothstep(radii.y * blend, radii.y, distances.y));
+        [branch] if (distances.y < radii.y * blend)
+            shadow = SHADOW_TAP_MIDDLE;
+        else
+            shadow = lerp(SHADOW_TAP_MIDDLE, SHADOW_TAP_FAR, smoothstep(radii.y * blend, radii.y, distances.y));
     }
     else if (distances.z < radii.z) {
-        shadow = (distances.z < radii.z * blend) ? shadows.z
-               : lerp(shadows.z, shadows.w, smoothstep(radii.z * blend, radii.z, distances.z));
+        [branch] if (distances.z < radii.z * blend)
+            shadow = SHADOW_TAP_FAR;
+        else
+            shadow = lerp(SHADOW_TAP_FAR, SHADOW_TAP_LOD, smoothstep(radii.z * blend, radii.z, distances.z));
     }
     else if (distances.w < radii.w) {
-        shadow = lerp(shadows.w, 1.0f, smoothstep(radii.w * blend, radii.w, distances.w));
+        shadow = lerp(SHADOW_TAP_LOD, 1.0f, smoothstep(radii.w * blend, radii.w, distances.w));
     }
+
+#undef SHADOW_TAP_NEAR
+#undef SHADOW_TAP_MIDDLE
+#undef SHADOW_TAP_FAR
+#undef SHADOW_TAP_LOD
 
     shadow = saturate(shadow);
 

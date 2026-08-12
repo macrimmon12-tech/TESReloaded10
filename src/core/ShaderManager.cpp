@@ -606,8 +606,17 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 
 	// save only the n first lights (based on #define TrackedLightsMax)
 	memset(&TheShaderManager->LightPosition, 0, TrackedLightsMax * sizeof(D3DXVECTOR4)); // clear previous lights from array
-	//memset(&ShadowsConstants->ShadowLightPosition, 0, ShadowCubeMapsMax * sizeof(D3DXVECTOR4)); // clear previous lights from array
+	// Must be cleared. The fill loop below only zeroes trailing slots once it runs out of scene
+	// lights; with more lights than slots it never reaches that branch, and a slot left holding
+	// last frame's position keeps GetPointLightAmount sampling a cubemap nobody redraws.
+	memset(&ShadowsConstants->ShadowLightPosition, 0, ShadowCubeMapsMax * sizeof(D3DXVECTOR4));
 	memset(&TheShaderManager->LightColor, 0, (TrackedLightsMax + ShadowCubeMapsMax) * sizeof(D3DXVECTOR4)); // clear previous lights from array
+
+	// ShadowManager::RenderShadowMaps only renders cubemaps for the first LightPoints slots.
+	// Filling past that gives the shader a live position and colour for a face that is never
+	// redrawn, so it samples whatever that cubemap last held -- a shadow frozen from an earlier
+	// frame or cell. Lights beyond the cap fall through to the non-shadowing tracked list.
+	const int ShadowLightsMax = min(Settings->LightPoints, (int)ShadowCubeMapsMax);
 
 	// get the data for all tracked lights
 	int ShadowIndex = 0;
@@ -690,7 +699,7 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 			D3DXVECTOR4 LightPos = Light->m_worldTransform.pos.toD3DXVEC4();
 			LightPos.w = radius;
 
-			if (CastShadow && ShadowIndex < ShadowCubeMapsMax && radius > 10) {
+			if (CastShadow && ShadowIndex < ShadowLightsMax && radius > 10) {
 				// add found light to list of lights that cast shadows
 				ShadowLightsList[ShadowIndex] = v->second;
 				ShadowsConstants->ShadowLightPosition[ShadowIndex] = LightPos;

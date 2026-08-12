@@ -37,6 +37,7 @@ float4 TESR_DebugVar;
 
 // Structures:
 #include "Includes/PBRScale.hlsl"
+#include "Includes/Shadow.hlsl"
 
 struct VS_INPUT {
     float2 BaseUV : TEXCOORD0;                      // uv
@@ -44,6 +45,7 @@ struct VS_INPUT {
     float4 color_1 : COLOR1;                        // fog color
     float3 texcoord_1 : TEXCOORD1_centroid;         // light direction from the sun
     float3 texcoord_2 : TEXCOORD2_centroid;         // light direction from pointlight
+    float4 shadowWorldPos : TEXCOORD3;              // from SKIN2005.vso, .w = sentinel
     float4 texcoord_4 : TEXCOORD4;                  // attenuation map UV
     float3 texcoord_6 : TEXCOORD6_centroid;         // eye direction
 };
@@ -77,6 +79,17 @@ VS_OUTPUT main(VS_INPUT IN) {
     // calculate lighting components
     float3 lighting = GetLighting(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[1]).rgb);
     float spec = GetSpecular(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[1]).rgb);
+
+#if FORWARD_SHADOWS
+    // Forward sun shadow. Scales the SUN terms only; the point light and ambient are untouched.
+    // ddx/ddy must stay at top level, outside dynamic flow control.
+    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
+                    ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
+                    : 1.0f;
+    lighting *= sunShadow;
+    spec     *= sunShadow;
+#endif
 
     lighting += spec + pointLightLighting + PBRAmbient(AmbientColor.rgb);
     float4 finalColor = float4(lighting * baseColor.rgb, baseColor.a * AmbientColor.a);

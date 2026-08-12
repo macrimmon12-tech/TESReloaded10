@@ -74,20 +74,18 @@ float3 BRDF(float roughness, float3 fresnel, float NdotV, float NdotL, float Ndo
 }
 
 float3 PBRDiffuse(float metallicness, float roughness, float3 albedo, float3 normal, float3 eyeDir, float3 lightDir, float3 lightColor) {
-    const float3 reflectance = lerp(float(0.04).rrr, albedo, metallicness);
-    
     normal = normalize(normal);
-    eyeDir = normalize(eyeDir);
     lightDir = normalize(lightDir);
-    
-    const float3 halfway = normalize(eyeDir + lightDir);
+
     const float NdotL = shades(normal, lightDir);
-    const float LdotH = shades(lightDir, halfway);
-    
-    const float3 fresnel = Fresnel(reflectance, (1.0).xxx, LdotH);
-    
-    const float3 diffuse = (1 - metallicness) * LambertianDiffuse(albedo, fresnel);
-    
+
+    // No Fresnel. These permutations render no specular lobe, so energy taken out of diffuse
+    // has nowhere to reappear -- PBRSun returns it as spec * NdotS, this path just loses it.
+    // (1 - LdotH)^5 then drives the surface to black as eyeDir approaches -lightDir, where
+    // normalize(eyeDir + lightDir) is singular besides. Dropping the term removes the last
+    // view dependence, which is what a purely Lambertian material should have.
+    const float3 diffuse = (1 - metallicness) * albedo / PI;
+
     return diffuse * NdotL * lightColor * PI;
 }
 
