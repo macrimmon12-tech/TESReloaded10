@@ -245,6 +245,8 @@ uniform string LUTTexture
 
 All existing shaders must have their uniform declarations annotated to match the finalized format. This is a large but low-risk editing pass — annotations add metadata only, no shader behavior changes. It must happen **after** the annotation format is locked, and is best delivered as a focused standalone PR.
 
+**Goal:** the widget hint set was designed by working backwards from every special case that currently exists in the built-in effects (LUT slot pickers, tonemapping enum, color triples, key binding). After the annotation pass, no built-in effect should require a C++ `RenderMenu()` override. The virtual override mechanism exists as an escape hatch for genuinely unforeseen future cases only.
+
 ---
 
 ## Refactor 4 — Custom Effects Drop-in Folder
@@ -273,7 +275,7 @@ Data/Shaders/Effects/
 
 ### Constraints
 
-Custom effects are intentionally limited to the standard widget helper set. Any UI requirement that cannot be expressed through an annotation hint is simply not available to custom shaders. Built-in effects handle complex cases via their C++ `RenderMenu()` overrides. This is a clean and acceptable boundary.
+Custom effects are limited to the standard widget hint set by design. The hint set already covers every widget needed by the current built-in effects, so this is not a meaningful restriction in practice. If a genuinely novel widget type is needed in the future, the correct fix is to add a new hint to the engine — not to require C++ from shader authors.
 
 ---
 
