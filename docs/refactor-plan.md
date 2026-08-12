@@ -109,11 +109,106 @@ ImGui helper layer (pure functions, no game/effect domain knowledge)
 | Revert logic duplicated across `RenderSetting` + `RenderColorTriple` | Single `RevertButton()` helper |
 | Global `s_plusPressed` / `s_minusPressed` state | Scoped inside individual widget helper calls |
 
-### Shader Annotation Format
+### Shader Annotation Format (Locked)
 
-As part of R3, a uniform annotation format must be designed and locked before any shader editing begins. Annotations embed all metadata the engine needs to construct settings and select the correct widget — no sidecar files, no separate schema. Everything travels with the shader.
+Annotations are written as HLSL `< >` annotation blocks attached to each uniform declaration. Everything the engine needs to construct settings and render the correct widget lives in the shader — no sidecar files, no separate schema.
+
+#### Required vs Optional Fields
+
+Only `default` is required. Everything else is optional with defined fallbacks.
+
+| Field | Type | Required | Fallback if omitted |
+|---|---|---|---|
+| `default` | matches uniform type | **Yes** | — |
+| `name` | `string` | No | Variable name, underscores → spaces |
+| `description` | `string` | No | No tooltip rendered |
+| `widget` | `string` | No | Type-default (see widget table) |
+
+#### Widget Hints
+
+| Hint | Widget rendered | Applies to |
+|---|---|---|
+| *(omitted)* | Type-default (see below) | any |
+| `color` | RGB color triple picker | `float3` |
+| `enum` | Dropdown combo (requires `enumNames`) | `int` |
+| `key` | Key binding picker (DIK reference popup) | `int` |
+| `slider` | Explicit slider | `int` (overrides drag-int default) |
+| `path` | File cycle picker — prev/next arrows + filename display | `string` |
+
+**Type-defaults when `widget` is omitted:**
+
+| HLSL type | Default widget |
+|---|---|
+| `float`, `float2`, `float3`, `float4` | Slider(s) |
+| `int` | Drag int |
+| `bool` | Checkbox |
+
+Unknown hints fall back silently to the type-default — no error, no crash.
+
+#### Range and Step
+
+Optional fields for slider uniforms. Defaults apply when omitted.
+
+| Field | `float` default | `int` default |
+|---|---|---|
+| `min` | 0.0 | 0 |
+| `max` | 1.0 | 10 |
+| `step` | 0.001 | 1 |
+
+`step` controls both drag speed and the +/- button increment.
+
+#### Enum Labels
+
+Declared as a single comma-delimited string in `enumNames`. Zero-indexed — value `0` maps to the first label.
 
 ```hlsl
+string enumNames = "None,Lottes,ACES,Reinhard";
+```
+
+Spaces within labels are valid; commas are the delimiter.
+
+#### Path Widget
+
+Requires a `folder` field. `filter` is optional, defaults to `*.dds`.
+
+```hlsl
+string widget = "path";
+string folder = "Data\\Textures\\LUT\\";
+string filter = "*.dds";
+```
+
+The engine scans `folder` at overlay open and presents the file list with prev/next arrows. The uniform value is the selected filename.
+
+#### Pipeline Position
+
+Declared once at the shader level, outside any uniform block, at the top of the file. Controls which render stage the effect runs in.
+
+| Value | When it runs | Use for |
+|---|---|---|
+| `PreTonemapping` | Before the game's HDR tonemapper | Lighting, AO, bloom, exposure, atmospheric |
+| `PostTonemapping` | After tonemapper on LDR output | Color grading, lens, AA, sharpening, vignette |
+
+Default if omitted: `PostTonemapping`.
+
+```hlsl
+string PipelinePosition = "PostTonemapping";
+```
+
+#### Full Example
+
+```hlsl
+string PipelinePosition = "PostTonemapping";
+
+uniform float Exposure
+<
+    string name = "Exposure";
+    string description = "Scene exposure multiplier";
+    float default = 1.0;
+    float min = 0.0;
+    float max = 4.0;
+    float step = 0.01;
+>;
+
 uniform float3 TintColor
 <
     string name = "Tint Color";
@@ -130,21 +225,19 @@ uniform int TonemapMode
     string enumNames = "None,Lottes,ACES,Reinhard";
     int default = 0;
 >;
+
+uniform string LUTTexture
+<
+    string name = "LUT Texture";
+    string widget = "path";
+    string folder = "Data\\Textures\\LUT\\";
+    string filter = "*.dds";
+    string default = "";
+>;
 ```
 
-Supported widget hints cover the full range needed for shader uniforms:
-
-| Hint | Widget rendered |
-|---|---|
-| *(none / default)* | Slider (float) or checkbox (bool) based on type |
-| `color` | RGB color triple picker |
-| `enum` | Dropdown combo (requires `enumNames`) |
-| `key` | Key binding picker (DIK reference popup) |
-
-Unknown hints fall back gracefully to the type-default widget.
-
 **The clean boundary:**
-- Shader annotation → declares data and widget hint only
+- Shader annotation → declares data, defaults, range, and widget hint only
 - ImGui helper layer → knows how to render each widget hint
 - `EffectRecord::RenderMenu()` → bridges them; no custom logic in the bridge
 
@@ -194,7 +287,7 @@ R1  Type system                       ──────────────
 R2  Texture consolidation             ──────────────────────────▶  parallel to R1
 
 R3  EffectRecord owns UI
-  ├─ 3a  Design + lock annotation format          (must come first within R3)
+  ├─ 3a  Design + lock annotation format          ✓ LOCKED (see spec above)
   ├─ 3b  Implement ImGui helper layer
   ├─ 3c  Implement base RenderMenu() + GameMenuManager wiring
   ├─ 3d  Port built-in effects to RenderMenu() overrides
