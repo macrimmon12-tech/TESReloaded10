@@ -25,6 +25,22 @@ Direct `D3DXCreateTextureFromFileA` call with a hardcoded path bypasses `Texture
 
 **Fix:** Replace with `TheTextureManager->GetFileTexture(".\\Data\\Textures\\Water\\water00.dds", TextureRecord::PlanarBuffer)`.
 
+Note: this texture is a debug-only occlusion map visualization and is never player-visible. The fix is for caching consistency only — in-game water texture switching is not possible via this path; the visible water surface is rendered by the game engine's own shaders which NVR does not control.
+
+---
+
+## Refactor 1 — Type System (Settings Storage)
+
+**Root cause documented at:** `src/core/SettingManager.cpp:56`
+
+All settings are stored as strings internally and re-parsed on every access. This forces every consumer to hand-parse types, causes bool and int values to silently route through float code paths, and requires defensive double-casts such as `(bool)atof(Node.Value)` throughout `SettingManager.cpp` and `ImGuiManager.cpp`.
+
+**Target state:**
+- Settings carry a proper typed value (`bool`, `int`, `float`, `string`) rather than raw strings
+- `SetSetting` has correctly typed overloads — no implicit bool → float promotion
+- Consumers read typed values directly; no `strcmp(value, "1")` or `atof` at call sites
+- The defaults TOML is demoted to **default values only** — not a runtime schema driving UI behavior
+
 ---
 
 ## Refactor 2 — Texture Loading Consolidation
@@ -47,29 +63,6 @@ Three codepaths currently exist where one should:
 
 `LoadLUT()` dissolves into these three owners. `GetFileTexture()` is the single file texture loading path; all callers route through it.
 
-### Water Texture — Rebind Support
-
-As a natural extension of routing `OcclusionManager` through `TextureManager`, the water texture should also be made runtime-switchable via the `path` widget. Currently `WaterTexture` is a C++ member loaded once at startup and not exposed as a shader uniform, so the menu has no way to rebind it.
-
-**Target state:**
-- Water texture plumbed through as a proper shader resource that can be rebound at runtime
-- On `path` widget selection, the effect calls `GetFileTexture()` with the new path and reassigns the resource — same pattern as LUT slot assignment
-- Enables in-game water texture switching with no additional UI machinery beyond the standard `path` widget
-
----
-
-## Refactor 1 — Type System (Settings Storage)
-
-**Root cause documented at:** `src/core/SettingManager.cpp:56`
-
-All settings are stored as strings internally and re-parsed on every access. This forces every consumer to hand-parse types, causes bool and int values to silently route through float code paths, and requires defensive double-casts such as `(bool)atof(Node.Value)` throughout `SettingManager.cpp` and `ImGuiManager.cpp`.
-
-**Target state:**
-- Settings carry a proper typed value (`bool`, `int`, `float`, `string`) rather than raw strings
-- `SetSetting` has correctly typed overloads — no implicit bool → float promotion
-- Consumers read typed values directly; no `strcmp(value, "1")` or `atof` at call sites
-- The defaults TOML is demoted to **default values only** — not a runtime schema driving UI behavior
-
 ---
 
 ## Refactor 3 — EffectRecord Owns Its Own UI (Core Architecture)
@@ -84,15 +77,6 @@ The menu currently holds all effect-specific knowledge. `RenderContent()`, `Rend
 EffectRecord (base class)
   virtual RenderMenu(ImGuiContext)
     └─ default impl: iterate settings, call appropriate ImGui helper per widget hint
-
-  LUTEffect : EffectRecord
-    └─ RenderMenu override → calls LUT picker helper, owns slot assignment + persistence
-
-  TonemapEffect : EffectRecord
-    └─ RenderMenu override → calls enum combo helper with its own label list
-
-  ColorEffect : EffectRecord
-    └─ RenderMenu override → calls color triple helper
 
 GameMenuManager
   └─ foreach effect: effect->RenderMenu()    ← zero effect-specific knowledge
@@ -110,10 +94,10 @@ ImGui helper layer (pure functions, no game/effect domain knowledge)
 
 | Current code | Replaced by |
 |---|---|
-| `strcmp(node.Key, "TonemappingMode")` inline check | `TonemapEffect::RenderMenu()` override |
-| `strcmp(node.Key, "KeyEnable")` inline check | Effect's own `RenderMenu()` override |
-| RGB triple detection via key-name heuristic | Color effects explicitly call the color triple helper |
-| LUT section hardcoded in `RenderContent()` | `LUTEffect::RenderMenu()` override |
+| `strcmp(node.Key, "TonemappingMode")` inline check | `enum` widget hint on the uniform annotation |
+| `strcmp(node.Key, "KeyEnable")` inline check | `key` widget hint on the uniform annotation |
+| RGB triple detection via key-name heuristic | `color` widget hint on the uniform annotation |
+| LUT section hardcoded in `RenderContent()` | `path` widget hint on the uniform annotation |
 | Tooltip rendered in 3 branches (one unreachable) | Single `TooltipIfHovered()` helper |
 | Revert logic duplicated across `RenderSetting` + `RenderColorTriple` | Single `RevertButton()` helper |
 | Global `s_plusPressed` / `s_minusPressed` state | Scoped inside individual widget helper calls |
@@ -296,7 +280,6 @@ BF-2  (water texture cache)           ──────────────
 
 R1  Type system                       ──────────────────────────▶  prerequisite for R3
 R2  Texture consolidation             ──────────────────────────▶  parallel to R1
-  └─ includes water texture rebind support
 
 R3  EffectRecord owns UI
   ├─ 3a  Design + lock annotation format          ✓ LOCKED (see spec above)
