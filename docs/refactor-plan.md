@@ -29,6 +29,30 @@ Note: this texture is a debug-only occlusion map visualization and is never play
 
 ---
 
+## Refactor 0 — UI Aesthetic Pass (Theme + Font)
+
+**Current state:** `src/core/ImGuiManager.cpp:738-741` — `ImGui::StyleColorsDark()` (the stock preset) plus three manually-tweaked rounding values (`WindowRounding`, `FrameRounding`, `ScrollbarRounding`). No custom font is loaded anywhere in the codebase; the overlay renders in ImGui's bundled default font at native size.
+
+Independent of the type-system and widget-architecture refactors below — this only touches style/font setup in `ImGuiManager::Init` (or wherever `NewFrame`'s one-time init lives) and can ship on its own, same as the BF items.
+
+**Inputs (to be supplied, not decided here):**
+- A theme exported from Patitotective's ImThemes tool — a generated `ImGuiStyle`/`style.Colors[]` C++ block to drop in in place of the current `StyleColorsDark()` + manual rounding lines
+- A chosen font file (TTF/OTF) to load via `AddFontFromFileTTF`
+
+**Work involved once those land:**
+- Replace `StyleColorsDark()` + the three manual rounding assignments with the generated theme block (theme block supersedes the manual tweaks — don't keep both)
+- Load the chosen font at a real pixel size (not the default atlas font) via `AddFontFromFileTTF`; evaluate whether `imgui_freetype` is worth pulling in for hinting/AA quality — decide when the font is picked, not before
+- Audit hardcoded per-widget accent colors that currently bypass the theme via `PushStyleColor(..., ImVec4(literal))` instead of reading `style.Colors[]` — these are semantic (enabled/disabled, FX on/off) and will look wrong or clash against an arbitrary theme if left as magic literals:
+  - `ImGuiManager.cpp:1397-1398` — shader enabled/disabled button (green/red)
+  - `ImGuiManager.cpp:1520-1522` — tree node label enabled/disabled text color
+  - `ImGuiManager.cpp:1642-1644` — "FX ON"/"FX OFF" toolbar button
+  
+  These should move to a small named palette (e.g. `AccentGood` / `AccentBad` pulled from the theme or defined alongside it) rather than staying as inline `ImVec4(...)` literals scattered across call sites. Low risk, but worth doing in the same pass since it's the same category of change and touches adjacent lines.
+
+**Sequencing note:** R3 (below) rewrites these same call sites as part of collapsing `RenderSetting()`/`RenderColorTriple()` into the `EffectRecord::RenderMenu()` + widget-helper architecture. If R3 lands first, the accent-color externalization happens naturally as part of that rewrite and this bullet is moot. If the aesthetic pass lands first, keep the accent-color fix minimal (palette constants, not a new abstraction) so it doesn't fight with R3's helper layer later.
+
+---
+
 ## Refactor 1 — Type System (Settings Storage)
 
 **Root cause documented at:** `src/core/SettingManager.cpp:56`
@@ -326,6 +350,11 @@ Custom effects are limited to the standard widget hint set by design. The hint s
 ```
 BF-1  (bool* cast fix)                ──────────────────────────▶  ship now
 BF-2  (water texture cache)           ──────────────────────────▶  ship now
+
+R0  UI aesthetic pass (theme + font)  ──────────────────────────▶  ship whenever theme/font
+                                                                    are supplied; independent,
+                                                                    but see note under R0 re:
+                                                                    accent-color overlap with R3
 
 R1  Type system
   ├─ 1a  Typed settings storage (bool/int/float/string)  ──▶  prerequisite for R3
