@@ -39,7 +39,55 @@ All settings are stored as strings internally and re-parsed on every access. Thi
 - Settings carry a proper typed value (`bool`, `int`, `float`, `string`) rather than raw strings
 - `SetSetting` has correctly typed overloads — no implicit bool → float promotion
 - Consumers read typed values directly; no `strcmp(value, "1")` or `atof` at call sites
-- The defaults TOML is demoted to **default values only** — not a runtime schema driving UI behavior
+- The defaults TOML is eliminated entirely — defaults now live in shader annotations (see R3)
+- The user save file is migrated from TOML to INI (see R1b below)
+
+### Refactor 1b — Replace TOML with INI for User Save File
+
+This is a significant sub-project within R1 and should be planned and executed carefully.
+
+**Current role of TOML:**
+
+| Role | After refactor |
+|---|---|
+| Default values | ✓ Eliminated — live in shader annotations |
+| Type information | ✓ Eliminated — live in HLSL uniform declarations |
+| Setting discovery | ✓ Eliminated — engine discovers from shader annotations |
+| Tooltip descriptions | ✓ Eliminated — live in shader annotations |
+| User’s saved values | **Remains — needs a new home** |
+
+Once the schema responsibilities are gone, TOML is doing nothing a simpler format couldn’t do. The TOML parser library dependency is no longer justified.
+
+**Target format: INI**
+
+INI is already the native format of the game and xNVSE ecosystem, requires no library dependency, parses faster, and is trivially human-readable for debugging. The user save file becomes a flat key/value store — one section per effect, one key per uniform:
+
+```ini
+[Bloom]
+Intensity=0.75
+Threshold=0.85
+
+[LUT]
+DayTexture=warm_lut.dds
+NightTexture=cool_lut.dds
+
+[Tonemapping]
+TonemapMode=2
+Exposure=1.1
+```
+
+**What this involves:**
+- Replace `SettingManager`’s TOML read/write backend with an INI reader/writer
+- Remove the TOML parser library from the project
+- Migrate any existing user TOML save files (one-time conversion or accept that settings reset on upgrade)
+- Ensure `EffectRecord` subclasses write and read their own section by effect name
+- Custom effects in `Custom/` get their own INI section automatically by shader name
+
+**Migration note:** existing users will have their settings stored in TOML. Options are:
+1. Silent reset — simplest; users re-tune on upgrade (acceptable given the refactor scope)
+2. One-time migration tool — reads old TOML, writes new INI on first run
+
+Option 1 is recommended given the scale of the overall refactor. The settings are graphics tweaks, not critical user data.
 
 ---
 
@@ -264,6 +312,7 @@ Data/Shaders/Effects/
 - For each shader found, parses uniform annotations to build a settings list and pipeline position
 - Instantiates a `GenericEffectRecord` (uses base `RenderMenu()`)
 - Base `RenderMenu()` iterates the settings list and calls the appropriate ImGui helper per widget hint
+- Custom effect settings are saved to an INI section named after the shader file
 - No C++ required from the shader author — ever
 
 ### Constraints
@@ -278,7 +327,13 @@ Custom effects are limited to the standard widget hint set by design. The hint s
 BF-1  (bool* cast fix)                ──────────────────────────▶  ship now
 BF-2  (water texture cache)           ──────────────────────────▶  ship now
 
-R1  Type system                       ──────────────────────────▶  prerequisite for R3
+R1  Type system
+  ├─ 1a  Typed settings storage (bool/int/float/string)  ──▶  prerequisite for R3
+  └─ 1b  Replace TOML with INI save file                 ──▶  can run parallel to 1a;
+                                                              best done after R3 so
+                                                              INI sections match
+                                                              final effect structure
+
 R2  Texture consolidation             ──────────────────────────▶  parallel to R1
 
 R3  EffectRecord owns UI
@@ -288,5 +343,5 @@ R3  EffectRecord owns UI
   ├─ 3d  Port built-in effects to RenderMenu() overrides
   └─ 3e  Annotate all existing shaders            (after 3a is locked; own PR)
 
-R4  Custom effects drop-in folder     ──────────────────────────▶  after R3 complete
+R4  Custom effects drop-in folder     ──────────────────────────▶  after R3 + R1b complete
 ```
