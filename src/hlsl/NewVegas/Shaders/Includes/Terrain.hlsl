@@ -10,6 +10,19 @@
 float4 TESR_TerrainData : register(c89);
 float4 TESR_TerrainExtraData : register(c90);
 
+// Hemisphere skylight, mirroring Includes/Object.hlsl. Terrain never includes that file -- it
+// carries its own getVanillaLightingAtt -- so the constants are declared here. c134/c135 are
+// clear on this side: the terrain chain tops out at c92 and Shadow.hlsl pins c100-c133.
+float4 TESR_SkyColor : register(c134);
+float4 TESR_DebugVar : register(c135);
+
+// Additive upper-sky term on top of the weather ambient, weighted by w = (1 + N.up) / 2.
+// w must stay linear in the dot product: that is the exact cosine-weighted form factor.
+#ifndef SKY_AMBIENT_STRENGTH
+    #define SKY_AMBIENT_STRENGTH  (TESR_DebugVar.x)          // scale on skyUpper at w = 1
+    #define SKY_AMBIENT_ON        (TESR_DebugVar.y >= 1.0f)  // off by default
+#endif
+
 float3 blendDiffuseMaps(float3 vertexColor, float2 uv, int texCount, sampler2D tex[7], float blends[7]) {
     float3 color = float3(0, 0, 0);
     [unroll] for (int i = 0; i < texCount; i++) {
@@ -71,9 +84,16 @@ float3 getPointLightLighting(float3 lightDir, float att, float3 lightColor, floa
     }
 }
 
-float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 normal, float3 AmbientColor, float3 albedo, float gloss = 0.0, float glossPower = 0.0, float metallicness = 1.0, float parallaxMultiplier = 1.0) {
+float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 normal, float3 AmbientColor, float3 albedo, float gloss = 0.0, float glossPower = 0.0, float metallicness = 1.0, float parallaxMultiplier = 1.0, float3 worldNormal = float3(0.0f, 0.0f, 1.0f)) {
     float3 lightColor = sunColor * TESR_TerrainData.z * parallaxMultiplier;
     float3 ambientColor = AmbientColor * TESR_TerrainData.w;
+
+    // Hemisphere skylight, matching getAmbientLighting in Object.hlsl. worldNormal is the
+    // geometric world normal, not the tangent-space shading normal used above. Scaled by
+    // terrain's own ambient multiplier so the two move together when that is tuned.
+    float wSky = 0.5f * dot(worldNormal, float3(0.0f, 0.0f, 1.0f)) + 0.5f;
+    float3 skyTerm = TESR_SkyColor.rgb * SKY_AMBIENT_STRENGTH * TESR_TerrainData.w * wSky;
+    ambientColor += skyTerm * (SKY_AMBIENT_ON ? 1.0f : 0.0f);
     float3 color = albedo;
     color = lerp(luma(albedo), color, TESR_TerrainExtraData.y);
 
