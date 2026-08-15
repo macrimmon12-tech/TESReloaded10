@@ -6,6 +6,24 @@ This plan consolidates feedback from code review and developer discussion identi
 
 ---
 
+## Session Continuity
+
+Some refactor steps (particularly R3b+c+d) are large enough to risk hitting context limits mid-session. Follow these rules for every implementation session:
+
+**Commit incrementally, not at the end.** Commit after each sub-step completes even if nothing is testable yet. If the session dies, the next session can read the branch and continue from the last commit rather than starting over.
+
+**Write a handoff note if context runs low.** If a session is running low on context before finishing, it must:
+1. Commit whatever is done to the branch
+2. Write `docs/r3-handoff.md` (or equivalent) describing: what is complete, what is in progress, what decisions were made, and exactly what the next session needs to do to continue
+3. Stop — do not push broken or half-finished code without the handoff note
+
+**Continuing a stalled session.** Start the next session with:
+> "Read `docs/refactor-plan.md` and `docs/r3-handoff.md`. Continue from where the previous session left off. Do not redo completed work."
+
+**Clean up handoff notes after merging.** Once a step is complete and merged, delete the handoff note — it is scaffolding, not permanent documentation.
+
+---
+
 ## Bug Fixes (Ship Immediately, Independent)
 
 ### BF-1 — Pointer Cast UB in SettingManager ✓ DONE
@@ -240,7 +258,7 @@ Requires a `folder` field. `filter` is optional, defaults to `*.dds`.
 
 ```hlsl
 string widget = "path";
-string folder = "Data\\Textures\\NewVegasReloaded\\LUTs\\";
+string folder = "Data/Textures/NewVegasReloaded/LUTs/";
 string filter = "*.dds,*.png";
 ```
 
@@ -342,9 +360,9 @@ R2   Texture consolidation            ──────────────
 
 R3   EffectRecord owns UI
   ├─ 3a  Annotation format              ✓ LOCKED
-  ├─ 3b  ImGui helper layer             ┐
-  ├─ 3c  Base RenderMenu() + wiring     ├─ one unbreakable unit;
-  └─ 3d  HLSL annotation parser         ┘   nothing testable until all three done
+  ├─ 3b  ImGui helper layer             ┌─ commit after each sub-step
+  ├─ 3c  Base RenderMenu() + wiring     ├─ write handoff note if context runs low
+  └─ 3d  HLSL annotation parser         └─ nothing testable until all three done
        ↓ first testable state: one EffectRecord (Bloom or Coloring)
          rendered end-to-end via annotations
   ├─ 3e  Annotate all NVR EffectRecord shaders   (own PR)
