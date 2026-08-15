@@ -22,8 +22,14 @@ float4 TESR_ReciprocalResolution
 >;
 float4 TESR_DitherBusterData
 <
+	string widget = "packed";
 	string name = "Dither Buster Data";
 	string description = "Packed anti-aliasing parameters: x = Strength (Shaders.DitherBuster.Main.Strength, AA blend strength, 0-1), y = MaskPower (edge detection sensitivity; higher = fewer edges AA'd).";
+	string componentKeys     = "Strength,MaskPower";
+	string componentDefaults = "1.0,0.5";
+	string componentMins     = "0,0";
+	string componentMaxs     = "1,2";
+	string componentSteps    = "0.01,0.01";
 	float defaultValue = 1.0;
 >;
 

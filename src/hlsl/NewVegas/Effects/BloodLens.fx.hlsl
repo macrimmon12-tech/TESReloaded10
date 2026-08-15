@@ -7,8 +7,14 @@ string PipelinePosition = "PostTonemapping";
 // Shaders.BloodLens.Main.Intensity setting scaled by the current fade-out amount.
 float4 TESR_BloodLensParams
 <
+	string widget = "packed";
 	string name = "Blood Lens Params";
 	string description = "Packed blood-splat parameters: x/y/z = per-hit random noise-warp seed (re-rolled on each splat, not user-configurable), w = Intensity (Shaders.BloodLens.Main.Intensity) scaled by the current fade-out amount.";
+	string componentKeys     = "Intensity";
+	string componentDefaults = "0.8";
+	string componentMins     = "0";
+	string componentMaxs     = "2";
+	string componentSteps    = "0.01";
 	float defaultValue = 0.8;
 >;
 float4 TESR_BloodLensColor

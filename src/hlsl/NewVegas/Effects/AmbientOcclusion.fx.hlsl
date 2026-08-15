@@ -6,16 +6,33 @@ string PipelinePosition = "PreTonemapping";
 #define halfres 0
 #define kernelSize 5
 
+// x = Samples is deliberately left out of componentKeys below: the TOML
+// comment already says it's "not currently used (hardcoded)", so exposing
+// it as an editable setting would just be misleading.
 float4 TESR_AmbientOcclusionAOData
 <
+	string widget = "packed";
 	string name = "AO Data";
 	string description = "Packed AO sampling parameters (Shaders.AmbientOcclusion.Exteriors/Interiors): x = Samples (not currently used, hardcoded), y = StrengthMultiplier, z = ClampStrength, w = Range.";
+	string componentKeys     = "StrengthMultiplier,ClampStrength,Range";
+	string componentNames    = "Strength Multiplier,Clamp Strength,Range";
+	string componentDefaults = "1.0,0.25,30.0";
+	string componentMins     = "0,0,1";
+	string componentMaxs     = "3,1,100";
+	string componentSteps    = "0.01,0.01,1";
 	float defaultValue = 1.0;
 >;
 float4 TESR_AmbientOcclusionData
 <
+	string widget = "packed";
 	string name = "AO Extra Data";
 	string description = "Packed AO shaping parameters (Shaders.AmbientOcclusion.Exteriors/Interiors): x = AngleBias, y = LumThreshold, z = BlurDropThreshold, w = BlurRadiusMultiplier.";
+	string componentKeys     = "AngleBias,LumThreshold,BlurDropThreshold,BlurRadiusMultiplier";
+	string componentNames    = "Angle Bias,Luminance Threshold,Blur Drop Threshold,Blur Radius Multiplier";
+	string componentDefaults = "1.6,0.7,8.0,2.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "3.14,1,20,5";
+	string componentSteps    = "0.01,0.01,0.1,0.01";
 	float defaultValue = 1.0;
 >;
 float4 TESR_ReciprocalResolution

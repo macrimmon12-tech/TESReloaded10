@@ -4,26 +4,50 @@ string PipelinePosition = "PostTonemapping";
 
 float4 TESR_ColoringColorCurve
 <
+	string widget = "packed";
 	string name = "Color Curve";
 	string description = "Packed per-channel S-curve contrast (Shaders.Coloring.Default): x = ColorCurve (overall), y = ColorCurveR, z = ColorCurveG, w = ColorCurveB.";
+	string componentKeys     = "ColorCurve,ColorCurveR,ColorCurveG,ColorCurveB";
+	string componentDefaults = "1.2,0.9,1.0,1.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "3,3,3,3";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 1.2;
 >;
 float4 TESR_ColoringEffectGamma
 <
+	string widget = "packed";
 	string name = "Effect Gamma";
 	string description = "Packed per-channel gamma applied to the luminance curve driving the color grade (Shaders.Coloring.Default): x = EffectGamma (overall), y = EffectGammaR, z = EffectGammaG, w = EffectGammaB.";
+	string componentKeys     = "EffectGamma,EffectGammaR,EffectGammaG,EffectGammaB";
+	string componentDefaults = "0.9,1.0,1.0,1.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "3,3,3,3";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 0.9;
 >;
 float4 TESR_ColoringData
 <
+	string widget = "packed";
 	string name = "Coloring Data";
 	string description = "Packed color-grading parameters (Shaders.Coloring.Default): x = Strength (overall effect strength), y = BaseGamma (gamma applied before the tone curve), z = Fade (cross-channel color bleed), w = Contrast.";
+	string componentKeys     = "Strength,BaseGamma,Fade,Contrast";
+	string componentDefaults = "0.5,1.6,0.0,0.8";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "1,3,1,2";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 0.5;
 >;
 float4 TESR_ColoringValues
 <
+	string widget = "packed";
 	string name = "Coloring Values";
 	string description = "Packed color-grading parameters (Shaders.Coloring.Default): x = Saturation, y = Bleach (bleach-bypass blend), z = BleachLuma (luminance-based highlight/shadow boost strength), w = Linearization.";
+	string componentKeys     = "Saturation,Bleach,BleachLuma,Linearization";
+	string componentDefaults = "-0.1,0.1,0.2,1.1";
+	string componentMins     = "-1,0,0,0";
+	string componentMaxs     = "1,1,1,3";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = -0.1;
 >;
 

@@ -13,14 +13,26 @@ float4 TESR_ReciprocalResolution
 >;
 float4 TESR_BloomLegacyData
 <
+	string widget = "packed";
 	string name = "Bloom Legacy Data";
 	string description = "Packed legacy-bloom tonemap parameters (Shaders.BloomLegacy.Exteriors/Interiors): x = Luminance, y = MiddleGray, z = WhiteCutOff.";
+	string componentKeys     = "Luminance,MiddleGray,WhiteCutOff";
+	string componentDefaults = "0.06,0.18,0.8";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "1,1,2";
+	string componentSteps    = "0.01,0.01,0.01";
 	float defaultValue = 0.06;
 >;
 float4 TESR_BloomLegacyValues
 <
+	string widget = "packed";
 	string name = "Bloom Legacy Values";
 	string description = "Packed legacy-bloom blend parameters (Shaders.BloomLegacy.Exteriors/Interiors): x = BloomIntensity, y = OriginalIntensity, z = BloomSaturation, w = OriginalSaturation.";
+	string componentKeys     = "BloomIntensity,OriginalIntensity,BloomSaturation,OriginalSaturation";
+	string componentDefaults = "1.4,1.0,1.2,1.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "4,2,2,2";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 1.4;
 >;
 

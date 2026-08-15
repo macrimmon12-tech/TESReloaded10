@@ -18,19 +18,35 @@ float4 TESR_ReciprocalResolution
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
+// x (AspectRatio) is deliberately left out of componentKeys below: its live
+// value is computed each frame from the setting plus Mode/dialog state, not
+// a direct passthrough, so exposing it here would show a real editable
+// range where the value on screen isn't a simple reflection of it.
 float4 TESR_CinemaData
 <
+	string widget = "packed";
 	string name = "Cinema Data";
 	string description = "Packed letterbox/vignette parameters: x = AspectRatio (computed each frame from Shaders.Cinema.Main.AspectRatio and Mode), y = VignetteRadius, z = VignetteDarkness, w = overlayStrength.";
+	string componentKeys     = "VignetteRadius,VignetteDarkness,OverlayStrength";
+	string componentDefaults = "0.6,1.2,0.1";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "1,3,1";
+	string componentSteps    = "0.01,0.01,0.01";
 	float defaultValue = 1.0;
 >;
 // x (dirt lens opacity) is declared but not currently written by
 // CinemaEffect::UpdateSettings() -- left as-is (metadata-only pass, no
-// behavior change); y/z/w are.
+// behavior change); y/z/w are, and are the only ones in componentKeys below.
 float4 TESR_CinemaSettings
 <
+	string widget = "packed";
 	string name = "Cinema Settings";
 	string description = "Packed film-grain/aberration/letterbox parameters (Shaders.Cinema.Main): x = dirt lens opacity (unused, not currently wired to a setting), y = FilmGrainAmount, z = ChromaticAberration, w = LetterBoxDepth.";
+	string componentKeys     = "FilmGrainAmount,ChromaticAberration,LetterBoxDepth";
+	string componentDefaults = "0.3,1.0,0.0";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "1,3,1";
+	string componentSteps    = "0.01,0.01,0.01";
 	float defaultValue = 0.3;
 >;
 
