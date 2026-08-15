@@ -1,22 +1,105 @@
 // Snow accumulation fullscreen shader for Oblivion Reloaded
 
-float4x4 TESR_WorldViewProjectionTransform;
-float4x4 TESR_ShadowCameraToLightTransformOrtho;
-float4 TESR_ReciprocalResolution;
-float4 TESR_SunDirection;
-float4 TESR_SunColor;
-float4 TESR_SunAmbient;
-float4 TESR_SnowAccumulationParams; // x:BlurNormDropThreshhold, y:BlurRadiusMultiplier, z:SunPower, w:SnowAmount 
-float4 TESR_SnowAccumulationColor;
-float4 TESR_WaterSettings;
-float4 TESR_ShadowFade;
-float4 TESR_ShadowData;
-float4 TESR_ShadowScreenSpaceData;
-float4 TESR_OrthoData;
+string PipelinePosition = "PreTonemapping";
 
-float4 TESR_ShadowLightPosition[12];
-float4 TESR_LightPosition[12];
-float4 TESR_LightColor[24];
+float4x4 TESR_WorldViewProjectionTransform
+<
+	string name = "World-View-Projection Transform";
+	string description = "Combined world-view-projection matrix, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4x4 TESR_ShadowCameraToLightTransformOrtho
+<
+	string name = "Shadow Ortho Camera-To-Light Transform";
+	string description = "ShadowsExteriorEffect's own registered ortho-cascade transform (see ShadowsExteriors.fx.hlsl), used here to sample the ortho shadow map for snow occlusion. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunDirection
+<
+	string name = "Sun Direction";
+	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunColor
+<
+	string name = "Sun Color";
+	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunAmbient
+<
+	string name = "Sun Ambient";
+	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SnowAccumulationParams
+<
+	string name = "Snow Accumulation Params";
+	string description = "Packed snow accumulation parameters (Shaders.SnowAccumulation.Main): x = BlurNormDropThreshhold, y = BlurRadiusMultiplier, z = SunPower, w = current accumulated snow coverage (animated, driven by Increase/Decrease).";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SnowAccumulationColor
+<
+	string name = "Snow Accumulation Color";
+	string description = "Snow coverage tint color (Shaders.SnowAccumulation.Main.SnowColorR/G/B).";
+	string widget = "color";
+	float3 defaultValue = {0.9, 0.9, 0.8};
+>;
+float4 TESR_WaterSettings
+<
+	string name = "Water Settings";
+	string description = "WaterShaders' own registered constant (ShaderCollection, no annotatable constant table): x = water height in the cell, y = depthDarkness, z = isUnderwater, w = refractionPower.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowFade
+<
+	string name = "Shadow Fade";
+	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowData
+<
+	string name = "Shadow Data";
+	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = Quality, y = Darkness.";
+	float defaultValue = 0.75;
+>;
+float4 TESR_ShadowScreenSpaceData
+<
+	string name = "Shadow Screen Space Data";
+	string description = "ShadowsExteriorEffect's own registered constant (Shaders.ShadowsExteriors.ScreenSpace): x = Enabled, y = BlurRadius, z = RenderDistance, w = Intensity.";
+	float defaultValue = 1.0;
+>;
+float4 TESR_OrthoData
+<
+	string name = "Ortho Data";
+	string description = "ShadowsExteriorEffect's own registered constant: x = max ortho radius (Shaders.ShadowsExteriors.Main.OrthoRadius x2), y = ortho shadow map inverse resolution.";
+	float defaultValue = 0.0;
+>;
+
+float4 TESR_ShadowLightPosition[12]
+<
+	string name = "Shadow Light Positions";
+	string description = "ShadowsExteriorEffect's own registered constant: world-space position + radius of up to 12 point lights currently casting shadows. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_LightPosition[12]
+<
+	string name = "Light Positions";
+	string description = "World-space position + radius of up to 12 nearby point lights, supplied by the engine each frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_LightColor[24]
+<
+	string name = "Light Colors";
+	string description = "Color/intensity of up to 24 nearby point lights (diffuse + specular pairs), supplied by the engine each frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_SourceBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

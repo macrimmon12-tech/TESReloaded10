@@ -1,22 +1,112 @@
 // Image space shadows shader for Oblivion Reloaded
 
-float4x4 TESR_WorldViewProjectionTransform;
-float4x4 TESR_ShadowCameraToLightTransformNear;
-float4x4 TESR_ShadowCameraToLightTransformMiddle;
-float4x4 TESR_ShadowCameraToLightTransformFar;
-float4x4 TESR_ShadowCameraToLightTransformLod;
-float4 TESR_ReciprocalResolution;
-float4 TESR_SmoothedSunDir;
-float4 TESR_ViewSpaceLightDir;
-float4 TESR_ShadowData; // x: quality, y: darkness, z: texel size
-float4 TESR_ShadowFormatData; // x: mode, y: format bits per pixels
-float4 TESR_ShadowScreenSpaceData; // x: Enabled, y: blurRadius, z: renderDistance, w: intensity
-float4 TESR_SunAmbient;
-float4 TESR_ShadowFade; // x: sunset attenuation, y: shadows maps active, z: point lights shadows active
-float4 TESR_ShadowNearCenter; // x,y,z: center (world space), w: radius
-float4 TESR_ShadowMiddleCenter; // x,y,z: center (world space), w: radius
-float4 TESR_ShadowFarCenter; // x,y,z: center (world space), w: radius
-float4 TESR_ShadowLodCenter; // x,y,z: center (world space), w: radius
+string PipelinePosition = "PreTonemapping";
+
+// All non-engine-global uniforms below are ShadowsExteriorEffect's own
+// registered constants (see ShadowsExteriors.fx.hlsl) -- this shader renders
+// the sun/directional shadow-map cascades that effect owns and consumes.
+float4x4 TESR_WorldViewProjectionTransform
+<
+	string name = "World-View-Projection Transform";
+	string description = "Combined world-view-projection matrix, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4x4 TESR_ShadowCameraToLightTransformNear
+<
+	string name = "Shadow Near Camera-To-Light Transform";
+	string description = "View-projection matrix of the near shadow cascade, computed each frame from the sun direction and cascade bounds. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4x4 TESR_ShadowCameraToLightTransformMiddle
+<
+	string name = "Shadow Middle Camera-To-Light Transform";
+	string description = "View-projection matrix of the middle shadow cascade, computed each frame from the sun direction and cascade bounds. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4x4 TESR_ShadowCameraToLightTransformFar
+<
+	string name = "Shadow Far Camera-To-Light Transform";
+	string description = "View-projection matrix of the far shadow cascade, computed each frame from the sun direction and cascade bounds. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4x4 TESR_ShadowCameraToLightTransformLod
+<
+	string name = "Shadow LOD Camera-To-Light Transform";
+	string description = "View-projection matrix of the LOD (far distance) shadow cascade, computed each frame from the sun direction and cascade bounds. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SmoothedSunDir
+<
+	string name = "Smoothed Sun Direction";
+	string description = "Sun/moon direction after the Shaders.ShadowsExteriors.SunSmoothing interpolation is applied, to avoid shadow popping as the sun moves. Not directly user-editable (see SmoothSun/SmoothingFactor/YawStepSize/PitchStepSize settings that shape it).";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ViewSpaceLightDir
+<
+	string name = "View Space Light Direction";
+	string description = "Sun/moon light direction transformed into view space, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowData
+<
+	string name = "Shadow Data";
+	string description = "This effect's own registered constant: x = Quality (Shaders.ShadowsExteriors.Main.Quality), y = Darkness (Shaders.ShadowsExteriors.Main.Darkness), z = texel size.";
+	float defaultValue = 0.75;
+>;
+float4 TESR_ShadowFormatData
+<
+	string name = "Shadow Format Data";
+	string description = "This effect's own registered constant (Shaders.ShadowsExteriors.ShadowMaps): x = Mode, y = Format (bits per pixel).";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowScreenSpaceData
+<
+	string name = "Shadow Screen Space Data";
+	string description = "This effect's own registered constant (Shaders.ShadowsExteriors.ScreenSpace): x = Enabled, y = BlurRadius, z = RenderDistance, w = Intensity.";
+	float defaultValue = 1.0;
+>;
+float4 TESR_SunAmbient
+<
+	string name = "Sun Ambient";
+	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowFade
+<
+	string name = "Shadow Fade";
+	string description = "This effect's own registered constant: x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowNearCenter
+<
+	string name = "Shadow Near Cascade Center";
+	string description = "World-space center (xyz) and radius (w) of the near shadow cascade, computed each frame around the camera. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowMiddleCenter
+<
+	string name = "Shadow Middle Cascade Center";
+	string description = "World-space center (xyz) and radius (w) of the middle shadow cascade, computed each frame around the camera. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowFarCenter
+<
+	string name = "Shadow Far Cascade Center";
+	string description = "World-space center (xyz) and radius (w) of the far shadow cascade, computed each frame around the camera. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowLodCenter
+<
+	string name = "Shadow LOD Cascade Center";
+	string description = "World-space center (xyz) and radius (w) of the LOD (far distance) shadow cascade, computed each frame around the camera. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_DepthBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_ShadowAtlas : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

@@ -1,9 +1,36 @@
 // Image space shadows shader for Oblivion Reloaded
 
-float4x4 TESR_WorldTransform;
-float4 TESR_ShadowData;
-float4 TESR_ShadowFade;
-float4 TESR_ReciprocalResolution;
+string PipelinePosition = "PreTonemapping";
+
+// ShadowsInteriorsEffect itself has no registered constants (its
+// RegisterConstants/UpdateConstants/UpdateSettings are all empty overrides) --
+// TESR_ShadowData/TESR_ShadowFade below are ShadowsExteriorEffect's own
+// registered constants (see ShadowsExteriors.fx.hlsl), shared across the
+// interior/exterior branches of its single UpdateConstants().
+float4x4 TESR_WorldTransform
+<
+	string name = "World Transform";
+	string description = "World matrix, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowData
+<
+	string name = "Shadow Data";
+	string description = "ShadowsExteriorEffect's own registered constant: in interiors, x = Quality (Shaders.ShadowsInteriors.Main.Quality), y = Darkness (Shaders.ShadowsInteriors.Main.Darkness), z = 1 / ShadowCubeMapSize.";
+	float defaultValue = 0.65;
+>;
+float4 TESR_ShadowFade
+<
+	string name = "Shadow Fade";
+	string description = "ShadowsExteriorEffect's own registered constant: in interiors, y = shadow maps enabled (ShadowsInteriorsEffect.Enabled), z = 1 (point lights always enabled), w = DrawDistance (Shaders.ShadowsInteriors.Main.DrawDistance).";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_SourceBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
