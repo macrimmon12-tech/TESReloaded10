@@ -222,6 +222,7 @@ Only `defaultValue` is required. Everything else is optional with defined fallba
 | `slider` | Explicit slider | `int` (overrides drag-int default) |
 | `path` | File cycle picker — prev/next arrows + filename display | `string` |
 | `hidden` | None — uniform is skipped when the parser builds the settings list | any |
+| `packed` | None on the uniform itself — explodes into N independent settings rows, one per `componentKeys` entry (see Packed Components below) | `float2`/`float3`/`float4` |
 
 `hidden` is for uniforms that are engine-supplied (camera/projection transforms, sun/weather state, per-frame timers, light lists, etc.) or otherwise not user-configurable — the shader still declares them normally and the `<>` block still documents what the uniform carries, but the annotation parser excludes them from the menu-building pass entirely rather than rendering a widget nobody should touch. This is distinct from simply omitting `widget`: an omitted `widget` still gets the type-default slider/checkbox/drag-int treatment (and would show up in a future annotation-driven settings list), whereas `hidden` opts a documented uniform out of that list on purpose.
 
@@ -256,6 +257,30 @@ string enumNames = "None,Lottes,ACES,Reinhard";
 ```
 
 Spaces within labels are valid; commas are the delimiter.
+
+#### Packed Components
+
+**Why this exists:** almost every real NVR shader constant is a `float4` packing 2–4 *independent* settings into one uniform (e.g. `TESR_BloomData.x/.y/.z/.w` = filter radius x, filter radius y, `Shaders.Bloom.Main.PassBlending`, and a derived `1/Passes` — three different TOML keys and one derived value, in one register). The one-name/description/default/widget-per-uniform model above only cleanly describes a uniform that *is* one setting (a lone scalar like `TESR_BloomFinalGain`) or *is* one widget in its own right (an RGB triple with `widget = "color"`). `packed` is for everything else — the common case, not the exception.
+
+A `packed` uniform's `<>` block carries parallel comma-delimited fields, one entry per exposed component, in `x, y, z, w` order — same delimiter convention as `enumNames`. A component with no real user-facing setting (e.g. an engine-computed slot) is simply omitted from the lists, so `componentKeys` may have fewer entries than the uniform has components:
+
+```hlsl
+float4 TESR_BloomData
+<
+    string widget = "packed";
+    string componentKeys     = "Blending,Strength,Passes,PassBlending"; // SettingManager keys this uniform backs, x/y/z/w order
+    string componentNames    = "Blending,Strength,Passes,Pass Blending"; // optional; falls back to componentKeys entry, underscores -> spaces
+    string componentDefaults = "0.04,1.0,8,0.0";
+    string componentMins     = "0,0,2,0";
+    string componentMaxs     = "1,4,8,1";
+    string componentSteps    = "0.001,0.01,1,0.01";
+    float defaultValue = 0.0; // still the required field per the table above; unused for packed uniforms
+>;
+```
+
+Only `componentKeys` is meaningful on its own (it's what turns a component into a settings-list row); `componentNames`/`componentDefaults`/`componentMins`/`componentMaxs`/`componentSteps` are each optional per the same fallback rules as their singular counterparts, applied per-component. A malformed or missing `componentKeys` degrades the same way an empty `enumNames` does — no rows for that uniform, no error, no crash.
+
+`packed` is orthogonal to (and never combined with) `color`/`enum`/`key`/`path`/`hidden` — a uniform is either one thing the widget hints already describe, or a bag of `componentKeys` describes, never both.
 
 #### Path Widget
 
@@ -372,10 +397,30 @@ R3   EffectRecord owns UI
          rendered end-to-end via annotations                        ✓ DONE — Bloom's TESR_BloomFinalGain,
                                                                         verified against a real build + live playtest
   ├─ 3e  Annotate all NVR EffectRecord shaders   ✓ DONE — all 35 shaders,
-       PipelinePosition + LUT path-widget uniforms
-  └─ 3f  Port all effects to annotation-driven RenderMenu()          ← NEXT
-          └─ ShaderCollection overrides (8 effects) — hand-written, legitimate
+       PipelinePosition + LUT path-widget uniforms; `hidden` widget added
+       and applied to every engine-supplied/other-effect-owned uniform
+  └─ 3f  Port all effects to annotation-driven RenderMenu()
+          ├─ 3f-1  `packed` widget + componentKeys/Names/Defaults/Mins/Maxs/Steps
+          │        schema + parser plumbing (additive; nothing consumes it yet)  ← IN PROGRESS
+          ├─ 3f-2  Wire the per-effect uniform index into RenderMenuNode,
+          │        replacing the "TESR_" + EffectName + Key guess-the-name
+          │        convention -- first visibly testable payoff (real
+          │        labels/tooltips/ranges sourced from shader annotations,
+          │        same persisted values, same TOML section/key model)
+          ├─ 3f-3  (stretch) retire remaining hardcoded menu heuristics
+          │        (RGB-triple-by-key-suffix, LUT hardcoded section) now that
+          │        a real per-effect annotation index exists to drive them
+          ├─ ShaderCollection overrides (8 effects) — hand-written, legitimate
           └─ LUTEffect — annotation-driven via path widget + OnPathChanged() hook
+
+  Why `packed` instead of unpacking every effect's constants into one scalar
+  uniform per setting: almost every real NVR setting today is packed 2-4 to a
+  float4 (TESR_BloomData, TESR_CinemaData, TESR_GodRaysRay, ...) -- unpacking
+  would mean rewriting shader math and GPU register layout across all 35
+  shaders' HLSL and C++ RegisterConstants()/UpdateConstants(), a large
+  behavior-risking change for a UI metadata refactor. `packed` keeps 3f at
+  the same "declares data, defaults, range, widget hint only" character as
+  every other step in R3 -- no shader math changes, ever.
 
   Note on 3c: ImGuiManager.cpp, not GameMenuManager.cpp, is the actual live
   NV settings UI (see CLAUDE.md's DXVK-input notes) — GameMenuManager::Render()

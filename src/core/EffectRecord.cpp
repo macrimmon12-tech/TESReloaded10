@@ -760,6 +760,15 @@ void EffectRecord::SnapshotSettingIfUnseen(const char* section, const char* key)
  * GetAnnotation()) -- no sidecar files, no separate schema, matching the
  * locked format in docs/refactor-plan.md R3a.
  *
+ * R3f-1 extended this to also read componentKeys/componentNames/
+ * componentDefaults/componentMins/componentMaxs/componentSteps for the
+ * `packed` widget (docs/refactor-plan.md "Packed Components") -- a uniform
+ * that backs N independent settings rather than one. Like enumNames, these
+ * are stored raw (comma-delimited, x/y/z/w order); this parser does not
+ * split or interpret them. Nothing calls GetUniformAnnotation() looking for
+ * these fields yet -- that's R3f-2's per-effect uniform index -- so this is
+ * additive plumbing only, no behavior change.
+ *
  * Every D3DX call here is guarded: a missing uniform, a missing annotation
  * block, an annotation whose value can't be read in its declared type, or an
  * unrecognised `widget` string are all handled by falling back rather than
@@ -808,6 +817,8 @@ bool EffectRecord::GetUniformAnnotation(const char* uniformName, UniformAnnotati
 				else if (!_stricmp(s, "key"))    ann.Widget = MenuWidget::Key;
 				else if (!_stricmp(s, "slider")) ann.Widget = MenuWidget::Slider;
 				else if (!_stricmp(s, "path"))   ann.Widget = MenuWidget::Path;
+				else if (!_stricmp(s, "hidden")) ann.Widget = MenuWidget::Hidden;
+				else if (!_stricmp(s, "packed")) ann.Widget = MenuWidget::Packed;
 				else                              ann.Widget = MenuWidget::Default; // unrecognised hint -> type-default
 			}
 		}
@@ -834,6 +845,34 @@ bool EffectRecord::GetUniformAnnotation(const char* uniformName, UniformAnnotati
 		else if (!_stricmp(field, "enumNames")) {
 			LPCSTR s = nullptr;
 			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.EnumNames = s;
+		}
+		// R3f-1: Packed widget fields (docs/refactor-plan.md "Packed Components").
+		// Stored raw, same as EnumNames above -- splitting the comma-delimited
+		// lists and matching them up against a settings section is the
+		// consumer's job (R3f-2's per-effect uniform index), not this parser's.
+		else if (!_stricmp(field, "componentKeys")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.ComponentKeys = s;
+		}
+		else if (!_stricmp(field, "componentNames")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.ComponentNames = s;
+		}
+		else if (!_stricmp(field, "componentDefaults")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.ComponentDefaults = s;
+		}
+		else if (!_stricmp(field, "componentMins")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.ComponentMins = s;
+		}
+		else if (!_stricmp(field, "componentMaxs")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.ComponentMaxs = s;
+		}
+		else if (!_stricmp(field, "componentSteps")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.ComponentSteps = s;
 		}
 		else if (!_stricmp(field, "defaultValue")) {
 			// The only required field -- named defaultValue, not default:

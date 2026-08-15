@@ -15,10 +15,26 @@ float4 TESR_BloomResolution
 	string description = "Packed per-pass mip resolution, set by the engine for whichever downsample/upsample mip is currently rendering: x = width, y = height, z = 1/width, w = 1/height. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
+// R3f-1 smoke test for the `packed` widget (docs/refactor-plan.md "Packed
+// Components"): x/y are engine-computed filter radii with no settings-menu
+// presence (omitted from componentKeys below), z/w back real
+// Shaders.Bloom.Main/Night/Interiors settings. Note w's live GPU value is the
+// *derived* 1/Passes, not the raw Passes integer -- componentKeys only
+// sources menu metadata (name/min/max/step) for the "Passes" setting, it
+// doesn't imply the uniform holds that setting's raw value. Values still
+// read/write through SettingManager exactly as before; nothing consumes
+// these fields yet (that's R3f-2).
 float4 TESR_BloomData
 <
+	string widget = "packed";
 	string name = "Bloom Data";
 	string description = "Packed bloom filter parameters: x = upsample filter radius (x axis), y = upsample filter radius (y axis, scaled for non-square resolutions), z = PassBlending (Shaders.Bloom.Main/Night/Interiors.PassBlending, 0 = additive blend, 0-1 = linear blend coefficient), w = 1 / Passes (inverse pass count for upscale normalization).";
+	string componentKeys     = "PassBlending,Passes";
+	string componentNames    = "Pass Blending,Passes";
+	string componentDefaults = "0.0,8";
+	string componentMins     = "0,2";
+	string componentMaxs     = "1,8";
+	string componentSteps    = "0.01,1";
 	float defaultValue = 0.0;
 >;
 

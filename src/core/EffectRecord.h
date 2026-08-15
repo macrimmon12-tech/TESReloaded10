@@ -79,6 +79,8 @@ public:
 		Key,     // DIK keybind picker (int)
 		Slider,  // explicit slider, overrides drag-int default (int)
 		Path,    // file cycle picker (string)
+		Hidden,  // uniform is skipped entirely when building a settings list (R3e/R3f-1)
+		Packed,  // uniform packs N independent settings; see ComponentKeys etc. (R3f-1)
 	};
 
 	struct UniformAnnotation {
@@ -91,6 +93,21 @@ public:
 		std::string	Folder;			// required for Path widget
 		std::string	Filter = "*.dds"; // optional for Path widget
 		std::string	EnumNames;		// comma-delimited, required for Enum widget
+
+		// ---- R3f-1: Packed widget (docs/refactor-plan.md "Packed Components") --
+		// All comma-delimited, x/y/z/w order, parsed raw here (same convention as
+		// EnumNames above) -- splitting/interpretation is the consumer's job
+		// (R3f-2's per-effect uniform index), not this parser's. A component with
+		// no real setting is simply absent from ComponentKeys, so it may be
+		// shorter than the uniform has components. Only meaningful when
+		// Widget == Packed; empty on every other uniform.
+		std::string	ComponentKeys;		// SettingManager keys this uniform backs
+		std::string	ComponentNames;		// optional; falls back to the key, per component
+		std::string	ComponentDefaults;	// optional
+		std::string	ComponentMins;		// optional
+		std::string	ComponentMaxs;		// optional
+		std::string	ComponentSteps;		// optional
+
 		bool		HasDefault = false; // true only when the required `defaultValue` annotation was present and readable
 	};
 
