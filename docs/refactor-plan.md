@@ -320,9 +320,9 @@ uniform string DayLUT
 - `EffectRecord::RenderMenu()` → bridges them; no custom logic in the bridge
 - `OnPathChanged()` → optional per-effect hook for side-effects only
 
-### Built-in Shader Annotation Pass
+### Built-in Shader Annotation Pass ✓ DONE (R3e)
 
-All existing NVR `EffectRecord` shaders must have their uniform declarations annotated. `ShaderCollection` shaders are excluded — they have no constant table to annotate against. Delivered as a focused standalone PR after the annotation parser (R3d) is working.
+All 35 NVR `EffectRecord` shaders under `src/hlsl/NewVegas/Effects/*.fx.hlsl` have their top-level uniform declarations annotated (`name`/`description`/`defaultValue`/`widget` where appropriate, `min`/`max`/`step` for sliders needing a non-default range) plus a `PipelinePosition` declaration at the top of each file, matching the render order in `ShaderManager::RenderEffectsPreTonemapping()`/`RenderEffects()`. `ShaderCollection` shaders (Grass, PBR, POM, Skin, Sky, Terrain, Tonemapping, Water) were excluded as planned — no constant table to annotate against. `LUTEffect` additionally gained `DayLUT`/`NightLUT`/`InteriorLUT` string uniforms (`widget = "path"`, `folder = "Data/Textures/NewVegasReloaded/LUTs/"`) declaring the target shape for its still-pending R3f port off the hand-rolled cycle-picker special case. The 7 shared engine-global uniforms declared once in `Includes/Depth.hlsl` (camera/projection/view transforms) were annotated at that single shared declaration site rather than duplicated per including shader. Metadata only — no shader behavior changes.
 
 ---
 
@@ -368,8 +368,9 @@ R3   EffectRecord owns UI
        ↓ first testable state: one EffectRecord (Bloom or Coloring)
          rendered end-to-end via annotations                        ✓ DONE — Bloom's TESR_BloomFinalGain,
                                                                         verified against a real build + live playtest
-  ├─ 3e  Annotate all NVR EffectRecord shaders   (own PR)            ← NEXT
-  └─ 3f  Port all effects to annotation-driven RenderMenu()
+  ├─ 3e  Annotate all NVR EffectRecord shaders   ✓ DONE — all 35 shaders,
+       PipelinePosition + LUT path-widget uniforms
+  └─ 3f  Port all effects to annotation-driven RenderMenu()          ← NEXT
           └─ ShaderCollection overrides (8 effects) — hand-written, legitimate
           └─ LUTEffect — annotation-driven via path widget + OnPathChanged() hook
 
