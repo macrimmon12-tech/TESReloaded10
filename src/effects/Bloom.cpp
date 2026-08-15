@@ -98,9 +98,15 @@ void BloomEffect::RenderPass(IDirect3DDevice9* Device, UINT techniqueIndex, bool
 * Renders the final bloom buffer by iteratively downsampling and upsampling with intermediary blur.
 */
 void BloomEffect::RenderBloomBuffer(IDirect3DSurface9* RenderTarget) {
-	if (!Enabled) {
+	if (!Enabled || !Effect) {
+		// Effect can be null with Enabled still true: settings-reload paths
+		// (SettingManager::RevertSettings(), the "Revert" button) sync each
+		// effect's Enabled flag from the persisted setting without checking
+		// whether the shader actually compiled/loaded. If it didn't, Effect
+		// stays null and this used to crash on the first Effect->GetTechnique()
+		// call in RenderPass() below instead of just skipping the render.
 		renderTime = 0.0f;
-		return; // skip rendering if the effect is disabled
+		return; // skip rendering if the effect is disabled or not loaded
 	}
 
 	auto timer = TimeLogger();
