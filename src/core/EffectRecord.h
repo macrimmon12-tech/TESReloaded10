@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unordered_map>
+
 class EffectRecord : public ShaderProgram {
 public:
 	EffectRecord(const char* effectName);
@@ -119,4 +121,34 @@ public:
 	// malformed annotation block degrades to "not found" rather than
 	// crashing or partially populating `out`.
 	bool					GetUniformAnnotation(const char* uniformName, UniformAnnotation* out);
+
+	// ---- R3f-2: packed-uniform settings index -------------------------------
+
+	// One exposed component of a `packed`-widget uniform (docs/refactor-plan.md
+	// "Packed Components"), resolved and ready for a widget to use -- no
+	// further annotation parsing needed. Deliberately carries no notion of
+	// which literal x/y/z/w slot it came from: nothing reads a packed
+	// uniform's live GPU value through this index, only its persisted
+	// SettingManager value (same as every other setting), so there is
+	// nothing for that position to mean.
+	struct PackedComponentRef {
+		std::string	UniformName; // the packed uniform this came from, e.g. "TESR_BloomData" -- documentation/debugging only
+		std::string	Name;
+		float		Min = 0.0f;
+		float		Max = 1.0f;
+		float		Step = 0.001f;
+	};
+
+	// SettingManager key -> the packed-uniform component documenting it.
+	// Built by BuildPackedSettingsIndex(); consult it directly rather than
+	// re-deriving it, it does not change until this effect reloads.
+	std::unordered_map<std::string, PackedComponentRef> PackedSettings;
+
+	// (Re)builds PackedSettings from every `packed`-widget uniform currently
+	// on this effect's constant table. Called from LoadEffect() right after
+	// CreateCT(), so it stays in step with the constant table's own
+	// lifetime; safe to call with no loaded Effect (clears and returns).
+	// A uniform with malformed or empty componentKeys contributes nothing to
+	// the index rather than crashing or partially indexing.
+	void					BuildPackedSettingsIndex();
 };

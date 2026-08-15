@@ -50,6 +50,8 @@ void EffectRecord::DisposeEffect() {
 	TextureShaderValues = nullptr;
 	TextureShaderValuesCount = 0;
 
+	PackedSettings.clear(); // R3f-2 -- stale once Effect (and its constant table) is gone
+
 	Enabled = false;
 }
 
@@ -188,6 +190,7 @@ bool EffectRecord::LoadEffect() {
 	if (Effect) {
 		this->Effect = Effect;
 		CreateCT(EffectSource, NULL); //Create the object which will associate a register index to a float pointer for constants updates;
+		BuildPackedSettingsIndex(); // R3f-2 -- reads <> annotations, stays in step with CreateCT()'s own lifetime
 		Logger::Log("Effect loaded: %s", EffectCompiledPath);
 	}
 
@@ -411,6 +414,21 @@ static bool ShouldHideMenuKey(const char* key) {
 	return false;
 }
 
+// R3f-2: splits a comma-delimited annotation string (componentKeys and
+// friends -- same convention as enumNames) into its parts, preserving empty
+// entries positionally (so e.g. "A,,B" yields {"A", "", "B"}, not {"A", "B"})
+// -- callers that align several of these lists by position depend on that.
+// An empty or all-comma input yields an empty vector rather than a vector of
+// empty strings.
+static std::vector<std::string> SplitCsv(const std::string& csv) {
+	std::vector<std::string> parts;
+	if (csv.empty()) return parts;
+	std::stringstream ss(csv);
+	std::string item;
+	while (std::getline(ss, item, ',')) parts.push_back(item);
+	return parts;
+}
+
 static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool isShaderSection, EffectRecord* owner) {
 	using NodeType = SettingManager::Configuration::NodeType;
 
@@ -429,14 +447,51 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 	// R3d: look up this key's <> annotation, if `owner` has a TESR_-prefixed
 	// uniform of the same name (convention: "TESR_" + effect name + key,
 	// matching the existing TESR_BloomData / TESR_ColoringColorCurve style).
-	// Gracefully absent for settings with no shader-side counterpart -- which
-	// today is most of them, since no shipped shader is annotated yet.
+	// Gracefully absent for settings with no shader-side counterpart.
 	std::string uniformName;
 	EffectRecord::UniformAnnotation ann;
 	bool hasAnn = false;
 	if (owner) {
 		uniformName = std::string("TESR_") + owner->Name + node.Key;
 		hasAnn = owner->GetUniformAnnotation(uniformName.c_str(), &ann);
+		if (hasAnn && ann.Widget == EffectRecord::MenuWidget::Hidden) {
+			// Explicitly marked hidden (R3e/R3f-1) -- render un-annotated,
+			// same as "no annotation found", not enriched by it.
+			hasAnn = false;
+		}
+	}
+
+	// R3f-2: the direct convention above only ever matches a uniform that
+	// *is* one setting (TESR_BloomFinalGain) or *is* one widget in its own
+	// right (an RGB triple with widget=color). Almost every real setting is
+	// packed 2-4 to a uniform instead -- TESR_BloomData.z is "PassBlending",
+	// not "TESR_BloomPassBlending". When the direct lookup found nothing (or
+	// found something explicitly hidden), fall back to this effect's
+	// packed-uniform index (EffectRecord::BuildPackedSettingsIndex(),
+	// docs/refactor-plan.md "Packed Components"). Synthesizing a normal `ann`
+	// here rather than branching separately means every widget/tooltip/
+	// revert code path below is unchanged -- only where the metadata came
+	// from differs.
+	if (!hasAnn && owner) {
+		auto it = owner->PackedSettings.find(node.Key);
+		if (it != owner->PackedSettings.end()) {
+			ann = EffectRecord::UniformAnnotation{};
+			ann.Name = it->second.Name;
+			ann.Min  = it->second.Min;
+			ann.Max  = it->second.Max;
+			ann.Step = it->second.Step;
+			ann.HasDefault = true;
+			hasAnn = true;
+			// Packed components have no unregistered-constant story of their
+			// own: their owning packed uniform is always a real
+			// RegisterConstants() entry whose UpdateConstants() already
+			// pushes every frame via the normal SetCT() path. Clearing
+			// uniformName makes syncLiveConstant() below a no-op here instead
+			// of guessing a "TESR_"+Name+Key string that names no real
+			// uniform (harmless either way -- SetCustomConstant() is a no-op
+			// for an unrecognised name -- but this is the honest signal).
+			uniformName.clear();
+		}
 	}
 
 	const char* label   = (hasAnn && !ann.Name.empty()) ? ann.Name.c_str() : node.Key;
@@ -455,9 +510,12 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 	// before the user ever opens this panel -- the shader-side value is
 	// whatever the shader's own annotated `defaultValue` implies, which annotated
 	// shaders are expected to fall back to via a guard (see Bloom.fx.hlsl's
-	// TESR_BloomFinalGain for the pattern this smoke-tests).
+	// TESR_BloomFinalGain for the pattern this smoke-tests). Guarded on
+	// uniformName being non-empty so packed-component-sourced nodes (which
+	// already have a live C++ UpdateConstants() path -- see above) never
+	// take this path.
 	auto syncLiveConstant = [&](float x) {
-		if (hasAnn) TheShaderManager->SetCustomConstant(uniformName.c_str(), D3DXVECTOR4(x, 0.0f, 0.0f, 0.0f));
+		if (hasAnn && !uniformName.empty()) TheShaderManager->SetCustomConstant(uniformName.c_str(), D3DXVECTOR4(x, 0.0f, 0.0f, 0.0f));
 	};
 
 	switch (node.Type) {
@@ -908,4 +966,69 @@ bool EffectRecord::GetUniformAnnotation(const char* uniformName, UniformAnnotati
 	ann.HasDefault = true;
 	*out = ann;
 	return true;
+}
+
+/*
+ * R3f-2: builds PackedSettings (docs/refactor-plan.md "Packed Components" /
+ * "Consumption") by walking every TESR_-prefixed uniform on this effect's own
+ * constant table -- same GetDesc()/GetParameter() loop CreateCT() already
+ * does, but over annotations instead of GPU register classes -- and, for
+ * each one whose annotation resolves to widget=packed, exploding its
+ * componentKeys into individual PackedComponentRef entries. This is the
+ * effect's own settings surface being read from the shader for once, rather
+ * than the shader being consulted only after a "TESR_" + effect name + key
+ * guess already found something -- the actual "annotation-driven" half of
+ * R3f, scoped to just packed uniforms today.
+ *
+ * Called once whenever this effect (re)loads (see LoadEffect(), right after
+ * CreateCT()) -- not per-frame, not per-menu-render. A uniform contributes
+ * nothing to the index, rather than a crash or a partial entry, if its
+ * annotation can't be read, isn't widget=packed, or has an empty/malformed
+ * componentKeys.
+ */
+void EffectRecord::BuildPackedSettingsIndex() {
+	PackedSettings.clear();
+	if (!Effect) return;
+
+	D3DXEFFECT_DESC effectDesc;
+	if (FAILED(Effect->GetDesc(&effectDesc))) return;
+
+	for (UINT c = 0; c < effectDesc.Parameters; c++) {
+		D3DXHANDLE handle = Effect->GetParameter(NULL, c);
+		D3DXPARAMETER_DESC paramDesc;
+		if (FAILED(Effect->GetParameterDesc(handle, &paramDesc)) || !paramDesc.Name) continue;
+		if (memcmp(paramDesc.Name, "TESR_", 5)) continue; // only TESR_-prefixed carry annotations we care about
+		if (paramDesc.Annotations == 0) continue; // fast skip -- no <> block at all, can't be `packed`
+
+		UniformAnnotation ann;
+		if (!GetUniformAnnotation(paramDesc.Name, &ann)) continue; // no defaultValue -> not menu-visible at all
+		if (ann.Widget != MenuWidget::Packed) continue;
+		if (ann.ComponentKeys.empty()) continue; // malformed/empty -- nothing to index, degrade silently
+
+		// Six comma-delimited lists, positionally aligned with each other
+		// only -- not with this uniform's own x/y/z/w layout (see
+		// docs/refactor-plan.md). Optional lists shorter than componentKeys,
+		// or carrying an empty entry at a given position, fall back per-entry
+		// the same way the singular name/min/max/step fields do.
+		std::vector<std::string> keys  = SplitCsv(ann.ComponentKeys);
+		std::vector<std::string> names = SplitCsv(ann.ComponentNames);
+		std::vector<std::string> mins  = SplitCsv(ann.ComponentMins);
+		std::vector<std::string> maxs  = SplitCsv(ann.ComponentMaxs);
+		std::vector<std::string> steps = SplitCsv(ann.ComponentSteps);
+
+		for (size_t i = 0; i < keys.size(); i++) {
+			if (keys[i].empty()) continue; // stray comma or similar -- not a usable key, skip it
+
+			PackedComponentRef ref;
+			ref.UniformName = paramDesc.Name;
+			ref.Name = (i < names.size() && !names[i].empty()) ? names[i] : keys[i];
+			// No int-vs-float type-aware fallback here (unlike the scalar
+			// case above) -- see docs/refactor-plan.md "Consumption" for why.
+			ref.Min  = (i < mins.size()  && !mins[i].empty())  ? (float)atof(mins[i].c_str())  : 0.0f;
+			ref.Max  = (i < maxs.size()  && !maxs[i].empty())  ? (float)atof(maxs[i].c_str())  : 1.0f;
+			ref.Step = (i < steps.size() && !steps[i].empty()) ? (float)atof(steps[i].c_str()) : 0.001f;
+
+			PackedSettings[keys[i]] = ref; // last writer wins if two packed uniforms claim the same key -- shouldn't happen, doesn't crash if it does
+		}
+	}
 }

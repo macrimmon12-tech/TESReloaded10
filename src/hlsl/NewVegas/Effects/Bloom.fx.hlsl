@@ -15,15 +15,17 @@ float4 TESR_BloomResolution
 	string description = "Packed per-pass mip resolution, set by the engine for whichever downsample/upsample mip is currently rendering: x = width, y = height, z = 1/width, w = 1/height. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
-// R3f-1 smoke test for the `packed` widget (docs/refactor-plan.md "Packed
-// Components"): x/y are engine-computed filter radii with no settings-menu
-// presence (omitted from componentKeys below), z/w back real
-// Shaders.Bloom.Main/Night/Interiors settings. Note w's live GPU value is the
-// *derived* 1/Passes, not the raw Passes integer -- componentKeys only
-// sources menu metadata (name/min/max/step) for the "Passes" setting, it
-// doesn't imply the uniform holds that setting's raw value. Values still
-// read/write through SettingManager exactly as before; nothing consumes
-// these fields yet (that's R3f-2).
+// R3f-1/R3f-2 smoke test for the `packed` widget (docs/refactor-plan.md
+// "Packed Components"): x/y are engine-computed filter radii with no
+// settings-menu presence (never mentioned in componentKeys below -- see the
+// doc's note that these lists carry no x/y/z/w positional meaning), z/w back
+// real Shaders.Bloom.Main/Night/Interiors settings. Note w's live GPU value
+// is the *derived* 1/Passes, not the raw Passes integer -- componentKeys
+// only sources menu metadata (name/min/max/step) for the "Passes" setting,
+// it doesn't imply the uniform holds that setting's raw value. Values still
+// read/write through SettingManager exactly as before -- EffectRecord's
+// PackedSettings index (built in BuildPackedSettingsIndex(), consulted by
+// RenderMenuNode()) only sources the widget's label/tooltip/range from this.
 float4 TESR_BloomData
 <
 	string widget = "packed";

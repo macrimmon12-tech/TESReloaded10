@@ -262,23 +262,28 @@ Spaces within labels are valid; commas are the delimiter.
 
 **Why this exists:** almost every real NVR shader constant is a `float4` packing 2–4 *independent* settings into one uniform (e.g. `TESR_BloomData.x/.y/.z/.w` = filter radius x, filter radius y, `Shaders.Bloom.Main.PassBlending`, and a derived `1/Passes` — three different TOML keys and one derived value, in one register). The one-name/description/default/widget-per-uniform model above only cleanly describes a uniform that *is* one setting (a lone scalar like `TESR_BloomFinalGain`) or *is* one widget in its own right (an RGB triple with `widget = "color"`). `packed` is for everything else — the common case, not the exception.
 
-A `packed` uniform's `<>` block carries parallel comma-delimited fields, one entry per exposed component, in `x, y, z, w` order — same delimiter convention as `enumNames`. A component with no real user-facing setting (e.g. an engine-computed slot) is simply omitted from the lists, so `componentKeys` may have fewer entries than the uniform has components:
+A `packed` uniform's `<>` block carries parallel comma-delimited fields — same delimiter convention as `enumNames`. **These six fields are positionally aligned with each other only, never with the uniform's own x/y/z/w GPU layout.** `componentKeys` is simply an ordered bag of the SettingManager keys this uniform's annotation chooses to expose; a component with no real user-facing setting (an engine-computed slot, e.g. `TESR_BloomData.x`/`.y`, the filter-radius pair) is never mentioned at all rather than represented by a placeholder gap — there is no requirement that the list's length or order say anything about which literal component backs which key. (This matters because nothing downstream reads a packed uniform's live GPU value through this index — see "Consumption" below — so there's nothing for positional x/y/z/w alignment to serve.)
 
 ```hlsl
 float4 TESR_BloomData
 <
     string widget = "packed";
-    string componentKeys     = "Blending,Strength,Passes,PassBlending"; // SettingManager keys this uniform backs, x/y/z/w order
-    string componentNames    = "Blending,Strength,Passes,Pass Blending"; // optional; falls back to componentKeys entry, underscores -> spaces
-    string componentDefaults = "0.04,1.0,8,0.0";
-    string componentMins     = "0,0,2,0";
-    string componentMaxs     = "1,4,8,1";
-    string componentSteps    = "0.001,0.01,1,0.01";
+    // Only 2 of this uniform's 4 components back a real setting -- .x/.y are
+    // engine-computed filter radii (see Bloom.fx.hlsl) and are simply never
+    // mentioned here, not represented by an empty placeholder entry.
+    string componentKeys     = "PassBlending,Passes"; // SettingManager keys this uniform's annotation exposes
+    string componentNames    = "Pass Blending,Passes"; // optional; falls back to the componentKeys entry, underscores -> spaces
+    string componentDefaults = "0.0,8";
+    string componentMins     = "0,2";
+    string componentMaxs     = "1,8";
+    string componentSteps    = "0.01,1";
     float defaultValue = 0.0; // still the required field per the table above; unused for packed uniforms
 >;
 ```
 
-Only `componentKeys` is meaningful on its own (it's what turns a component into a settings-list row); `componentNames`/`componentDefaults`/`componentMins`/`componentMaxs`/`componentSteps` are each optional per the same fallback rules as their singular counterparts, applied per-component. A malformed or missing `componentKeys` degrades the same way an empty `enumNames` does — no rows for that uniform, no error, no crash.
+Only `componentKeys` is meaningful on its own (it's what turns a component into a settings-list row); `componentNames`/`componentDefaults`/`componentMins`/`componentMaxs`/`componentSteps` are each optional per the same fallback rules as their singular counterparts, applied per-entry by position within these lists. A malformed or missing `componentKeys` degrades the same way an empty `enumNames` does — no rows for that uniform, no error, no crash.
+
+**Consumption (R3f-2):** `EffectRecord::BuildPackedSettingsIndex()` walks every `packed`-widget uniform on an effect's own constant table once (whenever the effect loads) and builds `key -> {Name, Min, Max, Step}` for every `componentKeys` entry across the whole effect. `RenderMenuNode()` consults this index only when the direct `"TESR_" + effect name + key` lookup finds nothing (or finds something explicitly `hidden`) — a persisted setting's *value* still flows through `SettingManager` exactly as it always has; only where the widget's label/tooltip/range comes from changes. One consequence of not tracking positional GPU layout: there is no int-vs-float type-aware fallback for a missing `componentMin`/`componentMax`/`componentStep` entry the way there is for a scalar uniform (`GetUniformAnnotation()` can inspect a lone uniform's own declared type; it can't infer what a `packed` uniform's *n*-th exposed key is logically supposed to be, since the uniform itself is always float-typed at the GPU level regardless of the setting's own type) — missing entries always fall back to the float defaults (`0`/`1`/`0.001`). Authors backing an int-typed setting through `packed` should supply explicit `componentMins`/`componentMaxs`/`componentSteps` rather than relying on the fallback.
 
 `packed` is orthogonal to (and never combined with) `color`/`enum`/`key`/`path`/`hidden` — a uniform is either one thing the widget hints already describe, or a bag of `componentKeys` describes, never both.
 
@@ -401,12 +406,20 @@ R3   EffectRecord owns UI
        and applied to every engine-supplied/other-effect-owned uniform
   └─ 3f  Port all effects to annotation-driven RenderMenu()
           ├─ 3f-1  `packed` widget + componentKeys/Names/Defaults/Mins/Maxs/Steps
-          │        schema + parser plumbing (additive; nothing consumes it yet)  ← IN PROGRESS
-          ├─ 3f-2  Wire the per-effect uniform index into RenderMenuNode,
-          │        replacing the "TESR_" + EffectName + Key guess-the-name
-          │        convention -- first visibly testable payoff (real
-          │        labels/tooltips/ranges sourced from shader annotations,
-          │        same persisted values, same TOML section/key model)
+          │        schema + parser plumbing                              ✓ DONE
+          ├─ 3f-2  Per-effect PackedSettings index (EffectRecord::
+          │        BuildPackedSettingsIndex(), built in LoadEffect() after
+          │        CreateCT()) wired into RenderMenuNode as the fallback
+          │        when the "TESR_" + EffectName + Key direct convention
+          │        finds nothing (or finds something `hidden`) -- first
+          │        visibly testable payoff (real labels/tooltips/ranges
+          │        sourced from shader annotations for e.g. Bloom's
+          │        PassBlending/Passes, same persisted values, same TOML
+          │        section/key model)                                    ✓ DONE (Bloom only so far)
+          │        ↓ remaining: retrofit componentKeys onto every other
+          │          effect's own packed uniforms (the ones R3e marked
+          │          NOT hidden -- TESR_CinemaData, TESR_GodRaysRay,
+          │          TESR_ColoringData, etc.), batched like R3e            ← NEXT
           ├─ 3f-3  (stretch) retire remaining hardcoded menu heuristics
           │        (RGB-triple-by-key-suffix, LUT hardcoded section) now that
           │        a real per-effect annotation index exists to drive them
