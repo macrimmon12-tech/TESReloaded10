@@ -11,28 +11,136 @@
 //----------------------------------------------------------
 // Boomstick was here
 
-float4 TESR_SunDirection;
-float4 TESR_ReciprocalResolution;
-float4x4 TESR_WorldViewProjectionTransform;
-float4x4 TESR_ShadowCameraToLightTransformOrtho;
+string PipelinePosition = "PreTonemapping";
 
-float4 TESR_GameTime;
-float4 TESR_SkyColor;
-float4 TESR_HorizonColor;
-float4 TESR_SunColor;
-float4 TESR_SunAmbient;
-float4 TESR_OrthoData; // max ortho radius
-float4 TESR_WetWorldCoeffs; // Puddle color R, G, B + spec multiplier
-float4 TESR_WaterSettings; // for water height to avoid rendering puddles underwater
-float4 TESR_WetWorldData; // x: current rain amount, y: max rain amount, z: puddle amount, w:puddle darkness/intensity
-float4 TESR_SunPosition;
-float4 TESR_SkyData;
-float4 TESR_SkyLowColor;
-float4 TESR_SunAmount;
-float4 TESR_LightPosition[12];
-float4 TESR_ShadowLightPosition[12];
-float4 TESR_LightColor[24];
-float4 TESR_DebugVar;
+float4 TESR_SunDirection
+<
+	string name = "Sun Direction";
+	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4x4 TESR_WorldViewProjectionTransform
+<
+	string name = "World-View-Projection Transform";
+	string description = "Combined world-view-projection matrix, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4x4 TESR_ShadowCameraToLightTransformOrtho
+<
+	string name = "Shadow Ortho Camera-To-Light Transform";
+	string description = "ShadowsExteriorEffect's own registered ortho-cascade transform (see ShadowsExteriors.fx.hlsl), used here to sample the ortho shadow map for puddle placement. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+
+float4 TESR_GameTime
+<
+	string name = "Game Time";
+	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SkyColor
+<
+	string name = "Sky Color";
+	string description = "Top-of-sky color, supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_HorizonColor
+<
+	string name = "Horizon Color";
+	string description = "Horizon color, supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunColor
+<
+	string name = "Sun Color";
+	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunAmbient
+<
+	string name = "Sun Ambient";
+	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_OrthoData
+<
+	string name = "Ortho Data";
+	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = max ortho radius (Shaders.ShadowsExteriors.Main.OrthoRadius x2), y = ortho shadow map inverse resolution.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_WetWorldCoeffs
+<
+	string name = "Wet World Coeffs";
+	string description = "Puddle tint color (Shaders.WetWorld.Main.PuddleCoeff_R/G/B, currently unused per the TOML comments) and specular multiplier (w = PuddleSpecularMultiplier, also unused).";
+	string widget = "color";
+	float3 defaultValue = {0.72, 0.62, 0.48};
+>;
+float4 TESR_WaterSettings
+<
+	string name = "Water Settings";
+	string description = "WaterShaders' own registered constant (ShaderCollection, no annotatable constant table): x = water height in the cell (used here to avoid rendering puddles underwater), y = depthDarkness, z = isUnderwater, w = refractionPower.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_WetWorldData
+<
+	string name = "Wet World Data";
+	string description = "Packed puddle parameters: x = current rain amount (animated), y = isRainy, z = animated puddle coverage amount, w = Amount (Shaders.WetWorld.Main.Amount, puddle darkness/intensity).";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunPosition
+<
+	string name = "Sun Position";
+	string description = "World-space position of the sun disk, normalized direction with w = 1, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SkyData
+<
+	string name = "Sky Data";
+	string description = "SkyShaders' own registered constant (ShaderCollection, no annotatable constant table -- Shaders.Sky.Main): x = AthmosphereThickness, y = SunInfluence, z = SunStrength, w = StarStrength.";
+	float defaultValue = 1.0;
+>;
+float4 TESR_SkyLowColor
+<
+	string name = "Sky Low Color";
+	string description = "Horizon-level sky color, supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunAmount
+<
+	string name = "Sun Amount";
+	string description = "Day/night blend amount supplied by the engine, used to fade effects across sunrise/sunset. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_LightPosition[12]
+<
+	string name = "Light Positions";
+	string description = "World-space position + radius of up to 12 nearby point lights, supplied by the engine each frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowLightPosition[12]
+<
+	string name = "Shadow Light Positions";
+	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): world-space position + radius of up to 12 point lights currently casting shadows. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_LightColor[24]
+<
+	string name = "Light Colors";
+	string description = "Color/intensity of up to 24 nearby point lights (diffuse + specular pairs), supplied by the engine each frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_DebugVar
+<
+	string name = "Debug Variable";
+	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
