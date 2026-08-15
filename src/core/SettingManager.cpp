@@ -14,6 +14,22 @@ static void BuildConfigPath(char (&out)[MAX_PATH], const char* suffix) {
 	strcat(out, suffix);
 }
 
+// Explicit specializations of ToString for the types settings actually carry, so
+// bool and int are formatted as their own type instead of being silently promoted
+// to float and reformatted through ostream's float rules (lossy for larger ints,
+// and the whole reason bool/int settings used to "route through" float code).
+// These must be defined before ToString<bool>/ToString<int> are first used below,
+// or MSVC will have already implicitly instantiated the generic template for them.
+template<>
+std::string SettingManager::ToString<bool>(const bool Value) {
+	return Value ? "1" : "0";
+}
+
+template<>
+std::string SettingManager::ToString<int>(const int Value) {
+	return std::to_string(Value);
+}
+
 /*
 * The Config Class holds, accesses and maintains the current instance of config document and its keys.
 */
@@ -103,6 +119,12 @@ bool SettingManager::Configuration::FillNode(ConfigNode* Node, const char* Secti
 
 			Node->Type = NodeType::Integer;
 			value = toml::format(setting);
+
+			// populate the typed value directly from toml's native int, rather than
+			// re-parsing it back out of the formatted string below
+			Node->IntValue = (int)setting.as_integer();
+			Node->FloatValue = (float)Node->IntValue;
+			Node->BoolValue = (Node->IntValue != 0);
 		}
 		else if (defaultSetting.is_floating()) {
 			if (!setting.is_floating()) {
@@ -112,6 +134,10 @@ bool SettingManager::Configuration::FillNode(ConfigNode* Node, const char* Secti
 
 			Node->Type = NodeType::Float;
 			value = toml::format(setting, 0, 5);
+
+			Node->FloatValue = (float)setting.as_floating();
+			Node->IntValue = (int)Node->FloatValue;
+			Node->BoolValue = (Node->FloatValue != 0.0f);
 		}
 		else if (defaultSetting.is_boolean()) {
 			if (!setting.is_boolean()) {
@@ -120,7 +146,11 @@ bool SettingManager::Configuration::FillNode(ConfigNode* Node, const char* Secti
 			}
 
 			Node->Type = NodeType::Boolean;
-			value = ToString<bool>((bool)setting.as_boolean());
+			Node->BoolValue = (bool)setting.as_boolean();
+			value = ToString<bool>(Node->BoolValue);
+
+			Node->IntValue = Node->BoolValue ? 1 : 0;
+			Node->FloatValue = Node->BoolValue ? 1.0f : 0.0f;
 		}
 		else if (defaultSetting.is_string()) {
 			if (!setting.is_string()) {
@@ -266,19 +296,18 @@ void SettingManager::Configuration::SetValue(ConfigNode* Node) {
 		section = table;
 	}
 
-	// setting value based on type
+	// setting value based on type. The node's typed fields are the source of
+	// truth (populated by FillNode/CreateNode/SetSetting) -- no need to
+	// re-parse them back out of the formatted Value string.
 	if (Node->Type == NodeType::Integer) {
-		int value = atoi(Node->Value);
-		(*section)[Node->Key] = value;
+		(*section)[Node->Key] = Node->IntValue;
 	} else if (Node->Type == NodeType::Float) {
-		float value = atof(Node->Value);
-		(*section)[Node->Key] = value;
+		(*section)[Node->Key] = Node->FloatValue;
 	} else if (Node->Type == NodeType::String) {
 		char* value = Node->Value;
 		(*section)[Node->Key] = value;
 	} else if (Node->Type == NodeType::Boolean) {
-		bool value = (bool)atoi(Node->Value);
-		(*section)[Node->Key] = value;
+		(*section)[Node->Key] = Node->BoolValue;
 	}
 }
 
@@ -736,7 +765,7 @@ int SettingManager::GetSettingI(const char* Section, const char* Key) {
 	Configuration::ConfigNode Node;
 	int Value = 0; //default in case the setting doesn't exist
 
-	if (Config.FillNode(&Node, Section, Key)) Value = atoi(Node.Value); // convert back from string to final type (TODO: store as native type)
+	if (Config.FillNode(&Node, Section, Key)) Value = Node.IntValue; // read the typed value directly, no string re-parse
 	return Value;
 }
 
@@ -744,7 +773,7 @@ float SettingManager::GetSettingF(const char* Section, const char* Key) {
 	Configuration::ConfigNode Node;
 	float Value = 0.0f; //default in case the setting doesn't exist
 
-	if (Config.FillNode(&Node, Section, Key)) Value = atof(Node.Value); // convert back from string to final type (TODO: store as native type)
+	if (Config.FillNode(&Node, Section, Key)) Value = Node.FloatValue; // read the typed value directly, no string re-parse
 	return Value;
 }
 
@@ -806,6 +835,26 @@ void SettingManager::SetSettingS(const char* Section, const char* Key, const cha
 
 	Config.FillNode(&Node, Section, Key);
 	strcpy(Node.Value, Value);
+
+	// SetSettingS is a text-in API (used e.g. for reverting to a snapshotted
+	// string, or for genuine string settings), so it's the one legitimate place
+	// left that has to parse text into the node's native type -- keep the typed
+	// fields in sync with what was just written to Value so Config.SetValue
+	// (which now trusts the typed fields, not the string) persists the right thing.
+	switch (Node.Type) {
+	case Configuration::NodeType::Integer:
+		Node.IntValue = atoi(Value);
+		break;
+	case Configuration::NodeType::Float:
+		Node.FloatValue = (float)atof(Value);
+		break;
+	case Configuration::NodeType::Boolean:
+		Node.BoolValue = (atoi(Value) != 0);
+		break;
+	default:
+		break;
+	}
+
 	SetSetting(&Node);
 
 }
@@ -818,21 +867,27 @@ void SettingManager::SetSettingF(const char* Section, const char* Key, float Val
 	Configuration::ConfigNode Node;
 	Config.FillNode(&Node, Section, Key); // guess the type based on defaults/current setting
 
-	// convert the value from the string to the given type and back to the string to ensure the right type format
+	// convert the incoming float to the node's native type, updating the typed
+	// field and its text representation together
 	switch (Node.Type) {
-	case SettingManager::Configuration::NodeType::Boolean:
-		
+	case SettingManager::Configuration::NodeType::Boolean: {
+		bool newValue = (Value != 0.0f);
+
 		// Handle switching shaders if the setting is Shader.<ShaderName>.Status.Enabled
 		if (!memcmp(Section, "Shaders", 7) && !memcmp(Section + strlen(Section) - 6, "Status", 6) && !memcmp(Key, "Enabled", 7)) {
-			if (((bool)atof(Node.Value) != (bool)Value) && ((bool)Value || !IsShaderForced(Node.MidSection))) TheShaderManager->SwitchShaderStatus(Node.MidSection);
+			if ((Node.BoolValue != newValue) && (newValue || !IsShaderForced(Node.MidSection))) TheShaderManager->SwitchShaderStatus(Node.MidSection);
 		}
-		strcpy(Node.Value, ToString<bool>(Value).c_str());
 
+		Node.BoolValue = newValue;
+		strcpy(Node.Value, ToString<bool>(newValue).c_str());
 		break;
+	}
 	case SettingManager::Configuration::NodeType::Integer:
-		strcpy(Node.Value, ToString<int>(Value).c_str());
+		Node.IntValue = (int)Value;
+		strcpy(Node.Value, ToString<int>(Node.IntValue).c_str());
 		break;
 	case SettingManager::Configuration::NodeType::Float:
+		Node.FloatValue = Value;
 		strcpy(Node.Value, ToString<float>(Value).c_str());
 		break;
 	default:
@@ -870,7 +925,7 @@ void SettingManager::Increment(const char* Section, const char* Key) {
 		SetSetting(Section, Key, value / 10000);
 		break;
 	case Configuration::NodeType::Boolean:
-		boolValue = (bool)GetSettingI(Section, Key);
+		boolValue = Node.BoolValue;
 		if (!boolValue) SetSetting(Section, Key, !boolValue); // only switch to true if value is false
 		break;
 	default:
@@ -895,7 +950,7 @@ void SettingManager::Decrement(const char* Section, const char* Key) {
 		SetSetting(Section, Key, value / 10000);
 		break;
 	case Configuration::NodeType::Boolean:
-		boolValue = (bool)GetSettingI(Section, Key);
+		boolValue = Node.BoolValue;
 		if (boolValue) SetSetting(Section, Key, !boolValue); // only switch to false if value is true
 		break;
 	default:
@@ -927,12 +982,15 @@ void SettingManager::SetSettingWeather(const char* Section, const char* Key, flo
 		Config.FillNode(&Node, Section, Key);
 		switch (Node.Type) {
 		case Configuration::NodeType::Boolean:
-			strcpy(Node.Value, ToString<bool>(Value).c_str());
+			Node.BoolValue = (Value != 0.0f);
+			strcpy(Node.Value, ToString<bool>(Node.BoolValue).c_str());
 			break;
 		case Configuration::NodeType::Integer:
-			strcpy(Node.Value, ToString<int>(Value).c_str());
+			Node.IntValue = (int)Value;
+			strcpy(Node.Value, ToString<int>(Node.IntValue).c_str());
 			break;
 		case Configuration::NodeType::Float:
+			Node.FloatValue = Value;
 			strcpy(Node.Value, ToString<float>(Value).c_str());
 			break;
 		}
@@ -1159,7 +1217,8 @@ void SettingManager::FillMenuSettings(Configuration::SettingList* Settings, cons
 void SettingManager::CreateNode(Configuration::ConfigNode* Node, const char* Section, const char* Key, float Value, bool Reboot) {
 	strcpy(Node->Section, Section);
 	strcpy(Node->Key, Key);
-	strcpy(Node->Value, ToString<float>(Value).c_str()); // convert to string to store value (TODO: store values in native format)
+	Node->FloatValue = Value;
+	strcpy(Node->Value, ToString<float>(Value).c_str()); // text form kept in sync for consumers that still read it (UI, weather strings)
 	Node->Reboot = Reboot;
 	Node->Type = Configuration::NodeType::Float;
 }
@@ -1171,7 +1230,8 @@ void SettingManager::CreateNode(Configuration::ConfigNode* Node, const char* Sec
 void SettingManager::CreateNode(Configuration::ConfigNode* Node, const char* Section, const char* Key, int Value, bool Reboot) {
 	strcpy(Node->Section, Section);
 	strcpy(Node->Key, Key);
-	strcpy(Node->Value, ToString<int>(Value).c_str()); // convert to string to store value (TODO: store values in native format)
+	Node->IntValue = Value;
+	strcpy(Node->Value, ToString<int>(Value).c_str()); // text form kept in sync for consumers that still read it (UI, weather strings)
 	Node->Reboot = Reboot;
 	Node->Type = Configuration::NodeType::Integer;
 }
@@ -1182,7 +1242,8 @@ void SettingManager::CreateNode(Configuration::ConfigNode* Node, const char* Sec
 void SettingManager::CreateNode(Configuration::ConfigNode* Node, const char* Section, const char* Key, bool Value, bool Reboot) {
 	strcpy(Node->Section, Section);
 	strcpy(Node->Key, Key);
-	strcpy(Node->Value, ToString<bool>(Value).c_str()); // convert to string to store value (TODO: store values in native format)
+	Node->BoolValue = Value;
+	strcpy(Node->Value, ToString<bool>(Value).c_str()); // text form kept in sync for consumers that still read it (UI, weather strings)
 	Node->Reboot = Reboot;
 	Node->Type = Configuration::NodeType::Boolean;
 }
