@@ -250,6 +250,9 @@
     <ClInclude Include="..\src\core\EffectRecord.h">
       <Filter>Core</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\core\ImGuiWidgets.h">
+      <Filter>Core</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\core\FrameRateManager.h">
       <Filter>Core</Filter>
     </ClInclude>
@@ -481,6 +484,9 @@
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="..\src\core\EffectRecord.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\core\ImGuiWidgets.cpp">
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="..\src\core\FrameRateManager.cpp">
