@@ -338,7 +338,14 @@ void CommandManager::PluginCommands::SetSettingS(double* result, const char* Sec
 		if      (strcmp(Key, "DayLUT")      == 0) slot = 0;
 		else if (strcmp(Key, "NightLUT")    == 0) slot = 1;
 		else if (strcmp(Key, "InteriorLUT") == 0) slot = 2;
-		if (slot >= 0) TheShaderManager->Effects.LUT->LoadLUT(slot, Value);
+		if (slot >= 0) {
+			// Setting is already persisted above; only load + assign the slot here
+			// to avoid writing it back out a second time.
+			LUTEffect* lut = TheShaderManager->Effects.LUT;
+			std::string path = std::string(LUTEffect::LUTFolder) + Value;
+			IDirect3DBaseTexture9* tex = TheTextureManager->GetFileTexture(path, TextureRecord::PlanarBuffer);
+			if (tex) lut->AssignLUTSlot(slot, tex, Value);
+		}
 	}
 
 	*result = 1;
