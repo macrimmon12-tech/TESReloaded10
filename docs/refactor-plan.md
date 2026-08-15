@@ -72,11 +72,9 @@ Exposure=1.1
 **What this involves:**
 - Replace `SettingManager`’s TOML read/write backend with an INI reader/writer
 - Remove the TOML parser library from the project
-- Migrate any existing user TOML save files (one-time conversion or accept that settings reset on upgrade)
-- Ensure `EffectRecord` subclasses write and read their own section by effect name
+- Existing user settings will reset on upgrade — no migration tool needed (settings are graphics tweaks, not critical data)
+- `EffectRecord` subclasses write and read their own INI section by effect name
 - Custom effects in `Custom/` get their own INI section automatically by shader name
-
-**Migration note:** existing users will have their settings stored in TOML. Recommendation: silent reset on upgrade. The settings are graphics tweaks, not critical user data.
 
 ---
 
@@ -106,7 +104,7 @@ Three codepaths currently exist where one should:
 
 **Current problem concentrated in:** `src/core/ImGuiManager.cpp:1099–1487` (~390 lines, 8+ mixed concerns)
 
-The menu currently holds all effect-specific knowledge. `RenderContent()`, `RenderSetting()`, and `RenderColorTriple()` mix display logic, input handling, tooltip rendering, settings persistence, special-case widget branches, and hardcoded field name checks (`strcmp(node.Key, "TonemappingMode")`, `strcmp(node.Key, "KeyEnable")`) in a single call chain. Every new effect with non-standard UI requires modifying `ImGuiManager`.
+The menu currently holds all effect-specific knowledge. `RenderContent()`, `RenderSetting()`, and `RenderColorTriple()` mix display logic, input handling, tooltip rendering, settings persistence, special-case widget branches, and hardcoded field name checks in a single call chain. Every new effect with non-standard UI requires modifying `ImGuiManager`.
 
 ### Target Architecture
 
@@ -114,13 +112,15 @@ The menu currently holds all effect-specific knowledge. `RenderContent()`, `Rend
 EffectRecord (base class)
   virtual RenderMenu(ImGuiContext)
     └─ default impl: iterate settings, call appropriate ImGui helper per widget hint
+  virtual OnPathChanged(uniformName, newPath)   ← optional hook for effects that need
+    └─ default: no-op                               side-effects on path selection
 
 GameMenuManager
   └─ foreach effect: effect->RenderMenu()    ← zero effect-specific knowledge
 
 ImGui helper layer (pure functions, no game/effect domain knowledge)
   └─ ColorTriplePicker(rgb) → rgb
-  └─ LUTFilePicker(files, index) → index
+  └─ FilePicker(folder, filter, current) → filename
   └─ KeyBindPicker(dik) → dik
   └─ EnumCombo(labels, index) → index
   └─ TooltipIfHovered(text)
@@ -133,14 +133,48 @@ ImGui helper layer (pure functions, no game/effect domain knowledge)
 |---|---|
 | `strcmp(node.Key, "KeyEnable")` inline check | `key` widget hint on the uniform annotation |
 | RGB triple detection via key-name heuristic | `color` widget hint on the uniform annotation |
-| LUT section hardcoded in `RenderContent()` | `path` widget hint on the uniform annotation |
+| LUT section hardcoded in `RenderContent()` | `path` widget hint on DayLUT/NightLUT/InteriorLUT uniforms |
 | Tooltip rendered in 3 branches (one unreachable) | Single `TooltipIfHovered()` helper |
 | Revert logic duplicated across `RenderSetting` + `RenderColorTriple` | Single `RevertButton()` helper |
 | Global `s_plusPressed` / `s_minusPressed` state | Scoped inside individual widget helper calls |
 
-### Known Override Exception: Tonemapping
+### EffectRecord vs ShaderCollection — Two Rendering Tiers
 
-Tonemapping is a `ShaderCollection`, not an `EffectRecord` subclass. Its mode value lives in a plain C++ struct field baked into shared HLSL via constant registers — there is no uniform declaration to annotate. It cannot be driven by the annotation parser and requires a hand-written `RenderMenu()` override with a hardcoded label array. This is a legitimate use of the virtual override escape hatch, not a gap in the architecture.
+NVR has two distinct effect base classes with fundamentally different architectures:
+
+**`EffectRecord` subclasses (34 effects)** — use `ID3DXEffect*` with an accessible constant table. HLSL uniform annotations are readable at runtime via `GetAnnotation()`. These are fully annotation-driven after R3.
+
+**`ShaderCollection` subclasses (8 effects)** — use pre-compiled `.vso`/`.pso` binary shaders with no constant table to enumerate. Settings live in plain C++ structs pushed to GPU via hardcoded constant registers. These **cannot** use the annotation system and require hand-written `RenderMenu()` overrides.
+
+| ShaderCollection | Complexity | Notes |
+|---|---|---|
+| GrassShaders | Low | Single D3DXVECTOR4 |
+| POMShaders | Low | Single D3DXVECTOR4 |
+| SkinShaders | Low | Two D3DXVECTOR4s |
+| SkyShaders | Low | Contains a runtime-computed `bool` with no INI backing |
+| PBRShaders | Medium | 5 weather-context sub-structs × 5 floats |
+| TerrainShaders | High | Weather sub-structs + parallax + LOD + bool flags |
+| TonemappingShaders | High | 3 weather sub-structs × 16 floats + mode combo |
+| WaterShaders | High | 2 full structs × 5 vectors + globals |
+
+These overrides are legitimate uses of the virtual dispatch mechanism, not gaps in the architecture. They are isolated to the `ShaderCollection` layer and do not affect the generic annotation-driven path for `EffectRecord` effects.
+
+### LUTEffect — Annotation-Driven via Path Widget
+
+`LUTEffect` is an `EffectRecord` subclass and **is** fully annotation-driven. Its Day/Night/Interior texture slots are expressed as `string` uniforms with `widget = "path"`:
+
+```hlsl
+uniform string DayLUT
+<
+    string name = "Day LUT";
+    string widget = "path";
+    string folder = "Data/Textures/NewVegasReloaded/LUTs/";
+    string filter = "*.dds,*.png";
+    string default = "";
+>;
+```
+
+When the user picks a file, the base `RenderMenu()` calls `LUTEffect::OnPathChanged("DayLUT", filename)`, which calls `GetFileTexture()`, rebinds the slot, and updates `DayCellCount` from the texture dimensions. The `OnPathChanged` hook is the only LUT-specific code needed — all widget rendering is generic.
 
 ### Shader Annotation Format (Locked)
 
@@ -206,15 +240,15 @@ Requires a `folder` field. `filter` is optional, defaults to `*.dds`.
 
 ```hlsl
 string widget = "path";
-string folder = "Data\\Textures\\LUT\\";
-string filter = "*.dds";
+string folder = "Data\\Textures\\NewVegasReloaded\\LUTs\\";
+string filter = "*.dds,*.png";
 ```
 
-The engine scans `folder` at overlay open and presents the file list with prev/next arrows. The uniform value is the selected filename.
+The engine scans `folder` at overlay open and presents the file list with prev/next arrows. The uniform value is the selected filename. Effects that need side-effects on selection implement `OnPathChanged()`.
 
 #### Pipeline Position
 
-Declared once at the shader level, outside any uniform block, at the top of the file. Controls which render stage the effect runs in.
+Declared once at the shader level, outside any uniform block, at the top of the file.
 
 | Value | When it runs | Use for |
 |---|---|---|
@@ -250,21 +284,12 @@ uniform float3 TintColor
     float3 default = {1.0, 1.0, 1.0};
 > = {1.0, 1.0, 1.0};
 
-uniform int TonemapMode
+uniform string DayLUT
 <
-    string name = "Tonemapping Mode";
-    string description = "Tonemapping operator applied post-exposure";
-    string widget = "enum";
-    string enumNames = "None,Lottes,ACES,Reinhard";
-    int default = 0;
->;
-
-uniform string LUTTexture
-<
-    string name = "LUT Texture";
+    string name = "Day LUT";
     string widget = "path";
-    string folder = "Data\\Textures\\LUT\\";
-    string filter = "*.dds";
+    string folder = "Data/Textures/NewVegasReloaded/LUTs/";
+    string filter = "*.dds,*.png";
     string default = "";
 >;
 ```
@@ -273,18 +298,17 @@ uniform string LUTTexture
 - Shader annotation → declares data, defaults, range, and widget hint only
 - ImGui helper layer → knows how to render each widget hint
 - `EffectRecord::RenderMenu()` → bridges them; no custom logic in the bridge
+- `OnPathChanged()` → optional per-effect hook for side-effects only
 
 ### Built-in Shader Annotation Pass
 
-All existing NVR shaders must have their uniform declarations annotated to match the finalized format. This is a large but low-risk editing pass — annotations add metadata only, no shader behavior changes. Delivered as a focused standalone PR after the annotation parser (R3d) is working.
-
-**Goal:** the widget hint set was designed by working backwards from every special case in the built-in effects. After the annotation pass, no built-in effect should require a C++ `RenderMenu()` override except Tonemapping (documented above). The virtual override mechanism exists as an escape hatch for that and any genuinely unforeseen future cases.
+All existing NVR `EffectRecord` shaders must have their uniform declarations annotated. `ShaderCollection` shaders are excluded — they have no constant table to annotate against. Delivered as a focused standalone PR after the annotation parser (R3d) is working.
 
 ---
 
 ## Refactor 4 — Custom Effects Drop-in Folder
 
-Once R3 is complete and built-in shaders are annotated, the menu is fully decoupled from knowing what effects exist at compile time. The custom effects system falls out almost for free.
+Once R3 is complete and built-in shaders are annotated, the menu is fully decoupled from knowing what effects exist at compile time.
 
 ### Structure
 
@@ -294,8 +318,6 @@ Data/Shaders/Effects/
   Custom/           ← drop-in folder; scanned at startup
     MyBloom/
       MyBloom.hlsl  ← only file needed; all metadata lives in annotations
-    MyDOF/
-      MyDOF.hlsl
 ```
 
 ### How It Works
@@ -303,37 +325,34 @@ Data/Shaders/Effects/
 - Engine scans `Custom/` at startup
 - For each shader found, parses uniform annotations to build a settings list and pipeline position
 - Instantiates a `GenericEffectRecord` (uses base `RenderMenu()`)
-- Base `RenderMenu()` iterates the settings list and calls the appropriate ImGui helper per widget hint
 - Custom effect settings persist to an INI section named after the shader file
 - No C++ required from the shader author — ever
-
-### Constraints
-
-Custom effects are limited to the standard widget hint set by design. The hint set already covers every widget needed by the current built-in effects (excepting Tonemapping which is a known `ShaderCollection` exception). If a genuinely novel widget type is needed in the future, the correct fix is to add a new hint to the engine — not to require C++ from shader authors.
+- Custom effects cannot be `ShaderCollection` types; they are always `EffectRecord` subclasses
 
 ---
 
 ## Dependency Order
 
 ```
-BF-1  (bool* cast fix)                ✓ DONE
-BF-2  (water texture cache)           ✓ DONE
+BF-1  ✓ DONE
+BF-2  ✓ DONE
 
 R1a  Typed settings storage           ────────────────────────▶  prerequisite for R3
 R2   Texture consolidation            ────────────────────────▶  parallel to R1a
 
 R3   EffectRecord owns UI
-  ├─ 3a  Annotation format design        ✓ LOCKED (see spec above)
-  ├─ 3b  ImGui helper layer
-  ├─ 3c  Base RenderMenu() + GameMenuManager wiring
-  |        + one real EffectRecord stubbed end-to-end as smoke test
-  |        (use Bloom or Coloring — NOT Tonemapping, it is a ShaderCollection)
-  ├─ 3d  Build the HLSL annotation parser
-  ├─ 3e  Annotate all existing NVR shaders   (own PR, after 3d working)
-  └─ 3f  Port all remaining built-in effects to annotation-driven RenderMenu()
-          Tonemapping gets a hand-written override (documented exception)
+  ├─ 3a  Annotation format              ✓ LOCKED
+  ├─ 3b  ImGui helper layer             ┐
+  ├─ 3c  Base RenderMenu() + wiring     ├─ one unbreakable unit;
+  └─ 3d  HLSL annotation parser         ┘   nothing testable until all three done
+       ↓ first testable state: one EffectRecord (Bloom or Coloring)
+         rendered end-to-end via annotations
+  ├─ 3e  Annotate all NVR EffectRecord shaders   (own PR)
+  └─ 3f  Port all effects to annotation-driven RenderMenu()
+          └─ ShaderCollection overrides (8 effects) — hand-written, legitimate
+          └─ LUTEffect — annotation-driven via path widget + OnPathChanged() hook
 
-R1b  TOML → INI save file             ────────────────────────▶  after R3 structure is final
+R1b  TOML → INI                       ────────────────────────▶  after R3 structure is final
 
 R4   Custom effects drop-in folder    ────────────────────────▶  after R3 + R1b complete
 ```
