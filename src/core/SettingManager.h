@@ -316,11 +316,20 @@ public:
 			char		Section[40];
 			char		Key[40];
 			char		MidSection[80];
-			char		Value[80];
+			char		Value[80];		// formatted text representation; still read directly by the UI layer
 			std::string Description;
 			bool		Reboot;
 			UInt32		Type;
-			
+
+			// Typed value, kept in sync with Value above. Populated for every node
+			// regardless of Type (e.g. a Boolean node also gets IntValue/FloatValue)
+			// so callers that read a setting through a different accessor
+			// (GetSettingI on a bool, GetSettingF on an int, etc.) get the right
+			// native value without re-parsing the text form.
+			bool		BoolValue;
+			int			IntValue;
+			float		FloatValue;
+
 			bool operator < (const ConfigNode& Node) const { return (strcoll(Key, Node.Key) < 0 ? true : false); }
 		};
 
