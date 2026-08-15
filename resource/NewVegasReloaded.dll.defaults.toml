@@ -220,22 +220,22 @@ LetterBoxDepth = 0.0                    # Depth of the letter box bars
 Enabled = false                          # A collection of tweaks to give a more cinematic post processing feel.
 
 [_Shaders.Coloring.Default]
-BaseGamma = 1.6
-Bleach = 0.1
-BleachLuma = 0.2
-ColorCurve = 1.2
-ColorCurveB = 1.0
-ColorCurveG = 1.0
-ColorCurveR = 0.9
-Contrast = 0.8
-EffectGamma = 0.9
-EffectGammaB = 1.0
-EffectGammaG = 1.0
-EffectGammaR = 1.0
-Fade = 0.0
-Linearization = 1.1
-Saturation = -0.1
-Strength = 0.5
+BaseGamma = 1.6                         # Gamma applied to the base image before the color-grading curve.
+Bleach = 0.1                            # Blends the tone curve toward its inverse, for a bleach-bypass look.
+BleachLuma = 0.2                        # Strength of the luminance-based highlight/shadow contrast boost.
+ColorCurve = 1.2                        # Overall S-curve contrast applied to the final graded image.
+ColorCurveB = 1.0                       # Per-channel (blue) S-curve contrast applied to the luminance curve.
+ColorCurveG = 1.0                       # Per-channel (green) S-curve contrast applied to the luminance curve.
+ColorCurveR = 0.9                       # Per-channel (red) S-curve contrast applied to the luminance curve.
+Contrast = 0.8                          # Blends the image toward black; lower values wash out contrast.
+EffectGamma = 0.9                       # Gamma applied to the luminance curve driving the color grade.
+EffectGammaB = 1.0                      # Per-channel (blue) gamma applied to the luminance curve.
+EffectGammaG = 1.0                      # Per-channel (green) gamma applied to the luminance curve.
+EffectGammaR = 1.0                      # Per-channel (red) gamma applied to the luminance curve.
+Fade = 0.0                              # Cross-channel color bleed; higher values give a faded, desaturated look.
+Linearization = 1.1                     # Gamma/linearization curve applied to the final image.
+Saturation = -0.1                       # Saturation via cross-channel color mixing; negative desaturates.
+Strength = 0.5                          # Overall strength of the color grading effect (0 = off, 1 = full).
 
 [_Shaders.Coloring.Status]
 Enabled = false                        #
