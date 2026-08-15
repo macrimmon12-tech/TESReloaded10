@@ -357,20 +357,32 @@ Data/Shaders/Effects/
 BF-1  ✓ DONE
 BF-2  ✓ DONE
 
-R1a  Typed settings storage           ────────────────────────▶  prerequisite for R3
-R2   Texture consolidation            ────────────────────────▶  parallel to R1a
+R1a  Typed settings storage           ✓ DONE
+R2   Texture consolidation            ✓ DONE
 
 R3   EffectRecord owns UI
-  ├─ 3a  Annotation format              ✓ LOCKED
-  ├─ 3b  ImGui helper layer             ┌─ commit after each sub-step
-  ├─ 3c  Base RenderMenu() + wiring     ├─ write handoff note if context runs low
-  └─ 3d  HLSL annotation parser         └─ nothing testable until all three done
+  ├─ 3a  Annotation format              ✓ LOCKED (defaultValue, not default — see R3a Correction note; X3000 on real compiler)
+  ├─ 3b  ImGui helper layer             ✓ DONE
+  ├─ 3c  Base RenderMenu() + wiring     ✓ DONE (delegate lives in ImGuiManager.cpp, not GameMenuManager — see note below)
+  └─ 3d  HLSL annotation parser         ✓ DONE
        ↓ first testable state: one EffectRecord (Bloom or Coloring)
-         rendered end-to-end via annotations
-  ├─ 3e  Annotate all NVR EffectRecord shaders   (own PR)
+         rendered end-to-end via annotations                        ✓ DONE — Bloom's TESR_BloomFinalGain,
+                                                                        verified against a real build + live playtest
+  ├─ 3e  Annotate all NVR EffectRecord shaders   (own PR)            ← NEXT
   └─ 3f  Port all effects to annotation-driven RenderMenu()
           └─ ShaderCollection overrides (8 effects) — hand-written, legitimate
           └─ LUTEffect — annotation-driven via path widget + OnPathChanged() hook
+
+  Note on 3c: ImGuiManager.cpp, not GameMenuManager.cpp, is the actual live
+  NV settings UI (see CLAUDE.md's DXVK-input notes) — GameMenuManager::Render()
+  is dead code for NV, only still called from the Oblivion render hook.
+  EffectRecord::RenderMenu()/RenderGenericSection() are called from
+  ImGuiManager::RenderContent() instead; GameMenuManager.cpp was not touched.
+
+  Known follow-up filed during 3b+c+d's live playtest, not yet done: a
+  generic "(?)" popup exposing the DIK scancode reference table somewhere
+  in the overlay chrome (keybinds are staying as plain int scancodes, not
+  becoming a `key`-widget picker — see docs discussion in that session).
 
 R1b  TOML → INI                       ────────────────────────▶  after R3 structure is final
 
