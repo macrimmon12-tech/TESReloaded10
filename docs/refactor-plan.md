@@ -8,48 +8,17 @@ This plan consolidates feedback from code review and developer discussion identi
 
 ## Bug Fixes (Ship Immediately, Independent)
 
-### BF-1 — Pointer Cast UB in SettingManager
+### BF-1 — Pointer Cast UB in SettingManager ✓ DONE
 **File:** `src/core/SettingManager.cpp:1223` and `:1243`
 
-`(bool*)GetSettingI(...)` casts an `int` return value to a `bool*` pointer instead of `bool`. This is undefined behavior on every call path that hits these functions.
+`(bool*)GetSettingI(...)` casts an `int` return value to a `bool*` pointer instead of `bool`. Fixed.
 
-- Line 1223: `bool enabled = (bool*)GetSettingI(settingString, "Enabled");`
-- Line 1243: `return (bool*)GetSettingI(settingString, Name);`
-
-**Fix:** Change `(bool*)` to `(bool)` at both sites.
-
-### BF-2 — Uncached Water Texture in OcclusionManager
+### BF-2 — Uncached Water Texture in OcclusionManager ✓ DONE
 **File:** `src/core/OcclusionManager.cpp:226`
 
-Direct `D3DXCreateTextureFromFileA` call with a hardcoded path bypasses `TextureManager` entirely — no caching, potential reload on every render pass.
-
-**Fix:** Replace with `TheTextureManager->GetFileTexture(".\\Data\\Textures\\Water\\water00.dds", TextureRecord::PlanarBuffer)`.
+Direct `D3DXCreateTextureFromFileA` call bypassing `TextureManager`. Fixed.
 
 Note: this texture is a debug-only occlusion map visualization and is never player-visible. The fix is for caching consistency only — in-game water texture switching is not possible via this path; the visible water surface is rendered by the game engine's own shaders which NVR does not control.
-
----
-
-## Refactor 0 — UI Aesthetic Pass (Theme + Font)
-
-**Current state:** `src/core/ImGuiManager.cpp:738-741` — `ImGui::StyleColorsDark()` (the stock preset) plus three manually-tweaked rounding values (`WindowRounding`, `FrameRounding`, `ScrollbarRounding`). No custom font is loaded anywhere in the codebase; the overlay renders in ImGui's bundled default font at native size.
-
-Independent of the type-system and widget-architecture refactors below — this only touches style/font setup in `ImGuiManager::Init` (or wherever `NewFrame`'s one-time init lives) and can ship on its own, same as the BF items.
-
-**Inputs (to be supplied, not decided here):**
-- A theme exported from Patitotective's ImThemes tool — a generated `ImGuiStyle`/`style.Colors[]` C++ block to drop in in place of the current `StyleColorsDark()` + manual rounding lines
-- A chosen font file (TTF/OTF) to load via `AddFontFromFileTTF`
-
-**Work involved once those land:**
-- Replace `StyleColorsDark()` + the three manual rounding assignments with the generated theme block (theme block supersedes the manual tweaks — don't keep both)
-- Load the chosen font at a real pixel size (not the default atlas font) via `AddFontFromFileTTF`; evaluate whether `imgui_freetype` is worth pulling in for hinting/AA quality — decide when the font is picked, not before
-- Audit hardcoded per-widget accent colors that currently bypass the theme via `PushStyleColor(..., ImVec4(literal))` instead of reading `style.Colors[]` — these are semantic (enabled/disabled, FX on/off) and will look wrong or clash against an arbitrary theme if left as magic literals:
-  - `ImGuiManager.cpp:1397-1398` — shader enabled/disabled button (green/red)
-  - `ImGuiManager.cpp:1520-1522` — tree node label enabled/disabled text color
-  - `ImGuiManager.cpp:1642-1644` — "FX ON"/"FX OFF" toolbar button
-  
-  These should move to a small named palette (e.g. `AccentGood` / `AccentBad` pulled from the theme or defined alongside it) rather than staying as inline `ImVec4(...)` literals scattered across call sites. Low risk, but worth doing in the same pass since it's the same category of change and touches adjacent lines.
-
-**Sequencing note:** R3 (below) rewrites these same call sites as part of collapsing `RenderSetting()`/`RenderColorTriple()` into the `EffectRecord::RenderMenu()` + widget-helper architecture. If R3 lands first, the accent-color externalization happens naturally as part of that rewrite and this bullet is moot. If the aesthetic pass lands first, keep the accent-color fix minimal (palette constants, not a new abstraction) so it doesn't fight with R3's helper layer later.
 
 ---
 
@@ -107,11 +76,7 @@ Exposure=1.1
 - Ensure `EffectRecord` subclasses write and read their own section by effect name
 - Custom effects in `Custom/` get their own INI section automatically by shader name
 
-**Migration note:** existing users will have their settings stored in TOML. Options are:
-1. Silent reset — simplest; users re-tune on upgrade (acceptable given the refactor scope)
-2. One-time migration tool — reads old TOML, writes new INI on first run
-
-Option 1 is recommended given the scale of the overall refactor. The settings are graphics tweaks, not critical user data.
+**Migration note:** existing users will have their settings stored in TOML. Recommendation: silent reset on upgrade. The settings are graphics tweaks, not critical user data.
 
 ---
 
@@ -166,13 +131,16 @@ ImGui helper layer (pure functions, no game/effect domain knowledge)
 
 | Current code | Replaced by |
 |---|---|
-| `strcmp(node.Key, "TonemappingMode")` inline check | `enum` widget hint on the uniform annotation |
 | `strcmp(node.Key, "KeyEnable")` inline check | `key` widget hint on the uniform annotation |
 | RGB triple detection via key-name heuristic | `color` widget hint on the uniform annotation |
 | LUT section hardcoded in `RenderContent()` | `path` widget hint on the uniform annotation |
 | Tooltip rendered in 3 branches (one unreachable) | Single `TooltipIfHovered()` helper |
 | Revert logic duplicated across `RenderSetting` + `RenderColorTriple` | Single `RevertButton()` helper |
 | Global `s_plusPressed` / `s_minusPressed` state | Scoped inside individual widget helper calls |
+
+### Known Override Exception: Tonemapping
+
+Tonemapping is a `ShaderCollection`, not an `EffectRecord` subclass. Its mode value lives in a plain C++ struct field baked into shared HLSL via constant registers — there is no uniform declaration to annotate. It cannot be driven by the annotation parser and requires a hand-written `RenderMenu()` override with a hardcoded label array. This is a legitimate use of the virtual override escape hatch, not a gap in the architecture.
 
 ### Shader Annotation Format (Locked)
 
@@ -308,9 +276,9 @@ uniform string LUTTexture
 
 ### Built-in Shader Annotation Pass
 
-All existing shaders must have their uniform declarations annotated to match the finalized format. This is a large but low-risk editing pass — annotations add metadata only, no shader behavior changes. It must happen **after** the annotation format is locked, and is best delivered as a focused standalone PR.
+All existing NVR shaders must have their uniform declarations annotated to match the finalized format. This is a large but low-risk editing pass — annotations add metadata only, no shader behavior changes. Delivered as a focused standalone PR after the annotation parser (R3d) is working.
 
-**Goal:** the widget hint set was designed by working backwards from every special case that currently exists in the built-in effects (LUT slot pickers, tonemapping enum, color triples, key binding). After the annotation pass, no built-in effect should require a C++ `RenderMenu()` override. The virtual override mechanism exists as an escape hatch for genuinely unforeseen future cases only.
+**Goal:** the widget hint set was designed by working backwards from every special case in the built-in effects. After the annotation pass, no built-in effect should require a C++ `RenderMenu()` override except Tonemapping (documented above). The virtual override mechanism exists as an escape hatch for that and any genuinely unforeseen future cases.
 
 ---
 
@@ -336,41 +304,36 @@ Data/Shaders/Effects/
 - For each shader found, parses uniform annotations to build a settings list and pipeline position
 - Instantiates a `GenericEffectRecord` (uses base `RenderMenu()`)
 - Base `RenderMenu()` iterates the settings list and calls the appropriate ImGui helper per widget hint
-- Custom effect settings are saved to an INI section named after the shader file
+- Custom effect settings persist to an INI section named after the shader file
 - No C++ required from the shader author — ever
 
 ### Constraints
 
-Custom effects are limited to the standard widget hint set by design. The hint set already covers every widget needed by the current built-in effects, so this is not a meaningful restriction in practice. If a genuinely novel widget type is needed in the future, the correct fix is to add a new hint to the engine — not to require C++ from shader authors.
+Custom effects are limited to the standard widget hint set by design. The hint set already covers every widget needed by the current built-in effects (excepting Tonemapping which is a known `ShaderCollection` exception). If a genuinely novel widget type is needed in the future, the correct fix is to add a new hint to the engine — not to require C++ from shader authors.
 
 ---
 
 ## Dependency Order
 
 ```
-BF-1  (bool* cast fix)                ──────────────────────────▶  ship now
-BF-2  (water texture cache)           ──────────────────────────▶  ship now
+BF-1  (bool* cast fix)                ✓ DONE
+BF-2  (water texture cache)           ✓ DONE
 
-R0  UI aesthetic pass (theme + font)  ──────────────────────────▶  ship whenever theme/font
-                                                                    are supplied; independent,
-                                                                    but see note under R0 re:
-                                                                    accent-color overlap with R3
+R1a  Typed settings storage           ────────────────────────▶  prerequisite for R3
+R2   Texture consolidation            ────────────────────────▶  parallel to R1a
 
-R1  Type system
-  ├─ 1a  Typed settings storage (bool/int/float/string)  ──▶  prerequisite for R3
-  └─ 1b  Replace TOML with INI save file                 ──▶  can run parallel to 1a;
-                                                              best done after R3 so
-                                                              INI sections match
-                                                              final effect structure
+R3   EffectRecord owns UI
+  ├─ 3a  Annotation format design        ✓ LOCKED (see spec above)
+  ├─ 3b  ImGui helper layer
+  ├─ 3c  Base RenderMenu() + GameMenuManager wiring
+  |        + one real EffectRecord stubbed end-to-end as smoke test
+  |        (use Bloom or Coloring — NOT Tonemapping, it is a ShaderCollection)
+  ├─ 3d  Build the HLSL annotation parser
+  ├─ 3e  Annotate all existing NVR shaders   (own PR, after 3d working)
+  └─ 3f  Port all remaining built-in effects to annotation-driven RenderMenu()
+          Tonemapping gets a hand-written override (documented exception)
 
-R2  Texture consolidation             ──────────────────────────▶  parallel to R1
+R1b  TOML → INI save file             ────────────────────────▶  after R3 structure is final
 
-R3  EffectRecord owns UI
-  ├─ 3a  Design + lock annotation format          ✓ LOCKED (see spec above)
-  ├─ 3b  Implement ImGui helper layer
-  ├─ 3c  Implement base RenderMenu() + GameMenuManager wiring
-  ├─ 3d  Port built-in effects to RenderMenu() overrides
-  └─ 3e  Annotate all existing shaders            (after 3a is locked; own PR)
-
-R4  Custom effects drop-in folder     ──────────────────────────▶  after R3 + R1b complete
+R4   Custom effects drop-in folder    ────────────────────────▶  after R3 + R1b complete
 ```
