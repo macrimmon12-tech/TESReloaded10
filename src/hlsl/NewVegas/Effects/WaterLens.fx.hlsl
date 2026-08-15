@@ -18,8 +18,14 @@ float4 TESR_GameTime
 >;
 float4 TESR_WaterLensData
 <
+	string widget = "packed";
 	string name = "Water Lens Data";
 	string description = "Packed water-lens ripple parameters: x = TimeMultA (Shaders.WaterLens.Main.TimeMultA, first noise animation speed), y = TimeMultB (TimeMultB, second noise animation speed), z = Viscosity (refraction distortion amount), w = current effect amount (Amount setting scaled by the underwater fade-out animator).";
+	string componentKeys     = "TimeMultA,TimeMultB,Viscosity,Amount";
+	string componentDefaults = "0.1,0.2,0.05,0.1";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "1,1,1,1";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 0.1;
 >;
 

@@ -22,12 +22,29 @@ float4 TESR_WaterSettings
 // branch (only x/y are); left undocumented rather than repeating a stale claim.
 float4 TESR_ShadowData
 <
+	string widget = "packed";
 	string name = "Shadow Data";
 	string description = "This effect's own registered constant: x = Quality (Shaders.ShadowsExteriors.Main.Quality), y = Darkness (Shaders.ShadowsExteriors.Main.Darkness).";
+	string componentKeys     = "Quality,Darkness";
+	string componentDefaults = "4,0.75";
+	string componentMins     = "0,0";
+	string componentMaxs     = "4,1";
+	string componentSteps    = "1,0.01";
 	float defaultValue = 0.75;
 >;
+// Not `packed`: x (sunset/moon-phase attenuation) and w (point light shadow
+// draw distance) are computed, not settings; z mixes two different keys
+// (UsePointShadowsDay or UsePointShadowsNight, chosen by time of day) rather
+// than reflecting either one directly, same reasoning as GodRays' day/night
+// multiplier; and y (Enabled) collides with TESR_ShadowScreenSpaceData's own
+// "Enabled" below -- Shaders.ShadowsExteriors.Main.Enabled and
+// Shaders.ShadowsExteriors.ScreenSpace.Enabled are two different settings
+// that happen to share a bare key name, and PackedSettings is keyed by bare
+// key only (see docs/refactor-plan.md), so both can't safely claim it. No
+// component here is a clean, unambiguous fit -- `hidden` is the honest one.
 float4 TESR_ShadowFade
 <
+	string widget = "hidden";
 	string name = "Shadow Fade";
 	string description = "This effect's own registered constant: x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled (Shaders.ShadowsExteriors.Main.Enabled), z = point light shadows enabled (UsePointShadowsDay/Night), w = point light shadow draw distance.";
 	float defaultValue = 0.0;
@@ -55,8 +72,15 @@ float4 TESR_SunColor
 >;
 float4 TESR_ShadowScreenSpaceData
 <
+	string widget = "packed";
 	string name = "Shadow Screen Space Data";
 	string description = "This effect's own registered constant (Shaders.ShadowsExteriors.ScreenSpace): x = Enabled, y = BlurRadius, z = RenderDistance, w = Intensity.";
+	string componentKeys     = "Enabled,BlurRadius,RenderDistance,Intensity";
+	string componentNames    = "Screen Space Shadows Enabled,Blur Radius,Render Distance,Intensity";
+	string componentDefaults = "1,1.0,180000,2.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "1,5,500000,5";
+	string componentSteps    = "1,0.01,100,0.01";
 	float defaultValue = 1.0;
 >;
 

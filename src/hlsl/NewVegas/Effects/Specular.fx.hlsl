@@ -11,14 +11,26 @@ float4 TESR_ReciprocalResolution
 >;
 float4 TESR_SpecularData
 <
+	string widget = "packed";
 	string name = "Specular Data";
 	string description = "Packed specular parameters (Shaders.Specular.Exterior/Rain, rain-blended): x = SpecLumaTreshold, y = BlurMultiplier, z = Glossiness, w = DistanceFade.";
+	string componentKeys     = "SpecLumaTreshold,BlurMultiplier,Glossiness,DistanceFade";
+	string componentDefaults = "0.25,1.0,16,30000";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "1,5,64,100000";
+	string componentSteps    = "0.01,0.01,1,100";
 	float defaultValue = 0.25;
 >;
 float4 TESR_SpecularEffects
 <
+	string widget = "packed";
 	string name = "Specular Effects";
 	string description = "Packed specular strength parameters (Shaders.Specular.Exterior/Rain, rain-blended): x = SpecularStrength, y = SkyTintStrength, z = FresnelStrength, w = SkyTintSaturation.";
+	string componentKeys     = "SpecularStrength,SkyTintStrength,FresnelStrength,SkyTintSaturation";
+	string componentDefaults = "0.2,0.5,1.0,1.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "2,2,3,2";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 0.2;
 >;
 float4 TESR_ViewSpaceLightDir

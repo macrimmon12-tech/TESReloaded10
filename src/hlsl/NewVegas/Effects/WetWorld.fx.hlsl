@@ -98,10 +98,18 @@ float4 TESR_WaterSettings
 	string description = "WaterShaders' own registered constant (ShaderCollection, no annotatable constant table): x = water height in the cell (used here to avoid rendering puddles underwater), y = depthDarkness, z = isUnderwater, w = refractionPower.";
 	float defaultValue = 0.0;
 >;
+// x/y/z are all animated/computed per-frame rain-and-puddle state, not
+// settings -- only w (Amount) is a clean single-key component.
 float4 TESR_WetWorldData
 <
+	string widget = "packed";
 	string name = "Wet World Data";
 	string description = "Packed puddle parameters: x = current rain amount (animated), y = isRainy, z = animated puddle coverage amount, w = Amount (Shaders.WetWorld.Main.Amount, puddle darkness/intensity).";
+	string componentKeys     = "Amount";
+	string componentDefaults = "0.0";
+	string componentMins     = "0";
+	string componentMaxs     = "1";
+	string componentSteps    = "0.01";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunPosition
