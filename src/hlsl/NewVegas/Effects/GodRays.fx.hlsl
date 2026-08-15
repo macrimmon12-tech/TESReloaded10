@@ -25,8 +25,14 @@ float4 TESR_SunColor
 >;
 float4 TESR_GodRaysRay
 <
+	string widget = "packed";
 	string name = "God Rays Ray";
 	string description = "Packed ray-marching parameters (Shaders.GodRays.Main): x = RayIntensity, y = RayLength, z = RayDensity, w = RayVisibility scaled by SunGlareEnabled and the engine's current sun glare value.";
+	string componentKeys     = "RayIntensity,RayLength,RayDensity,RayVisibility";
+	string componentDefaults = "1.0,1.0,1.0,50.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "3,3,3,100";
+	string componentSteps    = "0.01,0.01,0.01,0.1";
 	float defaultValue = 1.0;
 >;
 float4 TESR_GodRaysRayColor
@@ -36,10 +42,21 @@ float4 TESR_GodRaysRayColor
 	string widget = "color";
 	float3 defaultValue = {1.0, 1.0, 1.0};
 >;
+// x (LightShaftPasses) and z (the day/night multiplier, a blend of two
+// different keys -- DayMultiplier and NightMultiplier -- rather than a
+// direct reflection of either one) are deliberately left out of
+// componentKeys below.
 float4 TESR_GodRaysData
 <
+	string widget = "packed";
 	string name = "God Rays Data";
 	string description = "Packed god-rays parameters (Shaders.GodRays.Main): x = LightShaftPasses (currently unused), y = Luminance (minimum ray-casting luminosity threshold), z = day/night strength multiplier (DayMultiplier/NightMultiplier blended by the day/night transition curve), w = TimeEnabled (1 = strongest at sunset/sunrise).";
+	string componentKeys     = "Luminance,TimeEnabled";
+	string componentNames    = "Luminance,Time Enabled";
+	string componentDefaults = "0.8,0";
+	string componentMins     = "0,0";
+	string componentMaxs     = "2,1";
+	string componentSteps    = "0.01,1";
 	float defaultValue = 1.0;
 >;
 float4 TESR_ViewSpaceLightDir

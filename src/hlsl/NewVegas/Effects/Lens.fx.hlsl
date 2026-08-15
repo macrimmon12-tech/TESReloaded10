@@ -42,8 +42,14 @@ float4 TESR_SunAmount
 // against LensEffect::UpdateConstants(), which packs three settings, not two.
 float4 TESR_LensData
 <
+	string widget = "packed";
 	string name = "Lens Data";
 	string description = "Packed dirt-lens parameters (Shaders.Lens.Main/Night/Interiors, day/night/interior blended): x = strength (overall effect strength), y = bloomExponent (how far dirt particles are lit from the light source), z = smudginess (texture scale).";
+	string componentKeys     = "Strength,BloomExponent,Smudginess";
+	string componentDefaults = "0.4,0.7,0.0";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "1,2,1";
+	string componentSteps    = "0.01,0.01,0.01";
 	float defaultValue = 0.4;
 >;
 float4 TESR_DebugVar

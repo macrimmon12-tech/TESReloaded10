@@ -5,8 +5,14 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_ExposureData
 <
+	string widget = "packed";
 	string name = "Exposure Data";
 	string description = "Packed exposure parameters (Shaders.Exposure.Main/Night/Interiors, day/night/interior blended): x = MinBrightness, y = MaxBrightness, z = DarkAdaptSpeed, w = LightAdaptSpeed.";
+	string componentKeys     = "MinBrightness,MaxBrightness,DarkAdaptSpeed,LightAdaptSpeed";
+	string componentDefaults = "0.2,0.5,50.0,50.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "1,1,100,100";
+	string componentSteps    = "0.01,0.01,1,1";
 	float defaultValue = 0.2;
 >;
 float4 TESR_DebugVar

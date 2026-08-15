@@ -6,8 +6,14 @@ string PipelinePosition = "PostTonemapping";
 // percentage (see LowHFEffect::UpdateConstants()) blended with the Shaders.LowHF.Main
 // settings (LumaMultiplier, BlurMultiplier, VignetteMultiplier, DarknessMultiplier,
 // HealthLimit, FatigueLimit) -- it is not itself a directly user-editable setting.
+// R3f-2 correction: not `packed` either -- every component multiplies a real
+// setting together with the live health/fatigue percentage, so no component
+// is a clean 1:1 reflection of a single SettingManager key the way `packed`
+// requires. `hidden` is the honest fit; the six real settings behind this
+// still render normally via their own un-annotated Shaders.LowHF.Main nodes.
 float4 TESR_LowHFData
 <
+	string widget = "hidden";
 	string name = "Low Health/Fatigue Data";
 	string description = "Packed per-frame low-health/fatigue screen effect strength: x = desaturation amount, y = blur sample offset, z = vignette exponent, w = darkness multiplier. Derived from current health/fatigue and the Shaders.LowHF.Main settings; not directly user-editable.";
 	float defaultValue = 0.0;

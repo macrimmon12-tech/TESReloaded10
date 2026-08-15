@@ -13,14 +13,30 @@ float4 TESR_ReciprocalResolution
 >;
 float4 TESR_DepthOfFieldBlur
 <
+	string widget = "packed";
 	string name = "Depth Of Field Blur";
 	string description = "Packed distant-blur parameters (Shaders.DepthOfField.FirstPersonView/ThirdPersonView/VanityView): x = DistantBlur (enabled), y = DistantBlurStartRange, z = DistantBlurEndRange, w = BaseBlurRadius.";
+	string componentKeys     = "DistantBlur,DistantBlurStartRange,DistantBlurEndRange,BaseBlurRadius";
+	string componentNames    = "Distant Blur Enabled,Distant Blur Start Range,Distant Blur End Range,Base Blur Radius";
+	string componentDefaults = "1,30000,150000,1.0";
+	string componentMins     = ",0,0,0";
+	string componentMaxs     = ",200000,300000,5";
+	string componentSteps    = ",100,100,0.01";
 	float defaultValue = 0.0;
 >;
+// x (current focus distance) is deliberately left out of componentKeys
+// below: it's an animated, computed value (0 when DOF is disabled), not a
+// direct reflection of any setting.
 float4 TESR_DepthOfFieldData
 <
+	string widget = "packed";
 	string name = "Depth Of Field Data";
 	string description = "Packed autofocus/bokeh parameters (Shaders.DepthOfField.FirstPersonView/ThirdPersonView/VanityView): x = current focus distance (animated, 0 when DOF disabled), y = Radius (bokeh blur radius), z = DiameterRange (bokeh brightness threshold), w = NearBlurCutOff.";
+	string componentKeys     = "Radius,DiameterRange,NearBlurCutOff";
+	string componentDefaults = "1.5,0.8,100";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "5,2,500";
+	string componentSteps    = "0.01,0.01,1";
 	float defaultValue = 0.0;
 >;
 float4 TESR_MotionBlurData

@@ -4,8 +4,14 @@ string PipelinePosition = "PostTonemapping";
 
 float4 TESR_ImageAdjustData
 <
+	string widget = "packed";
 	string name = "Image Adjust Data";
 	string description = "Packed image adjustment parameters (day/night/interior blended): x = Brightness, y = Contrast, z = Saturation, w = Strength (overall effect blend).";
+	string componentKeys     = "Brightness,Contrast,Saturation,Strength";
+	string componentDefaults = "1.0,1.0,1.0,1.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "2,2,2,1";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 1.0;
 >;
 float4 TESR_DarkAdjustColor
