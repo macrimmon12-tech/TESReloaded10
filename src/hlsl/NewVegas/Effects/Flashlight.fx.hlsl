@@ -2,12 +2,14 @@ string PipelinePosition = "PreTonemapping";
 
 float4x4 TESR_FlashLightViewProjTransform
 <
+	string widget = "hidden";
 	string name = "Flashlight View-Projection Transform";
 	string description = "View-projection matrix of the flashlight spotlight, computed each frame from the weapon/camera transform (see FlashlightEffect::GetFlashlightViewProj()). Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_CameraForward
 <
+	string widget = "hidden";
 	string name = "Camera Forward";
 	string description = "World-space camera forward vector, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -17,6 +19,7 @@ float4 TESR_CameraForward
 // (ColorR/G/B, Dimmer, Distance, Angle, Offset X/Y/Z, AttachToWeapon).
 float4 TESR_SpotLightPosition
 <
+	string widget = "hidden";
 	string name = "Spot Light Position";
 	string description = "World-space position of the flashlight spotlight (xyz), w = radius (Shaders.Flashlight.Main.Distance). Not directly user-editable.";
 	float defaultValue = 0.0;
@@ -30,30 +33,35 @@ float4 TESR_SpotLightColor
 >;
 float4 TESR_SpotLightDirection
 <
+	string widget = "hidden";
 	string name = "Spot Light Direction";
 	string description = "World-space direction the flashlight spotlight is aimed, computed each frame from the weapon/camera transform. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunDirection
 <
+	string widget = "hidden";
 	string name = "Sun Direction";
 	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_DebugVar
 <
+	string widget = "hidden";
 	string name = "Debug Variable";
 	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;

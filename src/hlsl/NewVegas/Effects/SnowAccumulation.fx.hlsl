@@ -4,36 +4,42 @@ string PipelinePosition = "PreTonemapping";
 
 float4x4 TESR_WorldViewProjectionTransform
 <
+	string widget = "hidden";
 	string name = "World-View-Projection Transform";
 	string description = "Combined world-view-projection matrix, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ShadowCameraToLightTransformOrtho
 <
+	string widget = "hidden";
 	string name = "Shadow Ortho Camera-To-Light Transform";
 	string description = "ShadowsExteriorEffect's own registered ortho-cascade transform (see ShadowsExteriors.fx.hlsl), used here to sample the ortho shadow map for snow occlusion. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunDirection
 <
+	string widget = "hidden";
 	string name = "Sun Direction";
 	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmbient
 <
+	string widget = "hidden";
 	string name = "Sun Ambient";
 	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -53,30 +59,35 @@ float4 TESR_SnowAccumulationColor
 >;
 float4 TESR_WaterSettings
 <
+	string widget = "hidden";
 	string name = "Water Settings";
 	string description = "WaterShaders' own registered constant (ShaderCollection, no annotatable constant table): x = water height in the cell, y = depthDarkness, z = isUnderwater, w = refractionPower.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowFade
 <
+	string widget = "hidden";
 	string name = "Shadow Fade";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowData
 <
+	string widget = "hidden";
 	string name = "Shadow Data";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = Quality, y = Darkness.";
 	float defaultValue = 0.75;
 >;
 float4 TESR_ShadowScreenSpaceData
 <
+	string widget = "hidden";
 	string name = "Shadow Screen Space Data";
 	string description = "ShadowsExteriorEffect's own registered constant (Shaders.ShadowsExteriors.ScreenSpace): x = Enabled, y = BlurRadius, z = RenderDistance, w = Intensity.";
 	float defaultValue = 1.0;
 >;
 float4 TESR_OrthoData
 <
+	string widget = "hidden";
 	string name = "Ortho Data";
 	string description = "ShadowsExteriorEffect's own registered constant: x = max ortho radius (Shaders.ShadowsExteriors.Main.OrthoRadius x2), y = ortho shadow map inverse resolution.";
 	float defaultValue = 0.0;
@@ -84,18 +95,21 @@ float4 TESR_OrthoData
 
 float4 TESR_ShadowLightPosition[12]
 <
+	string widget = "hidden";
 	string name = "Shadow Light Positions";
 	string description = "ShadowsExteriorEffect's own registered constant: world-space position + radius of up to 12 point lights currently casting shadows. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_LightPosition[12]
 <
+	string widget = "hidden";
 	string name = "Light Positions";
 	string description = "World-space position + radius of up to 12 nearby point lights, supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_LightColor[24]
 <
+	string widget = "hidden";
 	string name = "Light Colors";
 	string description = "Color/intensity of up to 24 nearby point lights (diffuse + specular pairs), supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;

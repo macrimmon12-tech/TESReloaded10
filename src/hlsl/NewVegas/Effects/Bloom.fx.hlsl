@@ -10,6 +10,7 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_BloomResolution
 <
+	string widget = "hidden";
 	string name = "Bloom Resolution";
 	string description = "Packed per-pass mip resolution, set by the engine for whichever downsample/upsample mip is currently rendering: x = width, y = height, z = 1/width, w = 1/height. Not user-configurable.";
 	float defaultValue = 0.0;

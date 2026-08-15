@@ -4,18 +4,21 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_GameTime
 <
+	string widget = "hidden";
 	string name = "Game Time";
 	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -41,42 +44,49 @@ float4 TESR_GodRaysData
 >;
 float4 TESR_ViewSpaceLightDir
 <
+	string widget = "hidden";
 	string name = "View Space Light Direction";
 	string description = "Sun/moon light direction transformed into view space, supplied by the engine for screen-space ray marching. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunDirection
 <
+	string widget = "hidden";
 	string name = "Sun Direction";
 	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunPosition
 <
+	string widget = "hidden";
 	string name = "Sun Position";
 	string description = "World-space position of the sun disk, normalized direction with w = 1, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowFade
 <
+	string widget = "hidden";
 	string name = "Shadow Fade";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance. Read here for x, the sunset/sunrise attenuation factor.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmount
 <
+	string widget = "hidden";
 	string name = "Sun Amount";
 	string description = "Day/night blend amount supplied by the engine, used to fade effects across sunrise/sunset. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunsetColor
 <
+	string widget = "hidden";
 	string name = "Sunset Color";
 	string description = "Color boost applied to the sun near the horizon, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_DebugVar
 <
+	string widget = "hidden";
 	string name = "Debug Variable";
 	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
 	float defaultValue = 0.0;

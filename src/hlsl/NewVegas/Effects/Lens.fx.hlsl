@@ -5,30 +5,35 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_CinemaSettings
 <
+	string widget = "hidden";
 	string name = "Cinema Settings";
 	string description = "CinemaEffect's own registered constant (see Cinema.fx.hlsl): x = dirt lens opacity, y = grain amount, z = chromatic aberration strength.";
 	float defaultValue = 1.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmbient
 <
+	string widget = "hidden";
 	string name = "Sun Ambient";
 	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmount
 <
+	string widget = "hidden";
 	string name = "Sun Amount";
 	string description = "Day/night blend amount supplied by the engine, used to fade effects across sunrise/sunset. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -43,6 +48,7 @@ float4 TESR_LensData
 >;
 float4 TESR_DebugVar
 <
+	string widget = "hidden";
 	string name = "Debug Variable";
 	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4), used here for the luma threshold feeding the bloom mask. Not intended for normal use.";
 	float defaultValue = 0.0;

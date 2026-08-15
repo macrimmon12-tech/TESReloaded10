@@ -5,24 +5,28 @@ string PipelinePosition = "PostTonemapping";
 
 float4x4 TESR_WorldViewProjectionTransform
 <
+	string widget = "hidden";
 	string name = "World-View-Projection Transform";
 	string description = "Combined world-view-projection matrix, supplied by the engine for placing the rain streak geometry. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ShadowCameraToLightTransformOrtho
 <
+	string widget = "hidden";
 	string name = "Shadow Ortho Camera-To-Light Transform";
 	string description = "ShadowsExteriorEffect's own registered ortho-cascade transform (see ShadowsExteriors.fx.hlsl), used here to sample the ortho shadow map for rain occlusion. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_GameTime
 <
+	string widget = "hidden";
 	string name = "Game Time";
 	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -41,18 +45,21 @@ float4 TESR_RainAspect
 >;
 float4 TESR_FogColor
 <
+	string widget = "hidden";
 	string name = "Fog Color";
 	string description = "Current weather fog color (RGB), supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunDirection
 <
+	string widget = "hidden";
 	string name = "Sun Direction";
 	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;

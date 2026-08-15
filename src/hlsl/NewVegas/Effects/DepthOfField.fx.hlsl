@@ -6,6 +6,7 @@ string PipelinePosition = "PostTonemapping";
 
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -24,12 +25,14 @@ float4 TESR_DepthOfFieldData
 >;
 float4 TESR_MotionBlurData
 <
+	string widget = "hidden";
 	string name = "Motion Blur Data";
 	string description = "MotionBlurEffect's own registered constant (see MotionBlur.fx.hlsl); read here only for .x/.y (per-frame camera turn speed) to scale the autofocus sampling radius via TESR_AvgLumaBuffer.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_DebugVar
 <
+	string widget = "hidden";
 	string name = "Debug Variable";
 	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
 	float defaultValue = 0.0;

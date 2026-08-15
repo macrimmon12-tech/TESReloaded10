@@ -7,36 +7,42 @@ string PipelinePosition = "PreTonemapping";
 // docs/refactor-plan.md).
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunDirection
 <
+	string widget = "hidden";
 	string name = "Sun Direction";
 	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_GameTime
 <
+	string widget = "hidden";
 	string name = "Game Time";
 	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_WaterCoefficients
 <
+	string widget = "hidden";
 	string name = "Water Coefficients";
 	string description = "WaterShaders' own registered constant: underwater light scattering/extinction coefficients (Shaders.Water.Default): x = inExtCoeff_R, y = inExtCoeff_G, z = inExtCoeff_B, w = inScattCoeff.";
 	float defaultValue = 1.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_FogColor
 <
+	string widget = "hidden";
 	string name = "Fog Color";
 	string description = "Current weather fog color (RGB), supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -44,24 +50,28 @@ float4 TESR_FogColor
 // float4 TESR_FogData; // x: near fog distance, y:far fog distance, z: sun glare, w: fog power
 float4 TESR_WaterFog
 <
+	string widget = "hidden";
 	string name = "Water Fog";
 	string description = "WaterShaders' own registered constant: underwater fog parameters from the current water form's properties: x = near fog distance, y = far fog distance, z = fog amount.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_WaterVolume
 <
+	string widget = "hidden";
 	string name = "Water Volume";
 	string description = "WaterShaders' own registered constant (Shaders.Water.Default): x = causticsStrength (scaled by the engine's current sun glare), y = shoreFactor, z = turbidity, w = causticsStrengthS.";
 	float defaultValue = 3.0;
 >;
 float4 TESR_WaveParams
 <
+	string widget = "hidden";
 	string name = "Wave Params";
 	string description = "WaterShaders' own registered constant (Shaders.Water.Default): x = choppiness, y = waveWidth, z = waveSpeed, w = reflectivity.";
 	float defaultValue = 0.7;
 >;
 float4 TESR_WaterSettings
 <
+	string widget = "hidden";
 	string name = "Water Settings";
 	string description = "WaterShaders' own registered constant: x = water height in the cell, y = depthDarkness (Shaders.Water.Default.depthDarkness), z = isUnderwater, w = refractionPower.";
 	float defaultValue = 0.0;
@@ -70,36 +80,40 @@ float4 TESR_WaterShallowColor
 <
 	string name = "Water Shallow Color";
 	string description = "Shallow-water color, supplied by the game's water form. Not user-configurable.";
-	string widget = "color";
+	string widget = "hidden";
 	float3 defaultValue = {0.0, 0.0, 0.0};
 >;
 float4 TESR_WaterDeepColor
 <
 	string name = "Water Deep Color";
 	string description = "Deep-water color, supplied by the game's water form. Not user-configurable.";
-	string widget = "color";
+	string widget = "hidden";
 	float3 defaultValue = {0.0, 0.0, 0.0};
 >;
 float4 TESR_DebugVar
 <
+	string widget = "hidden";
 	string name = "Debug Variable";
 	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_HorizonColor
 <
+	string widget = "hidden";
 	string name = "Horizon Color";
 	string description = "Horizon color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmount
 <
+	string widget = "hidden";
 	string name = "Sun Amount";
 	string description = "Day/night blend amount supplied by the engine, used to fade effects across sunrise/sunset. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SkyColor
 <
+	string widget = "hidden";
 	string name = "Sky Color";
 	string description = "Top-of-sky color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;

@@ -11,6 +11,7 @@ float4 TESR_ExposureData
 >;
 float4 TESR_DebugVar
 <
+	string widget = "hidden";
 	string name = "Debug Variable";
 	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
 	float defaultValue = 0.0;

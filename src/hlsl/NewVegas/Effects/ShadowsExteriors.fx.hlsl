@@ -5,12 +5,14 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_WaterSettings
 <
+	string widget = "hidden";
 	string name = "Water Settings";
 	string description = "WaterShaders' own registered constant (ShaderCollection, no annotatable constant table): x = water height in the cell, y = depthDarkness (Shaders.Water.Default.depthDarkness), z = isUnderwater, w = refractionPower.";
 	float defaultValue = 0.0;
@@ -32,18 +34,21 @@ float4 TESR_ShadowFade
 >;
 float4 TESR_SkyColor
 <
+	string widget = "hidden";
 	string name = "Sky Color";
 	string description = "Top-of-sky color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmbient
 <
+	string widget = "hidden";
 	string name = "Sun Ambient";
 	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;

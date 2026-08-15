@@ -4,6 +4,7 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -22,48 +23,56 @@ float4 TESR_SpecularEffects
 >;
 float4 TESR_ViewSpaceLightDir
 <
+	string widget = "hidden";
 	string name = "View Space Light Direction";
 	string description = "Sun/moon light direction transformed into view space, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunDirection
 <
+	string widget = "hidden";
 	string name = "Sun Direction";
 	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SkyColor
 <
+	string widget = "hidden";
 	string name = "Sky Color";
 	string description = "Top-of-sky color, supplied by the engine from the active weather. Used here for the sky-tint lighting boost. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_HorizonColor
 <
+	string widget = "hidden";
 	string name = "Horizon Color";
 	string description = "Horizon color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_FogColor
 <
+	string widget = "hidden";
 	string name = "Fog Color";
 	string description = "Current weather fog color (RGB), supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_WaterSettings
 <
+	string widget = "hidden";
 	string name = "Water Settings";
 	string description = "WaterShaders' own registered constant (ShaderCollection, no annotatable constant table -- see docs/refactor-plan.md): x = water height in the cell, y = depthDarkness (Shaders.Water.Default.depthDarkness), z = isUnderwater, w = refractionPower.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowFade
 <
+	string widget = "hidden";
 	string name = "Shadow Fade";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance.";
 	float defaultValue = 0.0;

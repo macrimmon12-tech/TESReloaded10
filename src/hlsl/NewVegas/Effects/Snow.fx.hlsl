@@ -5,18 +5,21 @@ string PipelinePosition = "PostTonemapping";
 
 float4x4 TESR_WorldViewProjectionTransform
 <
+	string widget = "hidden";
 	string name = "World-View-Projection Transform";
 	string description = "Combined world-view-projection matrix, supplied by the engine for placing the snow streak geometry. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ShadowCameraToLightTransformOrtho
 <
+	string widget = "hidden";
 	string name = "Shadow Ortho Camera-To-Light Transform";
 	string description = "ShadowsExteriorEffect's own registered ortho-cascade transform (see ShadowsExteriors.fx.hlsl), used here to sample the ortho shadow map for snow occlusion. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_GameTime
 <
+	string widget = "hidden";
 	string name = "Game Time";
 	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -29,12 +32,14 @@ float4 TESR_SnowData
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmbient
 <
+	string widget = "hidden";
 	string name = "Sun Ambient";
 	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;

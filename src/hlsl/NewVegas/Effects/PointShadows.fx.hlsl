@@ -4,36 +4,42 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_ShadowLightPosition[12]
 <
+	string widget = "hidden";
 	string name = "Shadow Light Positions";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): world-space position + radius of up to 12 point lights currently casting shadows. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_LightPosition[12]
 <
+	string widget = "hidden";
 	string name = "Light Positions";
 	string description = "World-space position + radius of up to 12 nearby point lights, supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_LightColor[24]
 <
+	string widget = "hidden";
 	string name = "Light Colors";
 	string description = "Color/intensity of up to 24 nearby point lights (diffuse + specular pairs), supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowFade
 <
+	string widget = "hidden";
 	string name = "Shadow Fade";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SpotLightPosition
 <
+	string widget = "hidden";
 	string name = "Spot Light Position";
 	string description = "World-space position of the flashlight spotlight (xyz), w = radius (Shaders.Flashlight.Main.Distance), supplied by the engine. Not directly user-editable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SpotLightDirection
 <
+	string widget = "hidden";
 	string name = "Spot Light Direction";
 	string description = "World-space direction the flashlight spotlight is aimed, computed each frame from the weapon/camera transform. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -42,7 +48,7 @@ float4 TESR_SpotLightColor
 <
 	string name = "Spot Light Color";
 	string description = "Flashlight tint color (Shaders.Flashlight.Main.ColorR/G/B), w = Dimmer.";
-	string widget = "color";
+	string widget = "hidden";
 	float3 defaultValue = {2.0, 2.0, 1.0};
 >;
 

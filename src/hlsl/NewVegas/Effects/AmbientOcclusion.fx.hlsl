@@ -20,18 +20,21 @@ float4 TESR_AmbientOcclusionData
 >;
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_FogData
 <
+	string widget = "hidden";
 	string name = "Fog Data";
 	string description = "Current weather fog parameters, supplied by the engine: x = fog start, y = fog end, z = sun glare, w = fog power. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_FogColor
 <
+	string widget = "hidden";
 	string name = "Fog Color";
 	string description = "Current weather fog color (RGB), supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;

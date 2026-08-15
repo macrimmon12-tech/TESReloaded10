@@ -6,6 +6,7 @@ string PipelinePosition = "PostTonemapping";
 
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -18,6 +19,7 @@ float4 TESR_MotionBlurParams
 >;
 float4 TESR_MotionBlurData
 <
+	string widget = "hidden";
 	string name = "Motion Blur Data";
 	string description = "Packed per-frame camera-turn blur amount: x = smoothed horizontal (yaw) blur amount, y = smoothed vertical (pitch) blur amount. Derived each frame from player rotation delta; not directly user-editable.";
 	float defaultValue = 0.0;

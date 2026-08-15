@@ -4,18 +4,21 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_ShadowLightPosition[12]
 <
+	string widget = "hidden";
 	string name = "Shadow Light Positions";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): world-space position + radius of up to 12 point lights currently casting shadows. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_LightColor[24]
 <
+	string widget = "hidden";
 	string name = "Light Colors";
 	string description = "Color/intensity of up to 24 nearby point lights (diffuse + specular pairs), supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowFade
 <
+	string widget = "hidden";
 	string name = "Shadow Fade";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance.";
 	float defaultValue = 0.0;

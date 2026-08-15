@@ -9,24 +9,28 @@ string PipelinePosition = "PreTonemapping";
 // interior/exterior branches of its single UpdateConstants().
 float4x4 TESR_WorldTransform
 <
+	string widget = "hidden";
 	string name = "World Transform";
 	string description = "World matrix, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowData
 <
+	string widget = "hidden";
 	string name = "Shadow Data";
 	string description = "ShadowsExteriorEffect's own registered constant: in interiors, x = Quality (Shaders.ShadowsInteriors.Main.Quality), y = Darkness (Shaders.ShadowsInteriors.Main.Darkness), z = 1 / ShadowCubeMapSize.";
 	float defaultValue = 0.65;
 >;
 float4 TESR_ShadowFade
 <
+	string widget = "hidden";
 	string name = "Shadow Fade";
 	string description = "ShadowsExteriorEffect's own registered constant: in interiors, y = shadow maps enabled (ShadowsInteriorsEffect.Enabled), z = 1 (point lights always enabled), w = DrawDistance (Shaders.ShadowsInteriors.Main.DrawDistance).";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;

@@ -5,12 +5,14 @@ string PipelinePosition = "PreTonemapping";
 // of its own.
 float4 TESR_DepthConstants
 <
+	string widget = "hidden";
 	string name = "Depth Constants";
 	string description = "Packed depth-buffer metrics supplied by the engine: x = view-model (weapon) near Z, y = far Z (unused, always 0), z = 1.0 if the depth buffer is reversed else 0.0, w = 1.0 (unused). Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_CameraData
 <
+	string widget = "hidden";
 	string name = "Camera Data";
 	string description = "Packed camera metrics supplied by the engine: x = near Z, y = far Z, z = frustum aspect ratio (width/height), w = field of view. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -18,6 +20,7 @@ float4 TESR_CameraData
 
 float4x4 TESR_InvProjectionTransform
 <
+	string widget = "hidden";
 	string name = "Inverse Projection Transform";
 	string description = "Inverse of the current camera projection matrix, supplied by the engine each frame for view-space position reconstruction from depth. Not user-configurable.";
 	float defaultValue = 0.0;

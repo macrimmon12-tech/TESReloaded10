@@ -221,6 +221,9 @@ Only `defaultValue` is required. Everything else is optional with defined fallba
 | `key` | Key binding picker (DIK reference popup) | `int` |
 | `slider` | Explicit slider | `int` (overrides drag-int default) |
 | `path` | File cycle picker — prev/next arrows + filename display | `string` |
+| `hidden` | None — uniform is skipped when the parser builds the settings list | any |
+
+`hidden` is for uniforms that are engine-supplied (camera/projection transforms, sun/weather state, per-frame timers, light lists, etc.) or otherwise not user-configurable — the shader still declares them normally and the `<>` block still documents what the uniform carries, but the annotation parser excludes them from the menu-building pass entirely rather than rendering a widget nobody should touch. This is distinct from simply omitting `widget`: an omitted `widget` still gets the type-default slider/checkbox/drag-int treatment (and would show up in a future annotation-driven settings list), whereas `hidden` opts a documented uniform out of that list on purpose.
 
 **Type-defaults when `widget` is omitted:**
 

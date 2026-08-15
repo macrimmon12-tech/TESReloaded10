@@ -15,24 +15,28 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_SunDirection
 <
+	string widget = "hidden";
 	string name = "Sun Direction";
 	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_WorldViewProjectionTransform
 <
+	string widget = "hidden";
 	string name = "World-View-Projection Transform";
 	string description = "Combined world-view-projection matrix, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ShadowCameraToLightTransformOrtho
 <
+	string widget = "hidden";
 	string name = "Shadow Ortho Camera-To-Light Transform";
 	string description = "ShadowsExteriorEffect's own registered ortho-cascade transform (see ShadowsExteriors.fx.hlsl), used here to sample the ortho shadow map for puddle placement. Not user-configurable.";
 	float defaultValue = 0.0;
@@ -40,36 +44,42 @@ float4x4 TESR_ShadowCameraToLightTransformOrtho
 
 float4 TESR_GameTime
 <
+	string widget = "hidden";
 	string name = "Game Time";
 	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SkyColor
 <
+	string widget = "hidden";
 	string name = "Sky Color";
 	string description = "Top-of-sky color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_HorizonColor
 <
+	string widget = "hidden";
 	string name = "Horizon Color";
 	string description = "Horizon color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmbient
 <
+	string widget = "hidden";
 	string name = "Sun Ambient";
 	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_OrthoData
 <
+	string widget = "hidden";
 	string name = "Ortho Data";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = max ortho radius (Shaders.ShadowsExteriors.Main.OrthoRadius x2), y = ortho shadow map inverse resolution.";
 	float defaultValue = 0.0;
@@ -83,6 +93,7 @@ float4 TESR_WetWorldCoeffs
 >;
 float4 TESR_WaterSettings
 <
+	string widget = "hidden";
 	string name = "Water Settings";
 	string description = "WaterShaders' own registered constant (ShaderCollection, no annotatable constant table): x = water height in the cell (used here to avoid rendering puddles underwater), y = depthDarkness, z = isUnderwater, w = refractionPower.";
 	float defaultValue = 0.0;
@@ -95,48 +106,56 @@ float4 TESR_WetWorldData
 >;
 float4 TESR_SunPosition
 <
+	string widget = "hidden";
 	string name = "Sun Position";
 	string description = "World-space position of the sun disk, normalized direction with w = 1, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SkyData
 <
+	string widget = "hidden";
 	string name = "Sky Data";
 	string description = "SkyShaders' own registered constant (ShaderCollection, no annotatable constant table -- Shaders.Sky.Main): x = AthmosphereThickness, y = SunInfluence, z = SunStrength, w = StarStrength.";
 	float defaultValue = 1.0;
 >;
 float4 TESR_SkyLowColor
 <
+	string widget = "hidden";
 	string name = "Sky Low Color";
 	string description = "Horizon-level sky color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmount
 <
+	string widget = "hidden";
 	string name = "Sun Amount";
 	string description = "Day/night blend amount supplied by the engine, used to fade effects across sunrise/sunset. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_LightPosition[12]
 <
+	string widget = "hidden";
 	string name = "Light Positions";
 	string description = "World-space position + radius of up to 12 nearby point lights, supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowLightPosition[12]
 <
+	string widget = "hidden";
 	string name = "Shadow Light Positions";
 	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): world-space position + radius of up to 12 point lights currently casting shadows. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_LightColor[24]
 <
+	string widget = "hidden";
 	string name = "Light Colors";
 	string description = "Color/intensity of up to 24 nearby point lights (diffuse + specular pairs), supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_DebugVar
 <
+	string widget = "hidden";
 	string name = "Debug Variable";
 	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
 	float defaultValue = 0.0;

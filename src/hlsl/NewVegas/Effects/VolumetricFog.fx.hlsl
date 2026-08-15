@@ -4,90 +4,105 @@ string PipelinePosition = "PreTonemapping";
 
 float4 TESR_FogColor
 <
+	string widget = "hidden";
 	string name = "Fog Color";
 	string description = "Current weather fog color (RGB), supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_FogData
 <
+	string widget = "hidden";
 	string name = "Fog Data";
 	string description = "Current weather fog parameters, supplied by the engine: x = fogNear, y = fogFar, z = sunglare, w = fogpower. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunDirection
 <
+	string widget = "hidden";
 	string name = "Sun Direction";
 	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunPosition
 <
+	string widget = "hidden";
 	string name = "Sun Position";
 	string description = "World-space position of the sun disk, normalized direction with w = 1, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor
 <
+	string widget = "hidden";
 	string name = "Sun Color";
 	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunDiskColor
 <
+	string widget = "hidden";
 	string name = "Sun Disk Color";
 	string description = "Color of the sun disk itself, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmbient
 <
+	string widget = "hidden";
 	string name = "Sun Ambient";
 	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_HorizonColor
 <
+	string widget = "hidden";
 	string name = "Horizon Color";
 	string description = "Horizon color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SkyLowColor
 <
+	string widget = "hidden";
 	string name = "Sky Low Color";
 	string description = "Horizon-level sky color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SkyColor
 <
+	string widget = "hidden";
 	string name = "Sky Color";
 	string description = "Top-of-sky color, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SkyData
 <
+	string widget = "hidden";
 	string name = "Sky Data";
 	string description = "SkyShaders' own registered constant (ShaderCollection, no annotatable constant table -- Shaders.Sky.Main): x = AthmosphereThickness, y = SunInfluence, z = SunStrength, w = StarStrength.";
 	float defaultValue = 1.0;
 >;
 float4 TESR_DebugVar
 <
+	string widget = "hidden";
 	string name = "Debug Variable";
 	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunsetColor
 <
+	string widget = "hidden";
 	string name = "Sunset Color";
 	string description = "Color boost applied to the sun near the horizon, supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunAmount
 <
+	string widget = "hidden";
 	string name = "Sun Amount";
 	string description = "Day/night blend amount supplied by the engine: x = isDaytime. Not user-configurable.";
 	float defaultValue = 0.0;

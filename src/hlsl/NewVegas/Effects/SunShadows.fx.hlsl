@@ -7,102 +7,119 @@ string PipelinePosition = "PreTonemapping";
 // the sun/directional shadow-map cascades that effect owns and consumes.
 float4x4 TESR_WorldViewProjectionTransform
 <
+	string widget = "hidden";
 	string name = "World-View-Projection Transform";
 	string description = "Combined world-view-projection matrix, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ShadowCameraToLightTransformNear
 <
+	string widget = "hidden";
 	string name = "Shadow Near Camera-To-Light Transform";
 	string description = "View-projection matrix of the near shadow cascade, computed each frame from the sun direction and cascade bounds. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ShadowCameraToLightTransformMiddle
 <
+	string widget = "hidden";
 	string name = "Shadow Middle Camera-To-Light Transform";
 	string description = "View-projection matrix of the middle shadow cascade, computed each frame from the sun direction and cascade bounds. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ShadowCameraToLightTransformFar
 <
+	string widget = "hidden";
 	string name = "Shadow Far Camera-To-Light Transform";
 	string description = "View-projection matrix of the far shadow cascade, computed each frame from the sun direction and cascade bounds. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ShadowCameraToLightTransformLod
 <
+	string widget = "hidden";
 	string name = "Shadow LOD Camera-To-Light Transform";
 	string description = "View-projection matrix of the LOD (far distance) shadow cascade, computed each frame from the sun direction and cascade bounds. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ReciprocalResolution
 <
+	string widget = "hidden";
 	string name = "Reciprocal Resolution";
 	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SmoothedSunDir
 <
+	string widget = "hidden";
 	string name = "Smoothed Sun Direction";
 	string description = "Sun/moon direction after the Shaders.ShadowsExteriors.SunSmoothing interpolation is applied, to avoid shadow popping as the sun moves. Not directly user-editable (see SmoothSun/SmoothingFactor/YawStepSize/PitchStepSize settings that shape it).";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ViewSpaceLightDir
 <
+	string widget = "hidden";
 	string name = "View Space Light Direction";
 	string description = "Sun/moon light direction transformed into view space, supplied by the engine. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowData
 <
+	string widget = "hidden";
 	string name = "Shadow Data";
-	string description = "This effect's own registered constant: x = Quality (Shaders.ShadowsExteriors.Main.Quality), y = Darkness (Shaders.ShadowsExteriors.Main.Darkness), z = texel size.";
+	string description = "ShadowsExteriorEffect's own registered constant: x = Quality (Shaders.ShadowsExteriors.Main.Quality), y = Darkness (Shaders.ShadowsExteriors.Main.Darkness), z = texel size.";
 	float defaultValue = 0.75;
 >;
 float4 TESR_ShadowFormatData
 <
+	string widget = "hidden";
 	string name = "Shadow Format Data";
-	string description = "This effect's own registered constant (Shaders.ShadowsExteriors.ShadowMaps): x = Mode, y = Format (bits per pixel).";
+	string description = "ShadowsExteriorEffect's own registered constant (Shaders.ShadowsExteriors.ShadowMaps): x = Mode, y = Format (bits per pixel).";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowScreenSpaceData
 <
+	string widget = "hidden";
 	string name = "Shadow Screen Space Data";
-	string description = "This effect's own registered constant (Shaders.ShadowsExteriors.ScreenSpace): x = Enabled, y = BlurRadius, z = RenderDistance, w = Intensity.";
+	string description = "ShadowsExteriorEffect's own registered constant (Shaders.ShadowsExteriors.ScreenSpace): x = Enabled, y = BlurRadius, z = RenderDistance, w = Intensity.";
 	float defaultValue = 1.0;
 >;
 float4 TESR_SunAmbient
 <
+	string widget = "hidden";
 	string name = "Sun Ambient";
 	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowFade
 <
+	string widget = "hidden";
 	string name = "Shadow Fade";
-	string description = "This effect's own registered constant: x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled.";
+	string description = "ShadowsExteriorEffect's own registered constant: x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowNearCenter
 <
+	string widget = "hidden";
 	string name = "Shadow Near Cascade Center";
 	string description = "World-space center (xyz) and radius (w) of the near shadow cascade, computed each frame around the camera. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowMiddleCenter
 <
+	string widget = "hidden";
 	string name = "Shadow Middle Cascade Center";
 	string description = "World-space center (xyz) and radius (w) of the middle shadow cascade, computed each frame around the camera. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowFarCenter
 <
+	string widget = "hidden";
 	string name = "Shadow Far Cascade Center";
 	string description = "World-space center (xyz) and radius (w) of the far shadow cascade, computed each frame around the camera. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_ShadowLodCenter
 <
+	string widget = "hidden";
 	string name = "Shadow LOD Cascade Center";
 	string description = "World-space center (xyz) and radius (w) of the LOD (far distance) shadow cascade, computed each frame around the camera. Not user-configurable.";
 	float defaultValue = 0.0;

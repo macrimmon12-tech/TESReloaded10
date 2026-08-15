@@ -7,42 +7,49 @@
 // file, per R3e). None are user-configurable.
 float4x4 TESR_ProjectionTransform
 <
+	string widget = "hidden";
 	string name = "Projection Transform";
 	string description = "Current camera projection matrix, supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_InvProjectionTransform
 <
+	string widget = "hidden";
 	string name = "Inverse Projection Transform";
 	string description = "Inverse of the current camera projection matrix, supplied by the engine each frame for view-space position reconstruction from depth. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_ViewTransform
 <
+	string widget = "hidden";
 	string name = "View Transform";
 	string description = "Current camera view matrix, supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4x4 TESR_InvViewTransform
 <
+	string widget = "hidden";
 	string name = "Inverse View Transform";
 	string description = "Inverse of the current camera view matrix, supplied by the engine each frame for world-space position reconstruction from depth. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_DepthConstants
 <
+	string widget = "hidden";
 	string name = "Depth Constants";
 	string description = "Packed depth-buffer metrics supplied by the engine: x = view-model (weapon) near Z, y = far Z (unused, always 0), z = 1.0 if the depth buffer is reversed else 0.0, w = 1.0 (unused). Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_CameraData
 <
+	string widget = "hidden";
 	string name = "Camera Data";
 	string description = "Packed camera metrics supplied by the engine: x = near Z, y = far Z, z = frustum aspect ratio (width/height), w = field of view. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
 float4 TESR_CameraPosition
 <
+	string widget = "hidden";
 	string name = "Camera Position";
 	string description = "World-space camera position, supplied by the engine each frame. Not user-configurable.";
 	float defaultValue = 0.0;
