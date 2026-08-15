@@ -411,15 +411,19 @@ R3   EffectRecord owns UI
           │        BuildPackedSettingsIndex(), built in LoadEffect() after
           │        CreateCT()) wired into RenderMenuNode as the fallback
           │        when the "TESR_" + EffectName + Key direct convention
-          │        finds nothing (or finds something `hidden`) -- first
-          │        visibly testable payoff (real labels/tooltips/ranges
-          │        sourced from shader annotations for e.g. Bloom's
-          │        PassBlending/Passes, same persisted values, same TOML
-          │        section/key model)                                    ✓ DONE (Bloom only so far)
-          │        ↓ remaining: retrofit componentKeys onto every other
-          │          effect's own packed uniforms (the ones R3e marked
-          │          NOT hidden -- TESR_CinemaData, TESR_GodRaysRay,
-          │          TESR_ColoringData, etc.), batched like R3e            ← NEXT
+          │        finds nothing (or finds something `hidden`). Every
+          │        effect's own packed settings vectors (the ones R3e
+          │        marked NOT hidden) now carry componentKeys/Names/
+          │        Defaults/Mins/Maxs/Steps -- real labels/tooltips/ranges
+          │        sourced from shader annotations everywhere, same
+          │        persisted values, same TOML section/key model         ✓ DONE
+          │        ↳ caught two real issues while retrofitting: TESR_
+          │          LowHFData (every component mixes a setting with live
+          │          health/fatigue state, no clean 1:1 fit) and
+          │          ShadowsExteriors' TESR_ShadowFade (its Enabled
+          │          component would collide with TESR_ShadowScreenSpace-
+          │          Data's own Enabled -- PackedSettings is keyed by bare
+          │          key only) both corrected from packed to hidden
           ├─ 3f-3  (stretch) retire remaining hardcoded menu heuristics
           │        (RGB-triple-by-key-suffix, LUT hardcoded section) now that
           │        a real per-effect annotation index exists to drive them
