@@ -219,6 +219,7 @@ Only `default` is required. Everything else is optional with defined fallbacks.
 | `key` | Key binding picker (DIK reference popup) | `int` |
 | `slider` | Explicit slider | `int` (overrides drag-int default) |
 | `path` | File cycle picker — prev/next arrows + filename display | `string` |
+| `hidden` | Not shown in menu — use for engine-supplied or non-configurable uniforms | any |
 
 **Type-defaults when `widget` is omitted:**
 
@@ -310,6 +311,14 @@ uniform string DayLUT
     string filter = "*.dds,*.png";
     string default = "";
 >;
+
+// Engine-supplied uniforms use widget = "hidden" to document without exposing in menu
+uniform float4 TESR_SunsetColor
+<
+    string name = "Sunset Color";
+    string description = "Sun color near horizon, supplied by engine from active weather. Not user-configurable.";
+    string widget = "hidden";
+>;
 ```
 
 **The clean boundary:**
@@ -328,6 +337,33 @@ All existing NVR `EffectRecord` shaders must have their uniform declarations ann
 
 Once R3 is complete and built-in shaders are annotated, the menu is fully decoupled from knowing what effects exist at compile time.
 
+### Engine Data Availability
+
+A key concern raised during planning was whether custom shaders could access engine data (depth buffer, camera position, sun direction, etc.) without C++ backing. Research confirmed that **engine data is largely automatic** via NVR's existing `ConstantsTable` mechanism:
+
+- `ShaderManager::Initialize()` registers ~30 global engine values (`TESR_ViewTransform`, `TESR_CameraPosition`, `TESR_SunDirection`, `TESR_GameTime`, `TESR_FogColor`, etc.) as live C++ pointers, updated once per frame
+- When any shader's `SetCT()` runs, it looks up each `TESR_`-prefixed uniform by name in `ConstantsTable` and binds it automatically
+- Globally registered textures (`TESR_DepthBuffer`, `TESR_NormalsBuffer`, `TESR_AvgLumaBuffer`) bind automatically to any shader that declares them, provided the owning effect is loaded
+- **No per-effect C++ required** for any of the globally registered engine data
+
+The one real barrier is **effect registration** — a shader dropped in `Custom/` needs to be dynamically instantiated as a `GenericEffectRecord` and registered with `ShaderManager`. That is exactly what R4 implements.
+
+**What custom shaders can access for free** (via `TESR_` uniform declaration):
+- View/projection matrices, camera position, frustum data
+- Sun direction, sun color, ambient color
+- Game time, time of day
+- Fog color and density
+- Weather blend weights
+- Depth buffer, normals buffer, average luma buffer
+- Any other globally registered engine constant
+
+**What requires C++ (not available to custom shaders):**
+- Effect-specific derived values (e.g. `TESR_BloomData`, `TESR_DOFData`) — these are registered by individual built-in effects and not globally available
+- Custom engine data not already in `ConstantsTable`
+- Complex update semantics with interdependencies between settings
+
+For porting shaders from ReShade or similar frameworks: remap ReShade uniform semantics to NVR `TESR_` equivalents. A porting guide documenting the mapping is worth producing as part of R4.
+
 ### Structure
 
 ```
@@ -342,10 +378,17 @@ Data/Shaders/Effects/
 
 - Engine scans `Custom/` at startup
 - For each shader found, parses uniform annotations to build a settings list and pipeline position
-- Instantiates a `GenericEffectRecord` (uses base `RenderMenu()`)
+- Instantiates a `GenericEffectRecord`, registers it with `ShaderManager` dynamically
+- `GenericEffectRecord::RegisterConstants()` calls `RegisterConstant()` for any effect-specific values declared in annotations
+- All globally registered `TESR_` engine data binds automatically via `SetCT()`
 - Custom effect settings persist to an INI section named after the shader file
-- No C++ required from the shader author — ever
-- Custom effects cannot be `ShaderCollection` types; they are always `EffectRecord` subclasses
+- No C++ required from the shader author for any globally available engine data
+
+### Constraints
+
+- Custom effects are always `EffectRecord` subclasses — the `ShaderCollection` architecture is not available to custom shaders
+- Effect-specific derived constants from built-in effects are not available unless those effects are loaded
+- Complex update semantics requiring interdependencies between settings require a built-in C++ effect
 
 ---
 
@@ -373,4 +416,5 @@ R3   EffectRecord owns UI
 R1b  TOML → INI                       ────────────────────────▶  after R3 structure is final
 
 R4   Custom effects drop-in folder    ────────────────────────▶  after R3 + R1b complete
+  └─ produce TESR_ → ReShade semantic porting guide as part of R4
 ```
