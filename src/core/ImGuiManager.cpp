@@ -1,4 +1,5 @@
 #include "ImGuiManager.h"
+#include "ImGuiWidgets.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_impl_dx9.h"
@@ -28,7 +29,6 @@ static std::string SelectedSection;
 
 static float s_pendingWheelDelta    = 0.0f;
 static float s_shaderStepSize       = 0.1f;
-static bool  s_colorStatesNeedReset = false;
 static bool  s_plusPressed          = false;
 static bool  s_minusPressed         = false;
 static int   s_masterMod            = -1; // -1 = not yet read from settings
@@ -37,9 +37,10 @@ static int   s_masterMod            = -1; // -1 = not yet read from settings
 // Initialized to current key states when overlay opens so held keys don't misfire.
 static BYTE s_prevKeyState[256] = {};
 
-// Per-setting revert snapshot: section -> key -> value at overlay open time.
-// Populated lazily on first render of each setting; cleared on overlay open.
-static std::unordered_map<std::string, std::unordered_map<std::string, std::string>> s_snapshot;
+// Per-setting revert snapshots and colour-picker widget state (RGB triples)
+// now live in EffectRecord.cpp, shared by every effect's RenderMenu() and by
+// RenderGenericSection()'s fallback path -- see EffectRecord::ResetMenuState()
+// and EffectRecord::RevertMenuSnapshot(). Per docs/refactor-plan.md R3c.
 
 // ---- Confabulator -------------------------------------------------------
 
@@ -619,7 +620,7 @@ static void SetOverlayVisible(bool visible) {
 	if (ImGuiManager::IsVisible() == visible) return;
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
-		s_snapshot.clear();
+		EffectRecord::ResetMenuState();
 		// Snapshot current held keys so they don't register as new presses
 		for (int vk = 0; vk < 256; vk++)
 			s_prevKeyState[vk] = (GetAsyncKeyState(vk) & 0x8000) ? 0x80 : 0;
@@ -658,12 +659,7 @@ static void SetOverlayVisible(bool visible) {
 
 // Restore all snapshotted values and sync shader states.
 static void RevertToSnapshot() {
-	for (auto& [section, keys] : s_snapshot)
-		for (auto& [key, value] : keys)
-			TheSettingManager->SetSettingS(const_cast<char*>(section.c_str()),
-			                               const_cast<char*>(key.c_str()),
-			                               const_cast<char*>(value.c_str()));
-	TheSettingManager->LoadSettings();
+	EffectRecord::RevertMenuSnapshot(); // re-applies every value + clears menu state
 	// Sync shader enabled flags (same as RevertSettings does)
 	StringList shaders;
 	TheSettingManager->FillMenuSections(&shaders, "Shaders");
@@ -674,7 +670,6 @@ static void RevertToSnapshot() {
 		ShaderCollection* shader = TheShaderManager->GetShaderCollectionByName(name.c_str());
 		if (shader) shader->Enabled = want;
 	}
-	s_colorStatesNeedReset = true;
 	SelectedSection.clear();
 }
 
@@ -1005,6 +1000,9 @@ void ImGuiManager::NewFrame() {
 		s_minusPressed = curMinus && !prevMinus;
 		prevPlus  = curPlus;
 		prevMinus = curMinus;
+
+		ImGuiWidgets::SetStepKeys(s_plusPressed, s_minusPressed);
+		ImGuiWidgets::SetDefaultStep(s_shaderStepSize);
 	}
 }
 
@@ -1022,360 +1020,9 @@ static bool ShouldHideSection(const std::string& name) {
 	return name == "WeatherMode" || name == "Status";
 }
 
-static bool ShouldHideKey(const char* key) {
-	if (strncmp(key, "TextColor", 9) == 0 || strncmp(key, "TextShadow", 10) == 0) return true;
-	// LUT filenames are rendered as cycle pickers, not raw InputText
-	if (strcmp(key, "DayLUT") == 0 || strcmp(key, "NightLUT") == 0 || strcmp(key, "InteriorLUT") == 0) return true;
-	return false;
-}
-
-static const struct { int dik; const char* name; } kDIKTable[] = {
-	{ 0x01, "Escape" },
-	{ 0x02, "1" }, { 0x03, "2" }, { 0x04, "3" }, { 0x05, "4" }, { 0x06, "5" },
-	{ 0x07, "6" }, { 0x08, "7" }, { 0x09, "8" }, { 0x0A, "9" }, { 0x0B, "0" },
-	{ 0x0C, "Minus (-)" }, { 0x0D, "Equals (=)" }, { 0x0E, "Backspace" },
-	{ 0x0F, "Tab" },
-	{ 0x10, "Q" }, { 0x11, "W" }, { 0x12, "E" }, { 0x13, "R" }, { 0x14, "T" },
-	{ 0x15, "Y" }, { 0x16, "U" }, { 0x17, "I" }, { 0x18, "O" }, { 0x19, "P" },
-	{ 0x1A, "[ Left Bracket" }, { 0x1B, "] Right Bracket" }, { 0x1C, "Enter" },
-	{ 0x1D, "Left Ctrl" },
-	{ 0x1E, "A" }, { 0x1F, "S" }, { 0x20, "D" }, { 0x21, "F" }, { 0x22, "G" },
-	{ 0x23, "H" }, { 0x24, "J" }, { 0x25, "K" }, { 0x26, "L" },
-	{ 0x27, "Semicolon (;)" }, { 0x28, "Apostrophe (')" }, { 0x29, "Grave (`)" },
-	{ 0x2A, "Left Shift" }, { 0x2B, "Backslash (\\)" },
-	{ 0x2C, "Z" }, { 0x2D, "X" }, { 0x2E, "C" }, { 0x2F, "V" },
-	{ 0x30, "B" }, { 0x31, "N" }, { 0x32, "M" },
-	{ 0x33, "Comma (,)" }, { 0x34, "Period (.)" }, { 0x35, "Slash (/)" },
-	{ 0x36, "Right Shift" }, { 0x37, "Numpad *" }, { 0x38, "Left Alt" },
-	{ 0x39, "Space" }, { 0x3A, "Caps Lock" },
-	{ 0x3B, "F1" }, { 0x3C, "F2" }, { 0x3D, "F3" }, { 0x3E, "F4" },
-	{ 0x3F, "F5" }, { 0x40, "F6" }, { 0x41, "F7" }, { 0x42, "F8" },
-	{ 0x43, "F9" }, { 0x44, "F10" },
-	{ 0x45, "Num Lock" }, { 0x46, "Scroll Lock" },
-	{ 0x47, "Numpad 7" }, { 0x48, "Numpad 8" }, { 0x49, "Numpad 9" },
-	{ 0x4A, "Numpad -" },
-	{ 0x4B, "Numpad 4" }, { 0x4C, "Numpad 5" }, { 0x4D, "Numpad 6" },
-	{ 0x4E, "Numpad +" },
-	{ 0x4F, "Numpad 1" }, { 0x50, "Numpad 2" }, { 0x51, "Numpad 3" },
-	{ 0x52, "Numpad 0" }, { 0x53, "Numpad ." },
-	{ 0x57, "F11" }, { 0x58, "F12" },
-	{ 0x9C, "Numpad Enter" }, { 0x9D, "Right Ctrl" },
-	{ 0xB5, "Numpad /" }, { 0xB7, "Print Screen" }, { 0xB8, "Right Alt" },
-	{ 0xC5, "Pause" }, { 0xC7, "Home" },
-	{ 0xC8, "Up Arrow" }, { 0xC9, "Page Up" }, { 0xCB, "Left Arrow" },
-	{ 0xCD, "Right Arrow" }, { 0xCF, "End" },
-	{ 0xD0, "Down Arrow" }, { 0xD1, "Page Down" },
-	{ 0xD2, "Insert" }, { 0xD3, "Delete" },
-};
-
-static const char* DikToName(BYTE dik) {
-	for (auto& e : kDIKTable)
-		if (e.dik == (int)dik) return e.name;
-	return "Unknown";
-}
-
-static void RenderDIKPopup() {
-	if (!ImGui::BeginPopup("DIKReference")) return;
-	ImGui::Text("DirectInput Scancodes");
-	ImGui::Separator();
-	if (ImGui::BeginTable("diktbl", 2,
-		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
-		ImVec2(220.0f, 320.0f)))
-	{
-		ImGui::TableSetupScrollFreeze(0, 1);
-		ImGui::TableSetupColumn("Code");
-		ImGui::TableSetupColumn("Key");
-		ImGui::TableHeadersRow();
-		for (auto& e : kDIKTable) {
-			ImGui::TableNextRow();
-			ImGui::TableSetColumnIndex(0); ImGui::Text("0x%02X (%d)", e.dik, e.dik);
-			ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(e.name);
-		}
-		ImGui::EndTable();
-	}
-	ImGui::EndPopup();
-}
-
-static void RenderColorTriple(
-	SettingManager::Configuration::ConfigNode& nodeR,
-	SettingManager::Configuration::ConfigNode& nodeG,
-	SettingManager::Configuration::ConfigNode& nodeB,
-	const std::string& prefix)
-{
-	// Persistent state: only initialise from node values once per section visit.
-	// Re-reading each frame forces max(col)=1 every frame, pinning the picker
-	// dot to the top edge of the triangle and resetting the intensity slider.
-	struct ColorState { float col[3]; float scale; };
-	static std::unordered_map<std::string, ColorState> s_states;
-
-	if (s_colorStatesNeedReset) {
-		s_states.clear();
-		s_colorStatesNeedReset = false;
-	}
-
-	std::string stateKey = std::string(nodeR.Section) + "." + prefix;
-	if (s_states.find(stateKey) == s_states.end()) {
-		float rv = (float)atof(nodeR.Value);
-		float gv = (float)atof(nodeG.Value);
-		float bv = (float)atof(nodeB.Value);
-		float sc = rv > gv ? rv : gv;
-		if (bv > sc) sc = bv;
-		ColorState cs;
-		if (sc > 0.0f) {
-			cs.scale    = sc;
-			cs.col[0]   = rv / sc;
-			cs.col[1]   = gv / sc;
-			cs.col[2]   = bv / sc;
-		} else {
-			cs.scale    = 1.0f;
-			cs.col[0]   = cs.col[1] = cs.col[2] = 0.0f;
-		}
-		s_states[stateKey] = cs;
-	}
-	ColorState& cs = s_states[stateKey];
-
-	// Trim trailing underscores for display
-	std::string label = prefix;
-	while (!label.empty() && label.back() == '_') label.pop_back();
-
-	// Lazy snapshot for R/G/B
-	auto snapColor = [&](SettingManager::Configuration::ConfigNode& n) -> std::string& {
-		auto& sec = s_snapshot[n.Section];
-		auto  it  = sec.find(n.Key);
-		if (it == sec.end()) it = sec.emplace(n.Key, n.Value).first;
-		return it->second;
-	};
-	std::string& snapR = snapColor(nodeR);
-	std::string& snapG = snapColor(nodeG);
-	std::string& snapB = snapColor(nodeB);
-	bool colorDirty = snapR != nodeR.Value || snapG != nodeG.Value || snapB != nodeB.Value;
-
-	ImGui::PushID(prefix.c_str());
-
-	ImGui::TextUnformatted(label.c_str());
-	ImGui::SameLine();
-	if (!colorDirty) ImGui::BeginDisabled();
-	if (ImGui::SmallButton("~")) {
-		TheSettingManager->SetSettingS(nodeR.Section, nodeR.Key, const_cast<char*>(snapR.c_str()));
-		TheSettingManager->SetSettingS(nodeG.Section, nodeG.Key, const_cast<char*>(snapG.c_str()));
-		TheSettingManager->SetSettingS(nodeB.Section, nodeB.Key, const_cast<char*>(snapB.c_str()));
-		TheSettingManager->LoadSettings();
-		s_colorStatesNeedReset = true;
-	}
-	if (!colorDirty) ImGui::EndDisabled();
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
-
-	// R field rendered here (G and B are rendered by the outer loop before detection fires)
-	bool changed = false;
-	{
-		float rawR = cs.col[0] * cs.scale;
-		bool rChanged = ImGui::DragFloat(nodeR.Key, &rawR, 0.001f, 0.0f, 0.0f, "%.4f");
-		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
-			rawR += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
-			rChanged = true;
-		}
-		ImGui::SameLine();
-		if (ImGui::SmallButton("-##r")) { rawR -= s_shaderStepSize; rChanged = true; }
-		ImGui::SameLine();
-		if (ImGui::SmallButton("+##r")) { rawR += s_shaderStepSize; rChanged = true; }
-		if (rChanged && cs.scale > 0.0f) {
-			cs.col[0] = rawR / cs.scale;
-			changed = true;
-		}
-	}
-
-	if (ImGui::ColorPicker3("##col", cs.col,
-		ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoSidePreview))
-		changed = true;
-
-	ImGui::Text("Intensity");
-	ImGui::SameLine();
-	ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-	if (ImGui::DragFloat("##intensity", &cs.scale, 0.01f, 0.0f, 0.0f, "%.4f"))
-		changed = true;
-	if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
-		cs.scale += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
-		changed = true;
-	}
-
-	if (changed) {
-		TheSettingManager->SetSetting(nodeR.Section, nodeR.Key, cs.col[0] * cs.scale);
-		TheSettingManager->SetSetting(nodeG.Section, nodeG.Key, cs.col[1] * cs.scale);
-		TheSettingManager->SetSetting(nodeB.Section, nodeB.Key, cs.col[2] * cs.scale);
-		TheSettingManager->LoadSettings();
-	}
-
-	if (!nodeR.Description.empty()) {
-		ImGui::BeginTooltip();
-		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-		ImGui::TextUnformatted(nodeR.Description.c_str());
-		ImGui::PopTextWrapPos();
-		ImGui::EndTooltip();
-	}
-
-	ImGui::PopID();
-}
-
-static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool isShader = false) {
-	using NodeType = SettingManager::Configuration::NodeType;
-
-	ImGui::PushID(node.Key);
-
-	// Lazy snapshot: record value on first encounter after overlay opens.
-	auto& sectionSnap = s_snapshot[node.Section];
-	auto  snapIt      = sectionSnap.find(node.Key);
-	if (snapIt == sectionSnap.end())
-		snapIt = sectionSnap.emplace(node.Key, node.Value).first;
-	bool isDirty = snapIt->second != std::string(node.Value);
-
-	auto RevertBtn = [&]() {
-		ImGui::SameLine();
-		if (!isDirty) ImGui::BeginDisabled();
-		if (ImGui::SmallButton("~")) {
-			TheSettingManager->SetSettingS(node.Section, node.Key,
-			                               const_cast<char*>(snapIt->second.c_str()));
-			TheSettingManager->LoadSettings();
-		}
-		if (!isDirty) ImGui::EndDisabled();
-		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
-	};
-
-	switch (node.Type) {
-	case NodeType::Boolean: {
-		bool val = (strcmp(node.Value, "1") == 0 || _stricmp(node.Value, "true") == 0);
-		if (ImGui::Checkbox(node.Key, &val)) {
-			TheSettingManager->SetSetting(node.Section, node.Key, val);
-			TheSettingManager->LoadSettings();
-		}
-		RevertBtn();
-		break;
-	}
-	case NodeType::Float: {
-		float val = (float)atof(node.Value);
-		if (ImGui::DragFloat(node.Key, &val, 0.001f, 0.0f, 0.0f, "%.4f")) {
-			TheSettingManager->SetSetting(node.Section, node.Key, val);
-			TheSettingManager->LoadSettings();
-		}
-		bool hovered = ImGui::IsItemHovered();
-		if (hovered && (s_plusPressed || s_minusPressed)) {
-			val += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
-			TheSettingManager->SetSetting(node.Section, node.Key, val);
-			TheSettingManager->LoadSettings();
-		}
-		if (isShader) {
-			ImGui::SameLine();
-			if (ImGui::SmallButton("-")) {
-				val -= s_shaderStepSize;
-				TheSettingManager->SetSetting(node.Section, node.Key, val);
-				TheSettingManager->LoadSettings();
-			}
-			ImGui::SameLine();
-			if (ImGui::SmallButton("+")) {
-				val += s_shaderStepSize;
-				TheSettingManager->SetSetting(node.Section, node.Key, val);
-				TheSettingManager->LoadSettings();
-			}
-		}
-		RevertBtn();
-		if (hovered && !node.Description.empty()) {
-			ImGui::BeginTooltip();
-			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-			ImGui::TextUnformatted(node.Description.c_str());
-			ImGui::PopTextWrapPos();
-			ImGui::EndTooltip();
-		}
-		ImGui::PopID();
-		return;
-	}
-	case NodeType::Integer: {
-		int val = atoi(node.Value);
-		int newVal = val;
-		if (strcmp(node.Key, "TonemappingMode") == 0) {
-			static const char* kNames[] = {
-				"0 - None (vanilla)", "1 - VTLottes", "2 - NVRLottes",
-				"3 - Reinhard", "4 - Reinhard Jodie", "5 - ACES Filmic",
-				"6 - ACES Fitted", "7 - Uncharted 2", "8 - Uchimura (GT)",
-				"9 - AGX", "10 - DICE",
-			};
-			static const int kCount = (int)(sizeof(kNames) / sizeof(kNames[0]));
-			int clamped = ImClamp(val, 0, kCount - 1);
-			if (ImGui::BeginCombo(node.Key, kNames[clamped])) {
-				for (int i = 0; i < kCount; i++) {
-					bool sel = (clamped == i);
-					if (ImGui::Selectable(kNames[i], sel)) newVal = i;
-					if (sel) ImGui::SetItemDefaultFocus();
-				}
-				ImGui::EndCombo();
-			}
-			if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed))
-				newVal = ImClamp(clamped + (s_plusPressed ? 1 : -1), 0, kCount - 1);
-		} else {
-			if (ImGui::DragInt(node.Key, &newVal, 1.0f)) {}
-		}
-		if (newVal != val) {
-			TheSettingManager->SetSetting(node.Section, node.Key, newVal);
-			TheSettingManager->LoadSettings();
-		}
-		RevertBtn();
-		break;
-	}
-	default: {
-		static std::unordered_map<ImGuiID, std::string> sBufs;
-		ImGuiID id = ImGui::GetID(node.Key);
-		std::string& persistent = sBufs[id];
-		if (ImGui::GetActiveID() != id)
-			persistent = node.Value;
-		char buf[80];
-		strncpy_s(buf, persistent.c_str(), sizeof(buf) - 1);
-		buf[sizeof(buf) - 1] = '\0';
-		if (ImGui::InputText(node.Key, buf, sizeof(buf)))
-			persistent = buf;
-		bool hovered = ImGui::IsItemHovered();
-		if (ImGui::IsItemDeactivatedAfterEdit()) {
-			TheSettingManager->SetSettingS(node.Section, node.Key, buf);
-			TheSettingManager->LoadSettings();
-		}
-		if (strcmp(node.Key, "KeyEnable") == 0) {
-			ImGui::SameLine();
-			if (ImGui::SmallButton("(?)"))
-				ImGui::OpenPopup("DIKReference");
-			RenderDIKPopup();
-		}
-		RevertBtn();
-		if (hovered && !node.Description.empty()) {
-			ImGui::BeginTooltip();
-			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-			ImGui::TextUnformatted(node.Description.c_str());
-			ImGui::PopTextWrapPos();
-			ImGui::EndTooltip();
-		}
-		ImGui::PopID();
-		return;
-	}
-	}
-
-	if (ImGui::IsItemHovered() && !node.Description.empty()) {
-		ImGui::BeginTooltip();
-		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-		ImGui::TextUnformatted(node.Description.c_str());
-		ImGui::PopTextWrapPos();
-		ImGui::EndTooltip();
-	}
-
-	ImGui::PopID();
-}
-
 static void RenderContent() {
 	if (SelectedSection.empty()) {
 		ImGui::TextDisabled("Select a section from the left panel.");
-		return;
-	}
-
-	SettingManager::Configuration::SettingList settings;
-	TheSettingManager->FillMenuSettings(&settings, SelectedSection.c_str());
-
-	if (settings.empty()) {
-		ImGui::TextDisabled("No settings in this section.");
 		return;
 	}
 
@@ -1384,6 +1031,7 @@ static void RenderContent() {
 	ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.45f, 1.0f), "%s", SelectedSection.c_str());
 
 	// Shader enable toggle in content header
+	EffectRecord* effect = nullptr;
 	if (isShader) {
 		size_t dot1 = SelectedSection.find('.');
 		size_t dot2 = SelectedSection.find('.', dot1 + 1);
@@ -1402,92 +1050,23 @@ static void RenderContent() {
 			}
 			ImGui::PopStyleColor();
 			ImGui::EndDisabled();
+
+			// EffectRecord subclasses own their settings rendering (R3); null here
+			// means shaderName is ShaderCollection-backed (Water, Terrain, PBR,
+			// Tonemapping, Grass, POM, Skin, Sky -- see docs/refactor-plan.md
+			// "EffectRecord vs ShaderCollection") and falls through to the generic
+			// renderer below, which needs no effect-specific knowledge either way.
+			effect = TheShaderManager->GetEffectByName(shaderName.c_str());
 		}
 	}
 
 	ImGui::Separator();
 	ImGui::Spacing();
 
-	// LUT section: render DNI cycle pickers before the normal settings loop
-	if (SelectedSection == "Shaders.LUT.Main") {
-		LUTEffect* lut = TheShaderManager->Effects.LUT;
-		if (lut) {
-			if (lut->Settings.PreTonemapping) {
-				if (lut->Settings.HDRCompat)
-					ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "HDR Compat: SDR LUTs normalized to HDR range (approximate).");
-				else
-					ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f), "Pre-tonemapping mode: use HDR LUTs (float16 DDS converted from .CUBE).");
-				ImGui::Spacing();
-			}
-			if (lut->LUTFiles.empty()) {
-				ImGui::TextDisabled("No LUTs found in Data/Textures/NewVegasReloaded/LUTs/");
-			} else {
-				auto renderPicker = [&](const char* label, int& idx, int slot) {
-					ImGui::PushID(label);
-					ImGui::BeginGroup();
-					ImGui::Text("%s", label);
-					ImGui::SameLine();
-					int delta = 0;
-					if (ImGui::ArrowButton("##prev", ImGuiDir_Left)) delta = -1;
-					ImGui::SameLine();
-					float nameStartX = ImGui::GetCursorPosX();
-					ImGui::TextUnformatted(lut->LUTFiles[idx].c_str());
-					ImGui::SameLine(nameStartX + 220.0f);
-					if (ImGui::ArrowButton("##next", ImGuiDir_Right)) delta = 1;
-					ImGui::EndGroup();
-					if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed))
-						delta = s_plusPressed ? 1 : -1;
-					if (delta != 0) {
-						int n = (int)lut->LUTFiles.size();
-						idx = ((idx + delta) % n + n) % n;
-						lut->LoadLUT(slot, lut->LUTFiles[idx].c_str());
-					}
-					ImGui::PopID();
-				};
-				renderPicker("Day     ", lut->DayIdx,      0);
-				renderPicker("Night   ", lut->NightIdx,    1);
-				renderPicker("Interior", lut->InteriorIdx, 2);
-			}
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-		}
-	}
-
-	// Build key->index map for RGB triple detection
-	std::unordered_map<std::string, int> keyIdx;
-	for (int i = 0; i < (int)settings.size(); i++)
-		keyIdx[settings[i].Key] = i;
-
-	std::unordered_set<std::string> handled;
-
-	for (auto& s : settings) {
-		std::string key(s.Key);
-		if (handled.count(key)) continue;
-		if (ShouldHideKey(s.Key)) continue;
-
-		// Hide HDRCompat when PreTonemapping is off — it's meaningless in post-tonemapping mode
-		if (strcmp(s.Key, "HDRCompat") == 0 && SelectedSection == "Shaders.LUT.Main") {
-			LUTEffect* lut = TheShaderManager->Effects.LUT;
-			if (lut && !lut->Settings.PreTonemapping) continue;
-		}
-
-		// RGB triple → color picker (shader sections only)
-		if (isShader && key.size() > 1 && key.back() == 'R') {
-			std::string pfx = key.substr(0, key.size() - 1);
-			std::string kG = pfx + "G", kB = pfx + "B";
-			bool isColorCurve = (pfx == "ColorCurve" && strstr(s.Section, "Shaders.Coloring") != nullptr);
-			if (!isColorCurve && keyIdx.count(kG) && keyIdx.count(kB)) {
-				handled.insert(key);
-				handled.insert(kG);
-				handled.insert(kB);
-				RenderColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
-				continue;
-			}
-		}
-
-		RenderSetting(s, isShader);
-	}
+	if (effect)
+		effect->RenderMenu(SelectedSection.c_str());
+	else
+		EffectRecord::RenderGenericSection(SelectedSection.c_str(), isShader, nullptr);
 }
 
 // Recursive sidebar tree — path is the full dotted section path, name is the display label.
@@ -1578,7 +1157,7 @@ static void RenderMainMenuToast() {
 
 	std::string msg = std::string(PluginVersion::VersionString)
 		+ " loaded  |  press "
-		+ DikToName(TheSettingManager->SettingsMain.Menu.KeyEnable)
+		+ ImGuiWidgets::DikName(TheSettingManager->SettingsMain.Menu.KeyEnable)
 		+ " to open settings";
 
 	ImVec2 displaySize = ImGui::GetIO().DisplaySize;
@@ -1650,7 +1229,7 @@ void ImGuiManager::BuildUI() {
 		ImGui::PopStyleColor();
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Toggle all NVR effects (hotkey: modifier + %s)",
-				DikToName(TheSettingManager->SettingsMain.Menu.KeyEnable));
+				ImGuiWidgets::DikName(TheSettingManager->SettingsMain.Menu.KeyEnable));
 	}
 
 	ImGui::SameLine();
@@ -1680,10 +1259,9 @@ void ImGuiManager::BuildUI() {
 			ImGui::Spacing();
 			if (ImGui::Button("Yes", ImVec2(80.0f, 0.0f))) {
 				TheSettingManager->RevertSettings();
-				s_snapshot.clear();
+				EffectRecord::ResetMenuState();
 				s_masterMod = -1; // re-read from TOML after reload
 				SelectedSection.clear();
-				s_colorStatesNeedReset = true;
 				ImGui::CloseCurrentPopup();
 			}
 			ImGui::SameLine();

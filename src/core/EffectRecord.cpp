@@ -1,3 +1,7 @@
+#include <unordered_set>
+#include "imgui.h"
+#include "ImGuiWidgets.h"
+
 /*
 * Class that wraps an effect shader, in order to load it/render it/set constants.
 */
@@ -379,4 +383,345 @@ void EffectRecord::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTar
 
 	std::string name = "EffectRecord::Render " + std::string(Name);
 	renderTime = timer.LogTime(name.c_str());
+}
+
+/*
+ * ---- R3: EffectRecord owns its own settings-menu rendering -----------------
+ * See docs/refactor-plan.md Refactor 3. RenderGenericSection() is the shared
+ * per-node renderer used both by EffectRecord::RenderMenu()'s default
+ * implementation and, via the `owner = nullptr` overload, by the settings
+ * overlay's fallback path for sections that don't belong to an EffectRecord
+ * (ShaderCollection-backed shaders, and non-shader settings panes).
+ */
+
+// Per-setting revert snapshot: section -> key -> value at the last
+// ResetMenuState() call (overlay open / settings reload from disk).
+static std::unordered_map<std::string, std::unordered_map<std::string, std::string>> s_menuSnapshot;
+
+// Persistent hue/intensity decomposition for RGB-triple widgets, keyed by
+// "<section>.<prefix>". Cleared alongside s_menuSnapshot.
+static std::unordered_map<std::string, ImGuiWidgets::ColorTripleState> s_menuColorStates;
+static bool s_menuColorStatesNeedReset = false;
+
+static bool ShouldHideMenuKey(const char* key) {
+	if (strncmp(key, "TextColor", 9) == 0 || strncmp(key, "TextShadow", 10) == 0) return true;
+	// LUT filenames are rendered as cycle pickers, not raw text fields.
+	if (strcmp(key, "DayLUT") == 0 || strcmp(key, "NightLUT") == 0 || strcmp(key, "InteriorLUT") == 0) return true;
+	return false;
+}
+
+static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool isShaderSection, EffectRecord* owner) {
+	using NodeType = SettingManager::Configuration::NodeType;
+
+	ImGui::PushID(node.Key);
+
+	auto& sectionSnap = s_menuSnapshot[node.Section];
+	auto  snapIt      = sectionSnap.find(node.Key);
+	if (snapIt == sectionSnap.end())
+		snapIt = sectionSnap.emplace(node.Key, node.Value).first;
+	bool isDirty = snapIt->second != std::string(node.Value);
+	auto revert  = [&]() {
+		TheSettingManager->SetSettingS(node.Section, node.Key, const_cast<char*>(snapIt->second.c_str()));
+		TheSettingManager->LoadSettings();
+	};
+
+	// R3d: look up this key's <> annotation, if `owner` has a TESR_-prefixed
+	// uniform of the same name (convention: "TESR_" + effect name + key,
+	// matching the existing TESR_BloomData / TESR_ColoringColorCurve style).
+	// Gracefully absent for settings with no shader-side counterpart -- which
+	// today is most of them, since no shipped shader is annotated yet.
+	EffectRecord::UniformAnnotation ann;
+	bool hasAnn = false;
+	if (owner) {
+		std::string uniformName = std::string("TESR_") + owner->Name + node.Key;
+		hasAnn = owner->GetUniformAnnotation(uniformName.c_str(), &ann);
+	}
+
+	const char* label   = (hasAnn && !ann.Name.empty()) ? ann.Name.c_str() : node.Key;
+	const char* tooltip = (hasAnn && !ann.Description.empty()) ? ann.Description.c_str()
+	                     : (node.Description.empty() ? nullptr : node.Description.c_str());
+
+	switch (node.Type) {
+	case NodeType::Boolean: {
+		bool val = node.BoolValue;
+		if (ImGuiWidgets::Checkbox(label, &val)) {
+			TheSettingManager->SetSetting(node.Section, node.Key, val);
+			TheSettingManager->LoadSettings();
+		}
+		ImGuiWidgets::TooltipIfHovered(tooltip);
+		if (ImGuiWidgets::RevertButton(isDirty)) revert();
+		break;
+	}
+	case NodeType::Float: {
+		float val = node.FloatValue;
+		// Un-annotated (today, every shipped setting): fixed fine-drag speed,
+		// global user-configurable quick-adjust step -- matches pre-R3 behavior.
+		float minV = 0.0f, maxV = 0.0f, dragStep = 0.001f, quickStep = ImGuiWidgets::GetDefaultStep();
+		if (hasAnn) {
+			// Annotated: the uniform's own `step` controls both, per
+			// docs/refactor-plan.md ("step controls both drag speed and the
+			// +/- button increment").
+			minV = ann.Min; maxV = ann.Max; dragStep = quickStep = ann.Step;
+		}
+		if (ImGuiWidgets::FloatSlider(label, &val, minV, maxV, dragStep, quickStep, isShaderSection)) {
+			TheSettingManager->SetSetting(node.Section, node.Key, val);
+			TheSettingManager->LoadSettings();
+		}
+		ImGuiWidgets::TooltipIfHovered(tooltip);
+		if (ImGuiWidgets::RevertButton(isDirty)) revert();
+		break;
+	}
+	case NodeType::Integer: {
+		int  val    = node.IntValue;
+		int  newVal = val;
+		bool changed = false;
+
+		// Pre-existing hardcoded special case for the Tonemapping mode combo.
+		// TonemappingShaders is a ShaderCollection -- it has no accessible
+		// constant table to annotate against (see docs/refactor-plan.md,
+		// "EffectRecord vs ShaderCollection"), so this can't become an
+		// annotation-driven `enum` widget without a hand-written override.
+		// Ported unchanged from the pre-R3 implementation.
+		if (strcmp(node.Key, "TonemappingMode") == 0) {
+			static const std::vector<std::string> kNames = {
+				"0 - None (vanilla)", "1 - VTLottes", "2 - NVRLottes",
+				"3 - Reinhard", "4 - Reinhard Jodie", "5 - ACES Filmic",
+				"6 - ACES Fitted", "7 - Uncharted 2", "8 - Uchimura (GT)",
+				"9 - AGX", "10 - DICE",
+			};
+			changed = ImGuiWidgets::EnumCombo(label, kNames, &newVal);
+		}
+		else if (hasAnn && ann.Widget == EffectRecord::MenuWidget::Enum) {
+			std::vector<std::string> labels;
+			std::stringstream ss(ann.EnumNames);
+			std::string item;
+			while (std::getline(ss, item, ',')) labels.push_back(item);
+			if (!labels.empty())
+				changed = ImGuiWidgets::EnumCombo(label, labels, &newVal);
+			else // malformed/empty enumNames: degrade to the int type-default rather than crash
+				changed = ImGuiWidgets::IntDrag(label, &newVal, (int)ann.Min, (int)ann.Max, (int)ann.Step, false);
+		}
+		else if (hasAnn && ann.Widget == EffectRecord::MenuWidget::Key) {
+			changed = ImGuiWidgets::KeyBindPicker(label, &newVal);
+		}
+		else if (hasAnn) {
+			bool useSlider = (ann.Widget == EffectRecord::MenuWidget::Slider);
+			changed = ImGuiWidgets::IntDrag(label, &newVal, (int)ann.Min, (int)ann.Max, (int)ann.Step, useSlider);
+		}
+		else {
+			changed = ImGuiWidgets::IntDrag(label, &newVal, 0, 0, 1, false); // unbounded, matches pre-R3 behavior
+		}
+
+		if (changed && newVal != val) {
+			TheSettingManager->SetSetting(node.Section, node.Key, newVal);
+			TheSettingManager->LoadSettings();
+		}
+		ImGuiWidgets::TooltipIfHovered(tooltip);
+		if (ImGuiWidgets::RevertButton(isDirty)) revert();
+		break;
+	}
+	default: { // String
+		static std::unordered_map<ImGuiID, std::string> sBufs;
+		ImGuiID id = ImGui::GetID(node.Key);
+		std::string& persistent = sBufs[id];
+		if (ImGui::GetActiveID() != id)
+			persistent = node.Value;
+		char buf[80];
+		strncpy_s(buf, persistent.c_str(), sizeof(buf) - 1);
+		buf[sizeof(buf) - 1] = '\0';
+		if (ImGui::InputText(label, buf, sizeof(buf)))
+			persistent = buf;
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			TheSettingManager->SetSettingS(node.Section, node.Key, buf);
+			TheSettingManager->LoadSettings();
+			// `path` widget uniforms (e.g. LUTEffect's DayLUT/NightLUT/InteriorLUT,
+			// once ported -- see docs/refactor-plan.md) get their side effect here.
+			// A real prev/next FilePicker for annotated path uniforms is future
+			// work (R3f); this commits whatever text was typed either way.
+			if (owner && hasAnn && ann.Widget == EffectRecord::MenuWidget::Path) {
+				std::string uniformName = std::string("TESR_") + owner->Name + node.Key;
+				owner->OnPathChanged(uniformName.c_str(), buf);
+			}
+		}
+		ImGuiWidgets::TooltipIfHovered(tooltip);
+		if (ImGuiWidgets::RevertButton(isDirty)) revert();
+		break;
+	}
+	}
+
+	ImGui::PopID();
+}
+
+static void RenderMenuColorTriple(
+	SettingManager::Configuration::ConfigNode& nodeR,
+	SettingManager::Configuration::ConfigNode& nodeG,
+	SettingManager::Configuration::ConfigNode& nodeB,
+	const std::string& prefix,
+	EffectRecord* owner)
+{
+	(void)owner; // float3 `color` annotations aren't representable by three scalar
+	             // ConfigNodes yet -- this grouping is still detected by the R,G,B
+	             // key-suffix convention alone; see the comment at its call site.
+
+	if (s_menuColorStatesNeedReset) {
+		s_menuColorStates.clear();
+		s_menuColorStatesNeedReset = false;
+	}
+
+	std::string stateKey = std::string(nodeR.Section) + "." + prefix;
+	ImGuiWidgets::ColorTripleState& state = s_menuColorStates[stateKey];
+
+	float rgb[3] = { nodeR.FloatValue, nodeG.FloatValue, nodeB.FloatValue };
+
+	// Trim trailing underscore for display (matches pre-R3 behavior).
+	std::string label = prefix;
+	while (!label.empty() && label.back() == '_') label.pop_back();
+
+	auto snapOf = [&](SettingManager::Configuration::ConfigNode& n) -> std::string& {
+		auto& sec = s_menuSnapshot[n.Section];
+		auto  it  = sec.find(n.Key);
+		if (it == sec.end()) it = sec.emplace(n.Key, n.Value).first;
+		return it->second;
+	};
+	std::string& snapR = snapOf(nodeR);
+	std::string& snapG = snapOf(nodeG);
+	std::string& snapB = snapOf(nodeB);
+	bool isDirty = snapR != nodeR.Value || snapG != nodeG.Value || snapB != nodeB.Value;
+
+	ImGui::PushID(prefix.c_str());
+	ImGui::TextUnformatted(label.c_str());
+	if (ImGuiWidgets::RevertButton(isDirty)) {
+		TheSettingManager->SetSettingS(nodeR.Section, nodeR.Key, const_cast<char*>(snapR.c_str()));
+		TheSettingManager->SetSettingS(nodeG.Section, nodeG.Key, const_cast<char*>(snapG.c_str()));
+		TheSettingManager->SetSettingS(nodeB.Section, nodeB.Key, const_cast<char*>(snapB.c_str()));
+		TheSettingManager->LoadSettings();
+		state.seeded = false; // reseed from the just-reverted values next frame
+	}
+
+	bool changed = ImGuiWidgets::ColorTriplePicker("##triple", rgb, &state);
+	if (changed) {
+		TheSettingManager->SetSetting(nodeR.Section, nodeR.Key, rgb[0]);
+		TheSettingManager->SetSetting(nodeG.Section, nodeG.Key, rgb[1]);
+		TheSettingManager->SetSetting(nodeB.Section, nodeB.Key, rgb[2]);
+		TheSettingManager->LoadSettings();
+	}
+
+	// Unlike the pre-R3 implementation (which showed this tooltip
+	// unconditionally whenever a description was present), TooltipIfHovered
+	// correctly gates on hover -- see "Tooltip rendered in 3 branches (one
+	// unreachable)" in docs/refactor-plan.md's "What This Eliminates" table.
+	ImGuiWidgets::TooltipIfHovered(nodeR.Description.empty() ? nullptr : nodeR.Description.c_str());
+
+	ImGui::PopID();
+}
+
+void EffectRecord::RenderGenericSection(const char* section, bool isShaderSection, EffectRecord* owner) {
+	SettingManager::Configuration::SettingList settings;
+	TheSettingManager->FillMenuSettings(&settings, section);
+
+	if (settings.empty()) {
+		ImGui::TextDisabled("No settings in this section.");
+		return;
+	}
+
+	// LUTEffect's day/night/interior cycle pickers are chrome that predates R3
+	// and hasn't been ported to the `path` widget + OnPathChanged() hook
+	// described in docs/refactor-plan.md yet (own uniforms are still hidden
+	// via ShouldHideMenuKey() below and rendered specially here) -- left
+	// unchanged aside from routing through the new FilePicker primitive.
+	if (strcmp(section, "Shaders.LUT.Main") == 0) {
+		LUTEffect* lut = TheShaderManager->Effects.LUT;
+		if (lut) {
+			if (lut->Settings.PreTonemapping) {
+				if (lut->Settings.HDRCompat)
+					ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "HDR Compat: SDR LUTs normalized to HDR range (approximate).");
+				else
+					ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f), "Pre-tonemapping mode: use HDR LUTs (float16 DDS converted from .CUBE).");
+				ImGui::Spacing();
+			}
+			if (lut->LUTFiles.empty()) {
+				ImGui::TextDisabled("No LUTs found in Data/Textures/NewVegasReloaded/LUTs/");
+			} else {
+				auto renderPicker = [&](const char* label, int& idx, int slot) {
+					if (ImGuiWidgets::FilePicker(label, lut->LUTFiles, &idx))
+						lut->LoadLUT(slot, lut->LUTFiles[idx].c_str());
+				};
+				renderPicker("Day     ", lut->DayIdx,      0);
+				renderPicker("Night   ", lut->NightIdx,    1);
+				renderPicker("Interior", lut->InteriorIdx, 2);
+			}
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+		}
+	}
+
+	std::unordered_map<std::string, int> keyIdx;
+	for (int i = 0; i < (int)settings.size(); i++)
+		keyIdx[settings[i].Key] = i;
+
+	std::unordered_set<std::string> handled;
+
+	for (auto& s : settings) {
+		std::string key(s.Key);
+		if (handled.count(key)) continue;
+		if (ShouldHideMenuKey(s.Key)) continue;
+
+		// Hide HDRCompat when PreTonemapping is off -- meaningless in post-tonemapping mode.
+		if (strcmp(s.Key, "HDRCompat") == 0 && strcmp(section, "Shaders.LUT.Main") == 0) {
+			LUTEffect* lut = TheShaderManager->Effects.LUT;
+			if (lut && !lut->Settings.PreTonemapping) continue;
+		}
+
+		// RGB triple -> colour picker (shader sections only). Still detected
+		// by the R/G/B key-suffix convention rather than a `color` annotation:
+		// no shipped uniform is both float3-typed and annotated yet (packed
+		// constants like TESR_ColoringColorCurve don't correspond 1:1 with
+		// these per-channel settings), so there's nothing for a per-uniform
+		// lookup to match against today. See docs/refactor-plan.md R3e/R3f.
+		if (isShaderSection && key.size() > 1 && key.back() == 'R') {
+			std::string pfx = key.substr(0, key.size() - 1);
+			std::string kG = pfx + "G", kB = pfx + "B";
+			bool isColorCurve = (pfx == "ColorCurve" && strstr(s.Section, "Shaders.Coloring") != nullptr);
+			if (!isColorCurve && keyIdx.count(kG) && keyIdx.count(kB)) {
+				handled.insert(key);
+				handled.insert(kG);
+				handled.insert(kB);
+				RenderMenuColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx, owner);
+				continue;
+			}
+		}
+
+		RenderMenuNode(s, isShaderSection, owner);
+	}
+}
+
+void EffectRecord::RenderMenu(const char* section) {
+	RenderGenericSection(section, /*isShaderSection=*/true, this);
+}
+
+void EffectRecord::ResetMenuState() {
+	s_menuSnapshot.clear();
+	s_menuColorStatesNeedReset = true;
+}
+
+void EffectRecord::RevertMenuSnapshot() {
+	for (auto& [section, keys] : s_menuSnapshot)
+		for (auto& [key, value] : keys)
+			TheSettingManager->SetSettingS(const_cast<char*>(section.c_str()),
+			                               const_cast<char*>(key.c_str()),
+			                               const_cast<char*>(value.c_str()));
+	TheSettingManager->LoadSettings();
+	ResetMenuState();
+}
+
+bool EffectRecord::GetUniformAnnotation(const char* uniformName, UniformAnnotation* out) {
+	// TODO(R3d): parse the uniform's <> annotation block via
+	// ID3DXBaseEffect::GetAnnotation(). Until implemented, RenderMenu() always
+	// takes the type-default path -- identical to pre-R3 widget selection,
+	// since no shipped shader declares any TESR_ uniform annotations yet
+	// (see docs/refactor-plan.md R3e, a separate follow-up PR).
+	(void)uniformName;
+	(void)out;
+	return false;
 }

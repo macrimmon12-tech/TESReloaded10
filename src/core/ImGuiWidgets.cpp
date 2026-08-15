@@ -6,22 +6,32 @@ namespace ImGuiWidgets {
 
 	// ---- shared +/- quick-adjust state --------------------------------------
 
-	static bool s_plusPressed  = false;
-	static bool s_minusPressed = false;
+	static bool  s_plusPressed  = false;
+	static bool  s_minusPressed = false;
+	static float s_defaultStep  = 0.1f;
 
 	void SetStepKeys(bool plusPressed, bool minusPressed) {
 		s_plusPressed  = plusPressed;
 		s_minusPressed = minusPressed;
 	}
 
+	void SetDefaultStep(float step) {
+		s_defaultStep = step;
+	}
+
+	float GetDefaultStep() {
+		return s_defaultStep;
+	}
+
 	// ---- numeric widgets -----------------------------------------------------
 
-	bool FloatSlider(const char* label, float* value, float min, float max, float step, bool showStepButtons) {
-		float dragStep = step > 0.0f ? step : 0.001f;
-		bool changed = ImGui::DragFloat(label, value, dragStep, min, max, "%.4f");
+	bool FloatSlider(const char* label, float* value, float min, float max, float dragStep, float quickAdjustStep, bool showStepButtons) {
+		float drag = dragStep > 0.0f ? dragStep : 0.001f;
+		float step = quickAdjustStep > 0.0f ? quickAdjustStep : drag;
+		bool changed = ImGui::DragFloat(label, value, drag, min, max, "%.4f");
 
 		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
-			*value += s_plusPressed ? dragStep : -dragStep;
+			*value += s_plusPressed ? step : -step;
 			if (max > min) *value = ImClamp(*value, min, max);
 			changed = true;
 		}
@@ -29,13 +39,13 @@ namespace ImGuiWidgets {
 		if (showStepButtons) {
 			ImGui::SameLine();
 			if (ImGui::SmallButton("-")) {
-				*value -= dragStep;
+				*value -= step;
 				if (max > min) *value = ImClamp(*value, min, max);
 				changed = true;
 			}
 			ImGui::SameLine();
 			if (ImGui::SmallButton("+")) {
-				*value += dragStep;
+				*value += step;
 				if (max > min) *value = ImClamp(*value, min, max);
 				changed = true;
 			}
@@ -44,12 +54,17 @@ namespace ImGuiWidgets {
 		return changed;
 	}
 
-	bool IntDrag(const char* label, int* value, int step) {
+	bool IntDrag(const char* label, int* value, int min, int max, int step, bool useSlider) {
 		int dragStep = step != 0 ? step : 1;
-		bool changed = ImGui::DragInt(label, value, (float)dragStep);
+		bool changed;
+		if (useSlider && max > min)
+			changed = ImGui::SliderInt(label, value, min, max);
+		else
+			changed = ImGui::DragInt(label, value, (float)dragStep, min, max);
 
 		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
 			*value += s_plusPressed ? dragStep : -dragStep;
+			if (max > min) *value = ImClamp(*value, min, max);
 			changed = true;
 		}
 

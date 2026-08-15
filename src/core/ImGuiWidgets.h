@@ -19,14 +19,29 @@ namespace ImGuiWidgets {
 	// rendering any widgets, with edge-triggered "just pressed" booleans.
 	void SetStepKeys(bool plusPressed, bool minusPressed);
 
+	// User-configurable fallback quick-adjust step (the dev tools panel's
+	// "step size" control), used by callers rendering a setting with no
+	// annotation-supplied step of its own. Call once per frame alongside
+	// SetStepKeys(); defaults to 0.1 if never set.
+	void SetDefaultStep(float step);
+	float GetDefaultStep();
+
 	// Labelled float control. `value` is read/written in place. `min`/`max`
 	// both 0.0 means unbounded (matches ImGui::DragFloat's own convention).
-	// `showStepButtons` additionally renders explicit "-"/"+" buttons alongside
-	// the hover+key quick-adjust. Returns true if the value changed.
-	bool FloatSlider(const char* label, float* value, float min, float max, float step, bool showStepButtons);
+	// `dragStep` is the mouse-drag speed; `quickAdjustStep` is the increment
+	// applied by hovering + the +/- key, and by the explicit "-"/"+" buttons
+	// when `showStepButtons` is set (these are the same value for an
+	// annotated uniform, whose single `step` field controls both per
+	// docs/refactor-plan.md -- pass the same value for both to get that).
+	// Returns true if the value changed.
+	bool FloatSlider(const char* label, float* value, float min, float max, float dragStep, float quickAdjustStep, bool showStepButtons);
 
-	// Labelled int drag control. Returns true if the value changed.
-	bool IntDrag(const char* label, int* value, int step);
+	// Labelled int control. `min`/`max` both 0 means unbounded. `useSlider`
+	// renders ImGui::SliderInt (clamped drag) instead of the DragInt default --
+	// this is what the annotation format's `slider` widget hint means: an
+	// explicit slider overriding the drag-int type-default (requires a real
+	// min/max to have any effect). Returns true if the value changed.
+	bool IntDrag(const char* label, int* value, int min, int max, int step, bool useSlider);
 
 	// Dropdown of `labels`, backed by a zero-based `index`. Returns true if
 	// the selection changed. Out-of-range indices are clamped before display.
