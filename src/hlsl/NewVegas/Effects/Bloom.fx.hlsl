@@ -9,6 +9,35 @@
 float4 TESR_BloomResolution;
 float4 TESR_BloomData; // .x filterRadius x axis, .y filterRadius y axis, .z blendingCoefficient, .w inverse of number of passes for upscale
 
+// Smoke test for the R3d shader-annotation pipeline (docs/refactor-plan.md):
+// a plain uniform with no C++-side RegisterConstants() entry, whose menu
+// widget, bounds, and persisted value are entirely driven by this annotation
+// block -- EffectRecord::RenderMenu() finds it purely by name convention
+// ("TESR_" + effect name + setting key) and keeps it synced to the setting
+// while its panel is open (see EffectRecord.cpp's RenderMenuNode).
+//
+// Declared as float4 rather than a scalar float: EffectRecord::CreateCT()
+// only tracks TESR_ constants of D3DXPC_VECTOR/MATRIX_ROWS class for the
+// per-frame constant push in SetCT() (see EffectRecord.cpp), so a scalar
+// uniform here would never reach the GPU at all. Only .x is meaningful.
+//
+// Guarded against 0 (rather than trusting it to already be 1.0): unlike a
+// RegisterConstants() constant, nothing seeds this uniform's value before
+// the settings panel showing it has been opened at least once this session,
+// so its GPU-side value starts at 0 -- which would otherwise fully zero out
+// bloom by default. Until R4 adds a general "seed custom constants from
+// their annotation defaults" step, this guard is what a shader author using
+// an unregistered annotated uniform needs to write for a scalar multiplier.
+float4 TESR_BloomFinalGain
+<
+	string name = "Final Gain";
+	string description = "Overall multiplier applied to the composited bloom result.";
+	float default = 1.0;
+	float min = 0.0;
+	float max = 4.0;
+	float step = 0.01;
+>;
+
 sampler2D TESR_BloomBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_BloomBuffer2 : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_BloomBuffer4 : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -71,16 +100,20 @@ float4 Upsample(VSOUT IN, uniform sampler2D buffer, uniform sampler2D addBuffer)
 // Last upsample that normalizes the result if needed.
 float4 UpsampleLast(VSOUT IN, uniform sampler2D buffer, uniform sampler2D addBuffer) : COLOR0 {
     float2 uv = IN.UVCoord;
-    
+
     const float2 filterRadius = { TESR_BloomData.x, TESR_BloomData.y };
-    
+
     float4 upsample = UpsampleTent9(buffer, uv, filterRadius);
     float4 nextMip = tex2D(addBuffer, uv);
-    
+
+    // See TESR_BloomFinalGain's declaration above: treat an unseeded (0) value
+    // as "no change" rather than "zero the result".
+    float finalGain = TESR_BloomFinalGain.x > 0.0 ? TESR_BloomFinalGain.x : 1.0;
+
     [branch] if (TESR_BloomData.z > 0.0) {
-        return float4(lerp(nextMip.rgb, upsample.rgb, TESR_BloomData.z), 1);
+        return float4(lerp(nextMip.rgb, upsample.rgb, TESR_BloomData.z) * finalGain, 1);
     } else {
-        return float4((upsample.rgb + nextMip.rgb) * TESR_BloomData.w, 1);
+        return float4((upsample.rgb + nextMip.rgb) * TESR_BloomData.w * finalGain, 1);
     }
 }
 

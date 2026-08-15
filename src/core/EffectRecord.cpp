@@ -430,16 +430,34 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 	// matching the existing TESR_BloomData / TESR_ColoringColorCurve style).
 	// Gracefully absent for settings with no shader-side counterpart -- which
 	// today is most of them, since no shipped shader is annotated yet.
+	std::string uniformName;
 	EffectRecord::UniformAnnotation ann;
 	bool hasAnn = false;
 	if (owner) {
-		std::string uniformName = std::string("TESR_") + owner->Name + node.Key;
+		uniformName = std::string("TESR_") + owner->Name + node.Key;
 		hasAnn = owner->GetUniformAnnotation(uniformName.c_str(), &ann);
 	}
 
 	const char* label   = (hasAnn && !ann.Name.empty()) ? ann.Name.c_str() : node.Key;
 	const char* tooltip = (hasAnn && !ann.Description.empty()) ? ann.Description.c_str()
 	                     : (node.Description.empty() ? nullptr : node.Description.c_str());
+
+	// A setting with a matching annotation but no C++-side RegisterConstants()
+	// entry (the "no C++ required" custom-effect path this demonstrates -- see
+	// docs/refactor-plan.md R4) has nothing else keeping its live shader
+	// constant in sync with the persisted value: no UpdateConstants() override
+	// runs for it. Push the current value every time this node renders (not
+	// just on edit) so the constant tracks the setting for as long as this
+	// panel is open. TheShaderManager::SetCustomConstant() is a no-op until
+	// the effect has rendered at least one frame with this uniform referenced
+	// (which is what first creates its CustomConst slot); before that -- or
+	// before the user ever opens this panel -- the shader-side value is
+	// whatever the shader's own annotated `default` implies, which annotated
+	// shaders are expected to fall back to via a guard (see Bloom.fx.hlsl's
+	// TESR_BloomFinalGain for the pattern this smoke-tests).
+	auto syncLiveConstant = [&](float x) {
+		if (hasAnn) TheShaderManager->SetCustomConstant(uniformName.c_str(), D3DXVECTOR4(x, 0.0f, 0.0f, 0.0f));
+	};
 
 	switch (node.Type) {
 	case NodeType::Boolean: {
@@ -448,6 +466,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
+		syncLiveConstant(val ? 1.0f : 0.0f);
 		ImGuiWidgets::TooltipIfHovered(tooltip);
 		if (ImGuiWidgets::RevertButton(isDirty)) revert();
 		break;
@@ -467,6 +486,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
+		syncLiveConstant(val);
 		ImGuiWidgets::TooltipIfHovered(tooltip);
 		if (ImGuiWidgets::RevertButton(isDirty)) revert();
 		break;
@@ -516,6 +536,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 			TheSettingManager->SetSetting(node.Section, node.Key, newVal);
 			TheSettingManager->LoadSettings();
 		}
+		syncLiveConstant((float)newVal);
 		ImGuiWidgets::TooltipIfHovered(tooltip);
 		if (ImGuiWidgets::RevertButton(isDirty)) revert();
 		break;
@@ -539,7 +560,6 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 			// A real prev/next FilePicker for annotated path uniforms is future
 			// work (R3f); this commits whatever text was typed either way.
 			if (owner && hasAnn && ann.Widget == EffectRecord::MenuWidget::Path) {
-				std::string uniformName = std::string("TESR_") + owner->Name + node.Key;
 				owner->OnPathChanged(uniformName.c_str(), buf);
 			}
 		}

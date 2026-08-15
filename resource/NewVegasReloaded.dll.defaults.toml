@@ -182,6 +182,9 @@ PassBlending = 0.0                      # 0: Use additive blending, 0-1: Linear 
 [_Shaders.Bloom.Status]
 Enabled = true                          # Replace the vanilla bloom. Requires tonemapping shader to be applied. Also impacts Dirt Lens and Rain shaders
 
+[_Shaders.Bloom.Advanced]
+FinalGain = 1.0                         # Overall multiplier applied to the composited bloom result. Smoke test for the R3d shader-annotation pipeline (docs/refactor-plan.md) -- backs the TESR_BloomFinalGain uniform, which has no C++-side registration; its widget, bounds, and label all come from the shader's own <> annotation block.
+
 [_Shaders.BloomLegacy.Exteriors]
 BloomIntensity = 1.4
 BloomSaturation = 1.2
