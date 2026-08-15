@@ -18,13 +18,9 @@ void LUTEffect::ScanLUTFolder()
 	std::sort(LUTFiles.begin(), LUTFiles.end());
 }
 
-void LUTEffect::LoadLUT(int slot, const char* filename)
+void LUTEffect::AssignLUTSlot(int slot, IDirect3DBaseTexture9* texture, const char* filename)
 {
-	if (!filename || filename[0] == '\0') return;
-
-	std::string path = std::string(LUTFolder) + filename;
-	IDirect3DBaseTexture9* tex = TheTextureManager->GetFileTexture(path, TextureRecord::PlanarBuffer);
-	if (!tex) return;
+	if (!texture) return;
 
 	const char* samplerName = nullptr;
 	IDirect3DTexture9** member = nullptr;
@@ -36,7 +32,7 @@ void LUTEffect::LoadLUT(int slot, const char* filename)
 	default: return;
 	}
 
-	*member = (IDirect3DTexture9*)tex;
+	*member = (IDirect3DTexture9*)texture;
 	ClearSampler(samplerName, strlen(samplerName));
 
 	if (slot == 0 && DayTexture) {
@@ -50,12 +46,28 @@ void LUTEffect::LoadLUT(int slot, const char* filename)
 	for (int i = 0; i < (int)LUTFiles.size(); i++) {
 		if (LUTFiles[i] == filename) { idx = i; break; }
 	}
+}
 
-	// Persist chosen filename back to settings
-	const char* key = (slot == 0) ? "DayLUT" : (slot == 1) ? "NightLUT" : "InteriorLUT";
+void LUTEffect::SaveLUTSetting(int slot, const char* filename)
+{
+	const char* key = (slot == 0) ? "DayLUT" : (slot == 1) ? "NightLUT" : (slot == 2) ? "InteriorLUT" : nullptr;
+	if (!key) return;
+
 	char buf[80];
 	strncpy_s(buf, filename, sizeof(buf) - 1);
 	TheSettingManager->SetSettingS("Shaders.LUT.Main", key, buf);
+}
+
+void LUTEffect::LoadLUT(int slot, const char* filename)
+{
+	if (!filename || filename[0] == '\0') return;
+
+	std::string path = std::string(LUTFolder) + filename;
+	IDirect3DBaseTexture9* tex = TheTextureManager->GetFileTexture(path, TextureRecord::PlanarBuffer);
+	if (!tex) return;
+
+	AssignLUTSlot(slot, tex, filename);
+	SaveLUTSetting(slot, filename);
 }
 
 void LUTEffect::RegisterConstants()
@@ -72,10 +84,21 @@ void LUTEffect::RegisterTextures()
 
 	ScanLUTFolder();
 
-	char buf[80];
-	TheSettingManager->GetSettingS("Shaders.LUT.Main", "DayLUT",      buf); if (buf[0] && buf[0] != '"') LoadLUT(0, buf);
-	TheSettingManager->GetSettingS("Shaders.LUT.Main", "NightLUT",    buf); if (buf[0] && buf[0] != '"') LoadLUT(1, buf);
-	TheSettingManager->GetSettingS("Shaders.LUT.Main", "InteriorLUT", buf); if (buf[0] && buf[0] != '"') LoadLUT(2, buf);
+	// Restore previously-saved slot selections. These are already persisted —
+	// load + assign only, no need to write them straight back out.
+	auto restoreSlot = [this](int slot, const char* key) {
+		char buf[80];
+		TheSettingManager->GetSettingS("Shaders.LUT.Main", key, buf);
+		if (!buf[0] || buf[0] == '"') return;
+
+		std::string path = std::string(LUTFolder) + buf;
+		IDirect3DBaseTexture9* tex = TheTextureManager->GetFileTexture(path, TextureRecord::PlanarBuffer);
+		if (tex) AssignLUTSlot(slot, tex, buf);
+	};
+
+	restoreSlot(0, "DayLUT");
+	restoreSlot(1, "NightLUT");
+	restoreSlot(2, "InteriorLUT");
 }
 
 void LUTEffect::UpdateSettings()
