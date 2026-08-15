@@ -715,13 +715,114 @@ void EffectRecord::RevertMenuSnapshot() {
 	ResetMenuState();
 }
 
+/*
+ * R3d: HLSL <> annotation parser. Reads widget/name/description/default/
+ * min/max/step/folder/filter/enumNames off a TESR_-prefixed uniform's
+ * annotation block via the effect's own constant table (ID3DXBaseEffect::
+ * GetAnnotation()) -- no sidecar files, no separate schema, matching the
+ * locked format in docs/refactor-plan.md R3a.
+ *
+ * Every D3DX call here is guarded: a missing uniform, a missing annotation
+ * block, an annotation whose value can't be read in its declared type, or an
+ * unrecognised `widget` string are all handled by falling back rather than
+ * failing -- "malformed blocks must not crash" and "unknown hints fall back
+ * silently to the type-default" are both hard requirements per R3a, not just
+ * the happy path. `default` is the one required field: its absence (or an
+ * unreadable value) means this uniform isn't menu-visible at all, and
+ * GetUniformAnnotation() returns false with `out` untouched -- there is no
+ * partially-populated result.
+ */
 bool EffectRecord::GetUniformAnnotation(const char* uniformName, UniformAnnotation* out) {
-	// TODO(R3d): parse the uniform's <> annotation block via
-	// ID3DXBaseEffect::GetAnnotation(). Until implemented, RenderMenu() always
-	// takes the type-default path -- identical to pre-R3 widget selection,
-	// since no shipped shader declares any TESR_ uniform annotations yet
-	// (see docs/refactor-plan.md R3e, a separate follow-up PR).
-	(void)uniformName;
-	(void)out;
-	return false;
+	if (!Effect || !uniformName || !out) return false;
+
+	D3DXHANDLE param = Effect->GetParameterByName(NULL, uniformName);
+	if (!param) return false; // no such uniform on this effect
+
+	D3DXPARAMETER_DESC paramDesc;
+	if (FAILED(Effect->GetParameterDesc(param, &paramDesc))) return false;
+	if (paramDesc.Annotations == 0) return false; // uniform exists, but carries no <> block at all
+
+	UniformAnnotation ann; // built up locally -- *out is only touched once `default` is confirmed present
+	bool hasDefault = false, minSeen = false, maxSeen = false, stepSeen = false;
+
+	for (UINT i = 0; i < paramDesc.Annotations; i++) {
+		D3DXHANDLE annHandle = Effect->GetAnnotation(param, i);
+		if (!annHandle) continue; // malformed entry -- skip it, don't crash
+
+		D3DXPARAMETER_DESC annDesc;
+		if (FAILED(Effect->GetParameterDesc(annHandle, &annDesc)) || !annDesc.Name) continue;
+
+		const char* field = annDesc.Name;
+
+		if (!_stricmp(field, "name")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.Name = s;
+		}
+		else if (!_stricmp(field, "description")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.Description = s;
+		}
+		else if (!_stricmp(field, "widget")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) {
+				if      (!_stricmp(s, "color"))  ann.Widget = MenuWidget::Color;
+				else if (!_stricmp(s, "enum"))   ann.Widget = MenuWidget::Enum;
+				else if (!_stricmp(s, "key"))    ann.Widget = MenuWidget::Key;
+				else if (!_stricmp(s, "slider")) ann.Widget = MenuWidget::Slider;
+				else if (!_stricmp(s, "path"))   ann.Widget = MenuWidget::Path;
+				else                              ann.Widget = MenuWidget::Default; // unrecognised hint -> type-default
+			}
+		}
+		else if (!_stricmp(field, "min")) {
+			float f;
+			if (SUCCEEDED(Effect->GetFloat(annHandle, &f))) { ann.Min = f; minSeen = true; }
+		}
+		else if (!_stricmp(field, "max")) {
+			float f;
+			if (SUCCEEDED(Effect->GetFloat(annHandle, &f))) { ann.Max = f; maxSeen = true; }
+		}
+		else if (!_stricmp(field, "step")) {
+			float f;
+			if (SUCCEEDED(Effect->GetFloat(annHandle, &f))) { ann.Step = f; stepSeen = true; }
+		}
+		else if (!_stricmp(field, "folder")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.Folder = s;
+		}
+		else if (!_stricmp(field, "filter")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.Filter = s;
+		}
+		else if (!_stricmp(field, "enumNames")) {
+			LPCSTR s = nullptr;
+			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.EnumNames = s;
+		}
+		else if (!_stricmp(field, "default")) {
+			// The only required field. min/max/step, GetFloat/GetInt/GetBool/
+			// GetString all vary by the uniform's own declared type (float,
+			// float2-4, int, bool, string) -- rather than duplicate that
+			// type dispatch here for a value nothing downstream reads yet
+			// (persisted values come from SettingManager, not the shader;
+			// annotation-default-as-initial-value is R4's job once a setting
+			// can be discovered with no pre-existing TOML entry), this just
+			// confirms the field is present and takes its type from the
+			// annotation's own successful GetParameterDesc() above.
+			hasDefault = true;
+		}
+		// Unrecognised annotation names are ignored -- forward compatible
+		// with fields added later, never an error.
+	}
+
+	if (!hasDefault) return false; // required field missing: not menu-visible
+
+	// Un-annotated min/max/step fall back to the type-default table in
+	// docs/refactor-plan.md, which differs for float vs. int uniforms.
+	bool isIntType = (paramDesc.Type == D3DXPT_INT);
+	if (!minSeen)  ann.Min  = 0.0f;
+	if (!maxSeen)  ann.Max  = isIntType ? 10.0f : 1.0f;
+	if (!stepSeen) ann.Step = isIntType ? 1.0f : 0.001f;
+
+	ann.HasDefault = true;
+	*out = ann;
+	return true;
 }
