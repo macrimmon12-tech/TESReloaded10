@@ -188,7 +188,7 @@ uniform string DayLUT
     string widget = "path";
     string folder = "Data/Textures/NewVegasReloaded/LUTs/";
     string filter = "*.dds,*.png";
-    string default = "";
+    string defaultValue = "";
 >;
 ```
 
@@ -198,13 +198,15 @@ When the user picks a file, the base `RenderMenu()` calls `LUTEffect::OnPathChan
 
 Annotations are written as HLSL `< >` annotation blocks attached to each uniform declaration. Everything the engine needs to construct settings and render the correct widget lives in the shader — no sidecar files, no separate schema.
 
+> **Correction (post-R3d, verified against a real build):** the field was originally named `default`, but the D3DX9 effect compiler rejects it with `error X3000: syntax error: unexpected token 'default'` — it's a reserved HLSL keyword and cannot be used as an annotation field name, even though it parses fine as a struct/table key everywhere else this style of format is documented. Renamed to `defaultValue` throughout this section and in `EffectRecord::GetUniformAnnotation()`. If you're annotating a shader by hand from an older copy of this doc, use `defaultValue`, not `default`.
+
 #### Required vs Optional Fields
 
-Only `default` is required. Everything else is optional with defined fallbacks.
+Only `defaultValue` is required. Everything else is optional with defined fallbacks.
 
 | Field | Type | Required | Fallback if omitted |
 |---|---|---|---|
-| `default` | matches uniform type | **Yes** | — |
+| `defaultValue` | matches uniform type | **Yes** | — |
 | `name` | `string` | No | Variable name, underscores → spaces |
 | `description` | `string` | No | No tooltip rendered |
 | `widget` | `string` | No | Type-default (see widget table) |
@@ -288,7 +290,7 @@ uniform float Exposure
 <
     string name = "Exposure";
     string description = "Scene exposure multiplier";
-    float default = 1.0;
+    float defaultValue = 1.0;
     float min = 0.0;
     float max = 4.0;
     float step = 0.01;
@@ -299,7 +301,7 @@ uniform float3 TintColor
     string name = "Tint Color";
     string description = "Multiplied against the final output";
     string widget = "color";
-    float3 default = {1.0, 1.0, 1.0};
+    float3 defaultValue = {1.0, 1.0, 1.0};
 > = {1.0, 1.0, 1.0};
 
 uniform string DayLUT
@@ -308,7 +310,7 @@ uniform string DayLUT
     string widget = "path";
     string folder = "Data/Textures/NewVegasReloaded/LUTs/";
     string filter = "*.dds,*.png";
-    string default = "";
+    string defaultValue = "";
 >;
 ```
 

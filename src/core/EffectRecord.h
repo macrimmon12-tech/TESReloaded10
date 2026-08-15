@@ -79,13 +79,13 @@ public:
 		std::string	Folder;			// required for Path widget
 		std::string	Filter = "*.dds"; // optional for Path widget
 		std::string	EnumNames;		// comma-delimited, required for Enum widget
-		bool		HasDefault = false; // true only when the required `default` annotation was present and readable
+		bool		HasDefault = false; // true only when the required `defaultValue` annotation was present and readable
 	};
 
 	// Reads the <> annotation block for the TESR_-prefixed uniform named
 	// `uniformName` on this effect's constant table. Returns false (leaving
 	// `out` untouched) if the uniform doesn't exist, carries no annotations,
-	// or has no `default` field -- the one required field per the locked
+	// or has no `defaultValue` field -- the one required field per the locked
 	// annotation format (docs/refactor-plan.md R3a). Never throws; a
 	// malformed annotation block degrades to "not found" rather than
 	// crashing or partially populating `out`.

@@ -32,7 +32,8 @@ float4 TESR_BloomFinalGain
 <
 	string name = "Final Gain";
 	string description = "Overall multiplier applied to the composited bloom result.";
-	float default = 1.0;
+	float defaultValue = 1.0; // named defaultValue, not default -- `default` is a reserved HLSL keyword
+	                          // and the D3DX9 effect compiler rejects it here (error X3000)
 	float min = 0.0;
 	float max = 4.0;
 	float step = 0.01;

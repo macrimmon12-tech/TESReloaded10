@@ -453,7 +453,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 	// the effect has rendered at least one frame with this uniform referenced
 	// (which is what first creates its CustomConst slot); before that -- or
 	// before the user ever opens this panel -- the shader-side value is
-	// whatever the shader's own annotated `default` implies, which annotated
+	// whatever the shader's own annotated `defaultValue` implies, which annotated
 	// shaders are expected to fall back to via a guard (see Bloom.fx.hlsl's
 	// TESR_BloomFinalGain for the pattern this smoke-tests).
 	auto syncLiveConstant = [&](float x) {
@@ -737,7 +737,7 @@ void EffectRecord::RevertMenuSnapshot() {
 }
 
 /*
- * R3d: HLSL <> annotation parser. Reads widget/name/description/default/
+ * R3d: HLSL <> annotation parser. Reads widget/name/description/defaultValue/
  * min/max/step/folder/filter/enumNames off a TESR_-prefixed uniform's
  * annotation block via the effect's own constant table (ID3DXBaseEffect::
  * GetAnnotation()) -- no sidecar files, no separate schema, matching the
@@ -748,7 +748,7 @@ void EffectRecord::RevertMenuSnapshot() {
  * unrecognised `widget` string are all handled by falling back rather than
  * failing -- "malformed blocks must not crash" and "unknown hints fall back
  * silently to the type-default" are both hard requirements per R3a, not just
- * the happy path. `default` is the one required field: its absence (or an
+ * the happy path. `defaultValue` is the one required field: its absence (or an
  * unreadable value) means this uniform isn't menu-visible at all, and
  * GetUniformAnnotation() returns false with `out` untouched -- there is no
  * partially-populated result.
@@ -763,7 +763,7 @@ bool EffectRecord::GetUniformAnnotation(const char* uniformName, UniformAnnotati
 	if (FAILED(Effect->GetParameterDesc(param, &paramDesc))) return false;
 	if (paramDesc.Annotations == 0) return false; // uniform exists, but carries no <> block at all
 
-	UniformAnnotation ann; // built up locally -- *out is only touched once `default` is confirmed present
+	UniformAnnotation ann; // built up locally -- *out is only touched once `defaultValue` is confirmed present
 	bool hasDefault = false, minSeen = false, maxSeen = false, stepSeen = false;
 
 	for (UINT i = 0; i < paramDesc.Annotations; i++) {
@@ -818,8 +818,14 @@ bool EffectRecord::GetUniformAnnotation(const char* uniformName, UniformAnnotati
 			LPCSTR s = nullptr;
 			if (SUCCEEDED(Effect->GetString(annHandle, &s)) && s) ann.EnumNames = s;
 		}
-		else if (!_stricmp(field, "default")) {
-			// The only required field. min/max/step, GetFloat/GetInt/GetBool/
+		else if (!_stricmp(field, "defaultValue")) {
+			// The only required field -- named defaultValue, not default:
+			// `default` is a reserved HLSL keyword and the D3DX9 effect
+			// compiler rejects it as an annotation field name outright
+			// (error X3000: syntax error: unexpected token 'default'),
+			// confirmed against a real build. See docs/refactor-plan.md's
+			// "Correction" note under Shader Annotation Format.
+			// min/max/step, GetFloat/GetInt/GetBool/
 			// GetString all vary by the uniform's own declared type (float,
 			// float2-4, int, bool, string) -- rather than duplicate that
 			// type dispatch here for a value nothing downstream reads yet
