@@ -1,9 +1,31 @@
 // Coloring fullscreen shader for Oblivion/Skyrim Reloaded
 
-float4 TESR_ColoringColorCurve;
-float4 TESR_ColoringEffectGamma;
-float4 TESR_ColoringData;
-float4 TESR_ColoringValues;
+string PipelinePosition = "PostTonemapping";
+
+float4 TESR_ColoringColorCurve
+<
+	string name = "Color Curve";
+	string description = "Packed per-channel S-curve contrast (Shaders.Coloring.Default): x = ColorCurve (overall), y = ColorCurveR, z = ColorCurveG, w = ColorCurveB.";
+	float defaultValue = 1.2;
+>;
+float4 TESR_ColoringEffectGamma
+<
+	string name = "Effect Gamma";
+	string description = "Packed per-channel gamma applied to the luminance curve driving the color grade (Shaders.Coloring.Default): x = EffectGamma (overall), y = EffectGammaR, z = EffectGammaG, w = EffectGammaB.";
+	float defaultValue = 0.9;
+>;
+float4 TESR_ColoringData
+<
+	string name = "Coloring Data";
+	string description = "Packed color-grading parameters (Shaders.Coloring.Default): x = Strength (overall effect strength), y = BaseGamma (gamma applied before the tone curve), z = Fade (cross-channel color bleed), w = Contrast.";
+	float defaultValue = 0.5;
+>;
+float4 TESR_ColoringValues
+<
+	string name = "Coloring Values";
+	string description = "Packed color-grading parameters (Shaders.Coloring.Default): x = Saturation, y = Bleach (bleach-bypass blend), z = BleachLuma (luminance-based highlight/shadow boost strength), w = Linearization.";
+	float defaultValue = -0.1;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 

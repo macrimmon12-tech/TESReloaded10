@@ -2,10 +2,35 @@
 //--------------------------------------------------
 // Boomstick was h3r3
 
-float4 TESR_GameTime;
-float4 TESR_ReciprocalResolution;
-float4 TESR_CinemaData; // x: AspectRatio y: VignetteRadius z: VignetteDarkness, w: overlayStrength
-float4 TESR_CinemaSettings; //x: dirtlens opacity, y:grainAmount, z:chromatic aberration strength 
+string PipelinePosition = "PostTonemapping";
+
+float4 TESR_GameTime
+<
+	string name = "Game Time";
+	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter (drives the film-grain/noise animation), w = elapsed time in seconds since last frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_CinemaData
+<
+	string name = "Cinema Data";
+	string description = "Packed letterbox/vignette parameters: x = AspectRatio (computed each frame from Shaders.Cinema.Main.AspectRatio and Mode), y = VignetteRadius, z = VignetteDarkness, w = overlayStrength.";
+	float defaultValue = 1.0;
+>;
+// x (dirt lens opacity) is declared but not currently written by
+// CinemaEffect::UpdateSettings() -- left as-is (metadata-only pass, no
+// behavior change); y/z/w are.
+float4 TESR_CinemaSettings
+<
+	string name = "Cinema Settings";
+	string description = "Packed film-grain/aberration/letterbox parameters (Shaders.Cinema.Main): x = dirt lens opacity (unused, not currently wired to a setting), y = FilmGrainAmount, z = ChromaticAberration, w = LetterBoxDepth.";
+	float defaultValue = 0.3;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

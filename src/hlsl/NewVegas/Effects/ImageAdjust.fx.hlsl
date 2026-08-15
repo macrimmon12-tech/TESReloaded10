@@ -1,8 +1,27 @@
 // Basic Image adjutsments for Oblivion Reloaded
 
-float4 TESR_ImageAdjustData;
-float4 TESR_DarkAdjustColor;
-float4 TESR_LightAdjustColor;
+string PipelinePosition = "PostTonemapping";
+
+float4 TESR_ImageAdjustData
+<
+	string name = "Image Adjust Data";
+	string description = "Packed image adjustment parameters (day/night/interior blended): x = Brightness, y = Contrast, z = Saturation, w = Strength (overall effect blend).";
+	float defaultValue = 1.0;
+>;
+float4 TESR_DarkAdjustColor
+<
+	string name = "Dark Tone Color";
+	string description = "Multiplier tint applied to darker tones of the image (Shaders.ImageAdjust.*.DarkColorR/G/B).";
+	string widget = "color";
+	float3 defaultValue = {1.0, 1.0, 1.0};
+>;
+float4 TESR_LightAdjustColor
+<
+	string name = "Light Tone Color";
+	string description = "Multiplier tint applied to lighter tones of the image (Shaders.ImageAdjust.*.LightColorR/G/B).";
+	string widget = "color";
+	float3 defaultValue = {1.0, 1.0, 1.0};
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
  

@@ -1,10 +1,27 @@
 // Bloom for Oblivion Reloaded
 
+string PipelinePosition = "PostTonemapping";
+
 #define viewbloom 0
 
-float4 TESR_ReciprocalResolution;
-float4 TESR_BloomLegacyData;
-float4 TESR_BloomLegacyValues;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_BloomLegacyData
+<
+	string name = "Bloom Legacy Data";
+	string description = "Packed legacy-bloom tonemap parameters (Shaders.BloomLegacy.Exteriors/Interiors): x = Luminance, y = MiddleGray, z = WhiteCutOff.";
+	float defaultValue = 0.06;
+>;
+float4 TESR_BloomLegacyValues
+<
+	string name = "Bloom Legacy Values";
+	string description = "Packed legacy-bloom blend parameters (Shaders.BloomLegacy.Exteriors/Interiors): x = BloomIntensity, y = OriginalIntensity, z = BloomSaturation, w = OriginalSaturation.";
+	float defaultValue = 1.4;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_SourceBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

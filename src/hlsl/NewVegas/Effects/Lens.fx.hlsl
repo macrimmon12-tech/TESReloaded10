@@ -1,13 +1,52 @@
 // Lens Shader For TESReloaded
 //--------------------------------------------------
 
-float4 TESR_ReciprocalResolution;
-float4 TESR_CinemaSettings; //x: dirtlens opacity, y:grainAmount, z:chromatic aberration strength 
-float4 TESR_SunColor;
-float4 TESR_SunAmbient;
-float4 TESR_SunAmount;
-float4 TESR_LensData; // x: lens strength, y: luma threshold
-float4 TESR_DebugVar; // used for the luma threshold used for bloom
+string PipelinePosition = "PreTonemapping";
+
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_CinemaSettings
+<
+	string name = "Cinema Settings";
+	string description = "CinemaEffect's own registered constant (see Cinema.fx.hlsl): x = dirt lens opacity, y = grain amount, z = chromatic aberration strength.";
+	float defaultValue = 1.0;
+>;
+float4 TESR_SunColor
+<
+	string name = "Sun Color";
+	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunAmbient
+<
+	string name = "Sun Ambient";
+	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunAmount
+<
+	string name = "Sun Amount";
+	string description = "Day/night blend amount supplied by the engine, used to fade effects across sunrise/sunset. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+// Comment above previously read "x: lens strength, y: luma threshold" -- corrected
+// against LensEffect::UpdateConstants(), which packs three settings, not two.
+float4 TESR_LensData
+<
+	string name = "Lens Data";
+	string description = "Packed dirt-lens parameters (Shaders.Lens.Main/Night/Interiors, day/night/interior blended): x = strength (overall effect strength), y = bloomExponent (how far dirt particles are lit from the light source), z = smudginess (texture scale).";
+	float defaultValue = 0.4;
+>;
+float4 TESR_DebugVar
+<
+	string name = "Debug Variable";
+	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4), used here for the luma threshold feeding the bloom mask. Not intended for normal use.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_SourceBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

@@ -1,10 +1,27 @@
 // Motion Blur fullscreen shader for Oblivion/Skyrim Reloaded
 
+string PipelinePosition = "PostTonemapping";
+
 #define BlurSamples 24
 
-float4 TESR_ReciprocalResolution;
-float4 TESR_MotionBlurParams;
-float4 TESR_MotionBlurData;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_MotionBlurParams
+<
+	string name = "Motion Blur Params";
+	string description = "Packed blur-kernel parameters (Shaders.MotionBlur.FirstPersonView/ThirdPersonView): x = GaussianWeight, y = BlurScale, z = BlurOffsetMax.";
+	float defaultValue = 6.0;
+>;
+float4 TESR_MotionBlurData
+<
+	string name = "Motion Blur Data";
+	string description = "Packed per-frame camera-turn blur amount: x = smoothed horizontal (yaw) blur amount, y = smoothed vertical (pitch) blur amount. Derived each frame from player rotation delta; not directly user-editable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 

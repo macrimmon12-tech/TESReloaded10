@@ -2,8 +2,53 @@
 // Supports 256x16 (N=16), 1024x32 (N=32), and 4096x64 (N=64) strip LUT textures.
 // N is the cell size/count and is passed via TESR_LUTData.x at runtime.
 
-float4 TESR_LUTData;   // x=N (cell size = cell count), y=strength
-float4 TESR_LUTBlend;  // x=dayNightLerp (0=night, 1=day), y=isInterior (0 or 1)
+string PipelinePosition = "PostTonemapping"; // toggled to PreTonemapping via Shaders.LUT.Main.PreTonemapping at runtime
+
+float4 TESR_LUTData
+<
+	string name = "LUT Data";
+	string description = "Packed LUT sampling parameters: x = N (cell size = cell count of the currently bound LUT texture: 16/32/64), y = strength (Shaders.LUT.Main.Strength, overall blend strength).";
+	float defaultValue = 1.0;
+>;
+float4 TESR_LUTBlend
+<
+	string name = "LUT Blend";
+	string description = "Packed LUT blend parameters: x = dayNightLerp (0 = night, 1 = day, driven by the day/night transition curve), y = isInterior (0 or 1), z = hdrCompat (Shaders.LUT.Main.HDRCompat, 1.0 = normalize HDR input to LUT range).";
+	float defaultValue = 0.0;
+>;
+
+// Day/Night/Interior LUT file pickers (Shaders.LUT.Main.DayLUT/NightLUT/InteriorLUT).
+// Not yet wired through the generic `path` widget + OnPathChanged() at runtime --
+// LUTEffect's day/night/interior cycle pickers are still the hand-rolled special
+// case in EffectRecord::RenderGenericSection() (see docs/refactor-plan.md R3f).
+// These annotations declare the intended target shape for that port.
+string DayLUT
+<
+	string name = "Day LUT";
+	string description = "LUT texture used during the day in exteriors.";
+	string widget = "path";
+	string folder = "Data/Textures/NewVegasReloaded/LUTs/";
+	string filter = "*.dds,*.png";
+	string defaultValue = "";
+>;
+string NightLUT
+<
+	string name = "Night LUT";
+	string description = "LUT texture used at night in exteriors.";
+	string widget = "path";
+	string folder = "Data/Textures/NewVegasReloaded/LUTs/";
+	string filter = "*.dds,*.png";
+	string defaultValue = "";
+>;
+string InteriorLUT
+<
+	string name = "Interior LUT";
+	string description = "LUT texture used in interior cells.";
+	string widget = "path";
+	string folder = "Data/Textures/NewVegasReloaded/LUTs/";
+	string filter = "*.dds,*.png";
+	string defaultValue = "";
+>;
 
 sampler2D TESR_RenderedBuffer    : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 sampler2D TESR_LUTDayBuffer      : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
