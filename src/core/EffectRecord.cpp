@@ -1,5 +1,6 @@
 #include <unordered_set>
 #include "imgui.h"
+#include "imgui_internal.h" // GetActiveID() (RenderMenuNode's text-field editing state) is internal-only
 #include "ImGuiWidgets.h"
 
 /*
