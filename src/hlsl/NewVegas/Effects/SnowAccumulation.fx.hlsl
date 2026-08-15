@@ -44,10 +44,18 @@ float4 TESR_SunAmbient
 	string description = "Current ambient sky light color (RGB), supplied by the engine from the active weather. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
+// w (current accumulated snow coverage) is animated/computed and
+// deliberately left out of componentKeys below.
 float4 TESR_SnowAccumulationParams
 <
+	string widget = "packed";
 	string name = "Snow Accumulation Params";
 	string description = "Packed snow accumulation parameters (Shaders.SnowAccumulation.Main): x = BlurNormDropThreshhold, y = BlurRadiusMultiplier, z = SunPower, w = current accumulated snow coverage (animated, driven by Increase/Decrease).";
+	string componentKeys     = "BlurNormDropThreshhold,BlurRadiusMultiplier,SunPower";
+	string componentDefaults = "120,2.0,1.0";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "500,5,3";
+	string componentSteps    = "1,0.01,0.01";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SnowAccumulationColor

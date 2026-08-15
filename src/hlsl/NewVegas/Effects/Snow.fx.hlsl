@@ -24,10 +24,18 @@ float4 TESR_GameTime
 	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
+// x (current snow amount) is animated/computed, y is unused -- both
+// deliberately left out of componentKeys below.
 float4 TESR_SnowData
 <
+	string widget = "packed";
 	string name = "Snow Data";
 	string description = "Packed snow parameters: x = current snow amount (0-1, animated fade in/out with weather), y = unused, z = Speed (Shaders.Snow.Main.Speed, falling speed multiplier).";
+	string componentKeys     = "Speed";
+	string componentDefaults = "1.4";
+	string componentMins     = "0";
+	string componentMaxs     = "5";
+	string componentSteps    = "0.01";
 	float defaultValue = 0.0;
 >;
 float4 TESR_SunColor

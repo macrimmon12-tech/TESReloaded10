@@ -4,16 +4,34 @@
 
 string PipelinePosition = "PostTonemapping"; // toggled to PreTonemapping via Shaders.LUT.Main.PreTonemapping at runtime
 
+// x (N) is deliberately left out of componentKeys below: it's read from the
+// currently bound LUT texture's own dimensions, not a setting.
 float4 TESR_LUTData
 <
+	string widget = "packed";
 	string name = "LUT Data";
 	string description = "Packed LUT sampling parameters: x = N (cell size = cell count of the currently bound LUT texture: 16/32/64), y = strength (Shaders.LUT.Main.Strength, overall blend strength).";
+	string componentKeys     = "Strength";
+	string componentDefaults = "1.0";
+	string componentMins     = "0";
+	string componentMaxs     = "1";
+	string componentSteps    = "0.01";
 	float defaultValue = 1.0;
 >;
+// x (dayNightLerp) and y (isInterior) are deliberately left out of
+// componentKeys below: both are computed from the current transition curve
+// and cell type, not settings.
 float4 TESR_LUTBlend
 <
+	string widget = "packed";
 	string name = "LUT Blend";
 	string description = "Packed LUT blend parameters: x = dayNightLerp (0 = night, 1 = day, driven by the day/night transition curve), y = isInterior (0 or 1), z = hdrCompat (Shaders.LUT.Main.HDRCompat, 1.0 = normalize HDR input to LUT range).";
+	string componentKeys     = "HDRCompat";
+	string componentNames    = "HDR Compat";
+	string componentDefaults = "1";
+	string componentMins     = "0";
+	string componentMaxs     = "1";
+	string componentSteps    = "1";
 	float defaultValue = 0.0;
 >;
 

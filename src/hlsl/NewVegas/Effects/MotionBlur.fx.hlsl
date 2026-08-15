@@ -13,8 +13,14 @@ float4 TESR_ReciprocalResolution
 >;
 float4 TESR_MotionBlurParams
 <
+	string widget = "packed";
 	string name = "Motion Blur Params";
 	string description = "Packed blur-kernel parameters (Shaders.MotionBlur.FirstPersonView/ThirdPersonView): x = GaussianWeight, y = BlurScale, z = BlurOffsetMax.";
+	string componentKeys     = "GaussianWeight,BlurScale,BlurOffsetMax";
+	string componentDefaults = "6.0,4.0,24.0";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "20,20,100";
+	string componentSteps    = "0.1,0.1,0.5";
 	float defaultValue = 6.0;
 >;
 float4 TESR_MotionBlurData

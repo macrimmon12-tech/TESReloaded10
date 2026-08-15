@@ -31,16 +31,30 @@ float4 TESR_GameTime
 	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
 	float defaultValue = 0.0;
 >;
+// x (current rain amount) is deliberately left out of componentKeys below:
+// it's an animated fade value, not a setting.
 float4 TESR_RainData
 <
+	string widget = "packed";
 	string name = "Rain Data";
 	string description = "Packed rain parameters: x = current rain amount (0-1, animated fade in/out with weather), y = VerticalScale (Shaders.Precipitations.Main.VerticalScale), z = Speed, w = Opacity.";
+	string componentKeys     = "VerticalScale,Speed,Opacity";
+	string componentDefaults = "1.6,3.0,1.0";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "5,10,1";
+	string componentSteps    = "0.01,0.1,0.01";
 	float defaultValue = 0.0;
 >;
 float4 TESR_RainAspect
 <
+	string widget = "packed";
 	string name = "Rain Aspect";
 	string description = "Packed rain visual parameters (Shaders.Precipitations.Main): x = Refraction (screen distortion amount), y = Coloring (base coloring amount added to the refracted color), z = Bloom (rain blocked-by-objects glow).";
+	string componentKeys     = "Refraction,Coloring,Bloom";
+	string componentDefaults = "1.0,1.1,0.5";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "5,3,2";
+	string componentSteps    = "0.01,0.01,0.01";
 	float defaultValue = 1.0;
 >;
 float4 TESR_FogColor

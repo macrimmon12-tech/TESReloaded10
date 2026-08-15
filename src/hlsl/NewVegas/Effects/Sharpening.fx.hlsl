@@ -21,12 +21,15 @@ string PipelinePosition = "PostTonemapping";
 
 float4 TESR_SharpeningData
 <
+	string widget = "packed";
 	string name = "Sharpening Data";
 	string description = "Packed sharpening parameters: x = Strength (Shaders.Sharpening.Main.Strength, sharpening intensity), y = Clamp (contrast clamp), z = Offset (depth falloff distance, x1000).";
+	string componentKeys     = "Strength,Clamp,Offset";
+	string componentDefaults = "0.75,0.1,2.0";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "2,1,10";
+	string componentSteps    = "0.01,0.01,0.1";
 	float defaultValue = 0.75;
-	float min = 0.0;
-	float max = 2.0;
-	float step = 0.01;
 >;
 float4 TESR_ReciprocalResolution
 <
