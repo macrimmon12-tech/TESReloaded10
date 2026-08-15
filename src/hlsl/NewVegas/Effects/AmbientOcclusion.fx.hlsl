@@ -1,14 +1,41 @@
 // Ambient Occlusion fullscreen shader for Oblivion/Skyrim Reloaded
 
+string PipelinePosition = "PreTonemapping";
+
 #define viewao 0
 #define halfres 0
 #define kernelSize 5
 
-float4 TESR_AmbientOcclusionAOData;
-float4 TESR_AmbientOcclusionData;
-float4 TESR_ReciprocalResolution;
-float4 TESR_FogData; // x: fog start, y: fog end, z: sun glare, w: fog power
-float4 TESR_FogColor;
+float4 TESR_AmbientOcclusionAOData
+<
+	string name = "AO Data";
+	string description = "Packed AO sampling parameters (Shaders.AmbientOcclusion.Exteriors/Interiors): x = Samples (not currently used, hardcoded), y = StrengthMultiplier, z = ClampStrength, w = Range.";
+	float defaultValue = 1.0;
+>;
+float4 TESR_AmbientOcclusionData
+<
+	string name = "AO Extra Data";
+	string description = "Packed AO shaping parameters (Shaders.AmbientOcclusion.Exteriors/Interiors): x = AngleBias, y = LumThreshold, z = BlurDropThreshold, w = BlurRadiusMultiplier.";
+	float defaultValue = 1.0;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_FogData
+<
+	string name = "Fog Data";
+	string description = "Current weather fog parameters, supplied by the engine: x = fog start, y = fog end, z = sun glare, w = fog power. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_FogColor
+<
+	string name = "Fog Color";
+	string description = "Current weather fog color (RGB), supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

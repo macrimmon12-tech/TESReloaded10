@@ -1,8 +1,25 @@
 // Shader To compute a shadow pass for point light shadows (Supports 5 more lights)
 
-float4 TESR_ShadowLightPosition[12];
-float4 TESR_LightColor[24];
-float4 TESR_ShadowFade;
+string PipelinePosition = "PreTonemapping";
+
+float4 TESR_ShadowLightPosition[12]
+<
+	string name = "Shadow Light Positions";
+	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): world-space position + radius of up to 12 point lights currently casting shadows. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_LightColor[24]
+<
+	string name = "Light Colors";
+	string description = "Color/intensity of up to 24 nearby point lights (diffuse + specular pairs), supplied by the engine each frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowFade
+<
+	string name = "Shadow Fade";
+	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_DepthBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_NormalsBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = NONE; MINFILTER = NONE; MIPFILTER = NONE; };

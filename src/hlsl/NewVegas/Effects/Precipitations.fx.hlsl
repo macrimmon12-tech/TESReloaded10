@@ -1,15 +1,62 @@
 // Rain fullscreen shader for Oblivion Reloaded
+string PipelinePosition = "PostTonemapping";
+
 #define RainLayers 15
 
-float4x4 TESR_WorldViewProjectionTransform;
-float4x4 TESR_ShadowCameraToLightTransformOrtho;
-float4 TESR_ReciprocalResolution;
-float4 TESR_GameTime;
-float4 TESR_RainData; // x:rain amount, set by weather (0 to 1), y: vertical scale, z: speed of rainfall w: opacity
-float4 TESR_RainAspect; // x:refraction amount, y: base color
-float4 TESR_FogColor;
-float4 TESR_SunDirection;
-float4 TESR_SunColor;
+float4x4 TESR_WorldViewProjectionTransform
+<
+	string name = "World-View-Projection Transform";
+	string description = "Combined world-view-projection matrix, supplied by the engine for placing the rain streak geometry. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4x4 TESR_ShadowCameraToLightTransformOrtho
+<
+	string name = "Shadow Ortho Camera-To-Light Transform";
+	string description = "ShadowsExteriorEffect's own registered ortho-cascade transform (see ShadowsExteriors.fx.hlsl), used here to sample the ortho shadow map for rain occlusion. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_GameTime
+<
+	string name = "Game Time";
+	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_RainData
+<
+	string name = "Rain Data";
+	string description = "Packed rain parameters: x = current rain amount (0-1, animated fade in/out with weather), y = VerticalScale (Shaders.Precipitations.Main.VerticalScale), z = Speed, w = Opacity.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_RainAspect
+<
+	string name = "Rain Aspect";
+	string description = "Packed rain visual parameters (Shaders.Precipitations.Main): x = Refraction (screen distortion amount), y = Coloring (base coloring amount added to the refracted color), z = Bloom (rain blocked-by-objects glow).";
+	float defaultValue = 1.0;
+>;
+float4 TESR_FogColor
+<
+	string name = "Fog Color";
+	string description = "Current weather fog color (RGB), supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunDirection
+<
+	string name = "Sun Direction";
+	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunColor
+<
+	string name = "Sun Color";
+	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

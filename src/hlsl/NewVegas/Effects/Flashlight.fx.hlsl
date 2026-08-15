@@ -1,12 +1,63 @@
-float4x4 TESR_FlashLightViewProjTransform;
-float4 TESR_CameraForward;
-float4 TESR_SpotLightPosition;
-float4 TESR_SpotLightColor;
-float4 TESR_SpotLightDirection;
-float4 TESR_SunColor;
-float4 TESR_SunDirection;
-float4 TESR_DebugVar;
-float4 TESR_ReciprocalResolution;
+string PipelinePosition = "PreTonemapping";
+
+float4x4 TESR_FlashLightViewProjTransform
+<
+	string name = "Flashlight View-Projection Transform";
+	string description = "View-projection matrix of the flashlight spotlight, computed each frame from the weapon/camera transform (see FlashlightEffect::GetFlashlightViewProj()). Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_CameraForward
+<
+	string name = "Camera Forward";
+	string description = "World-space camera forward vector, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+// Position/Color/Direction are computed each frame from the SpotLight node's live
+// transform, which Flashlight.cpp itself drives from Shaders.Flashlight.Main
+// (ColorR/G/B, Dimmer, Distance, Angle, Offset X/Y/Z, AttachToWeapon).
+float4 TESR_SpotLightPosition
+<
+	string name = "Spot Light Position";
+	string description = "World-space position of the flashlight spotlight (xyz), w = radius (Shaders.Flashlight.Main.Distance). Not directly user-editable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SpotLightColor
+<
+	string name = "Spot Light Color";
+	string description = "Flashlight tint color (Shaders.Flashlight.Main.ColorR/G/B), w = Dimmer.";
+	string widget = "color";
+	float3 defaultValue = {2.0, 2.0, 1.0};
+>;
+float4 TESR_SpotLightDirection
+<
+	string name = "Spot Light Direction";
+	string description = "World-space direction the flashlight spotlight is aimed, computed each frame from the weapon/camera transform. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunColor
+<
+	string name = "Sun Color";
+	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunDirection
+<
+	string name = "Sun Direction";
+	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_DebugVar
+<
+	string name = "Debug Variable";
+	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
