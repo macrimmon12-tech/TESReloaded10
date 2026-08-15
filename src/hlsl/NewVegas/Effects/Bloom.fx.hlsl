@@ -6,8 +6,20 @@
 // Designed to work without thresholding, for HDR rendering.
 // Should minimize potential bloom issues of filtering artifacts and fireflies.
 
-float4 TESR_BloomResolution;
-float4 TESR_BloomData; // .x filterRadius x axis, .y filterRadius y axis, .z blendingCoefficient, .w inverse of number of passes for upscale
+string PipelinePosition = "PreTonemapping";
+
+float4 TESR_BloomResolution
+<
+	string name = "Bloom Resolution";
+	string description = "Packed per-pass mip resolution, set by the engine for whichever downsample/upsample mip is currently rendering: x = width, y = height, z = 1/width, w = 1/height. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_BloomData
+<
+	string name = "Bloom Data";
+	string description = "Packed bloom filter parameters: x = upsample filter radius (x axis), y = upsample filter radius (y axis, scaled for non-square resolutions), z = PassBlending (Shaders.Bloom.Main/Night/Interiors.PassBlending, 0 = additive blend, 0-1 = linear blend coefficient), w = 1 / Passes (inverse pass count for upscale normalization).";
+	float defaultValue = 0.0;
+>;
 
 // Smoke test for the R3d shader-annotation pipeline (docs/refactor-plan.md):
 // a plain uniform with no C++-side RegisterConstants() entry, whose menu

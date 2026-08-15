@@ -1,16 +1,73 @@
 // Specular multiplier fullscreen shader for Oblivion/Skyrim Reloaded
 
-float4 TESR_ReciprocalResolution;
-float4 TESR_SpecularData;					// x: luma treshold, y:blurMultiplier, z:glossiness, w:drawDistance
-float4 TESR_SpecularEffects;				// x: specular strength, y:sky tint strenght, z:fresnel strength
-float4 TESR_ViewSpaceLightDir;
-float4 TESR_SunDirection;
-float4 TESR_SunColor;
-float4 TESR_SkyColor;
-float4 TESR_HorizonColor;
-float4 TESR_FogColor;
-float4 TESR_WaterSettings;
-float4 TESR_ShadowFade; // attenuation factor of sunsets/sunrises and moon phases
+string PipelinePosition = "PreTonemapping";
+
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SpecularData
+<
+	string name = "Specular Data";
+	string description = "Packed specular parameters (Shaders.Specular.Exterior/Rain, rain-blended): x = SpecLumaTreshold, y = BlurMultiplier, z = Glossiness, w = DistanceFade.";
+	float defaultValue = 0.25;
+>;
+float4 TESR_SpecularEffects
+<
+	string name = "Specular Effects";
+	string description = "Packed specular strength parameters (Shaders.Specular.Exterior/Rain, rain-blended): x = SpecularStrength, y = SkyTintStrength, z = FresnelStrength, w = SkyTintSaturation.";
+	float defaultValue = 0.2;
+>;
+float4 TESR_ViewSpaceLightDir
+<
+	string name = "View Space Light Direction";
+	string description = "Sun/moon light direction transformed into view space, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunDirection
+<
+	string name = "Sun Direction";
+	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunColor
+<
+	string name = "Sun Color";
+	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SkyColor
+<
+	string name = "Sky Color";
+	string description = "Top-of-sky color, supplied by the engine from the active weather. Used here for the sky-tint lighting boost. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_HorizonColor
+<
+	string name = "Horizon Color";
+	string description = "Horizon color, supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_FogColor
+<
+	string name = "Fog Color";
+	string description = "Current weather fog color (RGB), supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_WaterSettings
+<
+	string name = "Water Settings";
+	string description = "WaterShaders' own registered constant (ShaderCollection, no annotatable constant table -- see docs/refactor-plan.md): x = water height in the cell, y = depthDarkness (Shaders.Water.Default.depthDarkness), z = isUnderwater, w = refractionPower.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowFade
+<
+	string name = "Shadow Fade";
+	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

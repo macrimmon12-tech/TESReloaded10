@@ -1,18 +1,86 @@
 // GodRays full screen shader for Oblivion/Skyrim Reloaded
 
-float4 TESR_ReciprocalResolution;
-float4 TESR_GameTime;
-float4 TESR_SunColor;
-float4 TESR_GodRaysRay; // x: intensity, y:length, z: density, w: visibility
-float4 TESR_GodRaysRayColor; // x:r, y:g, z:b, w:saturate
-float4 TESR_GodRaysData; // x: passes amount, y: luminance, z:multiplier, w: time enabled
-float4 TESR_ViewSpaceLightDir; // view space light vector
-float4 TESR_SunDirection; // worldspace sun light vector
-float4 TESR_SunPosition; // worldspace sundisk position
-float4 TESR_ShadowFade; // attenuation factor of sunsets/sunrises and moon phases
-float4 TESR_SunAmount;
-float4 TESR_SunsetColor;
-float4 TESR_DebugVar;
+string PipelinePosition = "PreTonemapping";
+
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_GameTime
+<
+	string name = "Game Time";
+	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunColor
+<
+	string name = "Sun Color";
+	string description = "Current directional sunlight color (RGB), supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_GodRaysRay
+<
+	string name = "God Rays Ray";
+	string description = "Packed ray-marching parameters (Shaders.GodRays.Main): x = RayIntensity, y = RayLength, z = RayDensity, w = RayVisibility scaled by SunGlareEnabled and the engine's current sun glare value.";
+	float defaultValue = 1.0;
+>;
+float4 TESR_GodRaysRayColor
+<
+	string name = "God Rays Color";
+	string description = "Custom ray tint color (Shaders.GodRays.Coloring.RayR/G/B) and its blend weight (w = Saturate: 0 = use the sky/sun color, 1 = use only this custom color).";
+	string widget = "color";
+	float3 defaultValue = {1.0, 1.0, 1.0};
+>;
+float4 TESR_GodRaysData
+<
+	string name = "God Rays Data";
+	string description = "Packed god-rays parameters (Shaders.GodRays.Main): x = LightShaftPasses (currently unused), y = Luminance (minimum ray-casting luminosity threshold), z = day/night strength multiplier (DayMultiplier/NightMultiplier blended by the day/night transition curve), w = TimeEnabled (1 = strongest at sunset/sunrise).";
+	float defaultValue = 1.0;
+>;
+float4 TESR_ViewSpaceLightDir
+<
+	string name = "View Space Light Direction";
+	string description = "Sun/moon light direction transformed into view space, supplied by the engine for screen-space ray marching. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunDirection
+<
+	string name = "Sun Direction";
+	string description = "World-space direction vector to the sun/moon light source, normalized, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunPosition
+<
+	string name = "Sun Position";
+	string description = "World-space position of the sun disk, normalized direction with w = 1, supplied by the engine. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ShadowFade
+<
+	string name = "Shadow Fade";
+	string description = "ShadowsExteriorEffect's own registered constant (see ShadowsExteriors.fx.hlsl): x = sunset/sunrise (and moon phase) shadow attenuation, y = shadow maps enabled, z = point light shadows enabled, w = point light shadow draw distance. Read here for x, the sunset/sunrise attenuation factor.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunAmount
+<
+	string name = "Sun Amount";
+	string description = "Day/night blend amount supplied by the engine, used to fade effects across sunrise/sunset. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_SunsetColor
+<
+	string name = "Sunset Color";
+	string description = "Color boost applied to the sun near the horizon, supplied by the engine from the active weather. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_DebugVar
+<
+	string name = "Debug Variable";
+	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

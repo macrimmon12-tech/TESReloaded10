@@ -1,8 +1,20 @@
 // Exposure shader for Oblivion/Skyrim Reloaded
+string PipelinePosition = "PreTonemapping";
+
 #define debug 0
 
-float4 TESR_ExposureData; // x:min brightness, y;max brightness, z:dark adapt speed, w: light adapt speed
-float4 TESR_DebugVar; // x:min brightness, y;max brightness, z:dark adapt speed, w: light adapt speed
+float4 TESR_ExposureData
+<
+	string name = "Exposure Data";
+	string description = "Packed exposure parameters (Shaders.Exposure.Main/Night/Interiors, day/night/interior blended): x = MinBrightness, y = MaxBrightness, z = DarkAdaptSpeed, w = LightAdaptSpeed.";
+	float defaultValue = 0.2;
+>;
+float4 TESR_DebugVar
+<
+	string name = "Debug Variable";
+	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
+	float defaultValue = 0.0;
+>;
 //float4 TESR_FrameTime; // x:min brightness, y;max brightness, z:dark adapt speed, w: light adapt speed
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

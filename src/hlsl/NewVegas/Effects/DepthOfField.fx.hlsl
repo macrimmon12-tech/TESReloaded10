@@ -1,12 +1,39 @@
 // Depth of Field fullscreen shader for Oblivion/Skyrim Reloaded
 
+string PipelinePosition = "PostTonemapping";
+
 #define showDepth 0
 
-float4 TESR_ReciprocalResolution;
-float4 TESR_DepthOfFieldBlur; //x: distant blur, y:distant blur start, z: distant blur end, w: base blur radius
-float4 TESR_DepthOfFieldData; //x: blur fallout y:radius z:diameterRange w:nearblur cutoff
-float4 TESR_MotionBlurData;
-float4 TESR_DebugVar;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_DepthOfFieldBlur
+<
+	string name = "Depth Of Field Blur";
+	string description = "Packed distant-blur parameters (Shaders.DepthOfField.FirstPersonView/ThirdPersonView/VanityView): x = DistantBlur (enabled), y = DistantBlurStartRange, z = DistantBlurEndRange, w = BaseBlurRadius.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_DepthOfFieldData
+<
+	string name = "Depth Of Field Data";
+	string description = "Packed autofocus/bokeh parameters (Shaders.DepthOfField.FirstPersonView/ThirdPersonView/VanityView): x = current focus distance (animated, 0 when DOF disabled), y = Radius (bokeh blur radius), z = DiameterRange (bokeh brightness threshold), w = NearBlurCutOff.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_MotionBlurData
+<
+	string name = "Motion Blur Data";
+	string description = "MotionBlurEffect's own registered constant (see MotionBlur.fx.hlsl); read here only for .x/.y (per-frame camera turn speed) to scale the autofocus sampling radius via TESR_AvgLumaBuffer.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_DebugVar
+<
+	string name = "Debug Variable";
+	string description = "Developer scratch variable (Main.Develop.Main.DebugVar1-4). Not intended for normal use.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state {ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
