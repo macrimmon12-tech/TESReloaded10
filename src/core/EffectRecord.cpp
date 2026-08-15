@@ -468,7 +468,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 			TheSettingManager->LoadSettings();
 		}
 		syncLiveConstant(val ? 1.0f : 0.0f);
-		ImGuiWidgets::TooltipIfHovered(tooltip);
+		ImGuiWidgets::TooltipIfHovered(ImGui::IsItemHovered(), tooltip);
 		if (ImGuiWidgets::RevertButton(isDirty)) revert();
 		break;
 	}
@@ -483,19 +483,21 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 			// +/- button increment").
 			minV = ann.Min; maxV = ann.Max; dragStep = quickStep = ann.Step;
 		}
-		if (ImGuiWidgets::FloatSlider(label, &val, minV, maxV, dragStep, quickStep, isShaderSection)) {
+		bool hovered = false;
+		if (ImGuiWidgets::FloatSlider(label, &val, minV, maxV, dragStep, quickStep, isShaderSection, &hovered)) {
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
 		syncLiveConstant(val);
-		ImGuiWidgets::TooltipIfHovered(tooltip);
+		ImGuiWidgets::TooltipIfHovered(hovered, tooltip);
 		if (ImGuiWidgets::RevertButton(isDirty)) revert();
 		break;
 	}
 	case NodeType::Integer: {
-		int  val    = node.IntValue;
-		int  newVal = val;
+		int  val     = node.IntValue;
+		int  newVal  = val;
 		bool changed = false;
+		bool hovered = false; // set inside whichever branch below actually runs
 
 		// Pre-existing hardcoded special case for the Tonemapping mode combo.
 		// TonemappingShaders is a ShaderCollection -- it has no accessible
@@ -511,6 +513,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 				"9 - AGX", "10 - DICE",
 			};
 			changed = ImGuiWidgets::EnumCombo(label, kNames, &newVal);
+			hovered = ImGui::IsItemHovered();
 		}
 		else if (hasAnn && ann.Widget == EffectRecord::MenuWidget::Enum) {
 			std::vector<std::string> labels;
@@ -521,16 +524,19 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 				changed = ImGuiWidgets::EnumCombo(label, labels, &newVal);
 			else // malformed/empty enumNames: degrade to the int type-default rather than crash
 				changed = ImGuiWidgets::IntDrag(label, &newVal, (int)ann.Min, (int)ann.Max, (int)ann.Step, false);
+			hovered = ImGui::IsItemHovered();
 		}
 		else if (hasAnn && ann.Widget == EffectRecord::MenuWidget::Key) {
-			changed = ImGuiWidgets::KeyBindPicker(label, &newVal);
+			changed = ImGuiWidgets::KeyBindPicker(label, &newVal, &hovered);
 		}
 		else if (hasAnn) {
 			bool useSlider = (ann.Widget == EffectRecord::MenuWidget::Slider);
 			changed = ImGuiWidgets::IntDrag(label, &newVal, (int)ann.Min, (int)ann.Max, (int)ann.Step, useSlider);
+			hovered = ImGui::IsItemHovered();
 		}
 		else {
 			changed = ImGuiWidgets::IntDrag(label, &newVal, 0, 0, 1, false); // unbounded, matches pre-R3 behavior
+			hovered = ImGui::IsItemHovered();
 		}
 
 		if (changed && newVal != val) {
@@ -538,7 +544,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 			TheSettingManager->LoadSettings();
 		}
 		syncLiveConstant((float)newVal);
-		ImGuiWidgets::TooltipIfHovered(tooltip);
+		ImGuiWidgets::TooltipIfHovered(hovered, tooltip);
 		if (ImGuiWidgets::RevertButton(isDirty)) revert();
 		break;
 	}
@@ -553,6 +559,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 		buf[sizeof(buf) - 1] = '\0';
 		if (ImGui::InputText(label, buf, sizeof(buf)))
 			persistent = buf;
+		bool hovered = ImGui::IsItemHovered();
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
 			TheSettingManager->SetSettingS(node.Section, node.Key, buf);
 			TheSettingManager->LoadSettings();
@@ -564,7 +571,7 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 				owner->OnPathChanged(uniformName.c_str(), buf);
 			}
 		}
-		ImGuiWidgets::TooltipIfHovered(tooltip);
+		ImGuiWidgets::TooltipIfHovered(hovered, tooltip);
 		if (ImGuiWidgets::RevertButton(isDirty)) revert();
 		break;
 	}
@@ -619,7 +626,8 @@ static void RenderMenuColorTriple(
 		state.seeded = false; // reseed from the just-reverted values next frame
 	}
 
-	bool changed = ImGuiWidgets::ColorTriplePicker("##triple", rgb, &state);
+	bool hovered = false;
+	bool changed = ImGuiWidgets::ColorTriplePicker("##triple", rgb, &state, &hovered);
 	if (changed) {
 		TheSettingManager->SetSetting(nodeR.Section, nodeR.Key, rgb[0]);
 		TheSettingManager->SetSetting(nodeG.Section, nodeG.Key, rgb[1]);
@@ -631,7 +639,7 @@ static void RenderMenuColorTriple(
 	// unconditionally whenever a description was present), TooltipIfHovered
 	// correctly gates on hover -- see "Tooltip rendered in 3 branches (one
 	// unreachable)" in docs/refactor-plan.md's "What This Eliminates" table.
-	ImGuiWidgets::TooltipIfHovered(nodeR.Description.empty() ? nullptr : nodeR.Description.c_str());
+	ImGuiWidgets::TooltipIfHovered(hovered, nodeR.Description.empty() ? nullptr : nodeR.Description.c_str());
 
 	ImGui::PopID();
 }
@@ -734,6 +742,15 @@ void EffectRecord::RevertMenuSnapshot() {
 			                               const_cast<char*>(value.c_str()));
 	TheSettingManager->LoadSettings();
 	ResetMenuState();
+}
+
+void EffectRecord::SnapshotSettingIfUnseen(const char* section, const char* key) {
+	auto& sectionSnap = s_menuSnapshot[section];
+	if (sectionSnap.find(key) != sectionSnap.end()) return; // already captured this session
+
+	SettingManager::Configuration::ConfigNode node;
+	if (TheSettingManager->Config.FillNode(&node, section, key))
+		sectionSnap.emplace(key, node.Value);
 }
 
 /*

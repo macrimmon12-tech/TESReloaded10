@@ -25,12 +25,15 @@ namespace ImGuiWidgets {
 
 	// ---- numeric widgets -----------------------------------------------------
 
-	bool FloatSlider(const char* label, float* value, float min, float max, float dragStep, float quickAdjustStep, bool showStepButtons) {
+	bool FloatSlider(const char* label, float* value, float min, float max, float dragStep, float quickAdjustStep, bool showStepButtons, bool* outHovered) {
 		float drag = dragStep > 0.0f ? dragStep : 0.001f;
 		float step = quickAdjustStep > 0.0f ? quickAdjustStep : drag;
 		bool changed = ImGui::DragFloat(label, value, drag, min, max, "%.4f");
 
-		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
+		bool hovered = ImGui::IsItemHovered();
+		if (outHovered) *outHovered = hovered;
+
+		if (hovered && (s_plusPressed || s_minusPressed)) {
 			*value += s_plusPressed ? step : -step;
 			if (max > min) *value = ImClamp(*value, min, max);
 			changed = true;
@@ -104,7 +107,7 @@ namespace ImGuiWidgets {
 
 	// ---- colour triple ---------------------------------------------------------
 
-	bool ColorTriplePicker(const char* label, float rgb[3], ColorTripleState* state) {
+	bool ColorTriplePicker(const char* label, float rgb[3], ColorTripleState* state, bool* outHovered) {
 		if (!state->seeded) {
 			float r = rgb[0], g = rgb[1], b = rgb[2];
 			float sc = r > g ? r : g;
@@ -122,6 +125,7 @@ namespace ImGuiWidgets {
 		}
 
 		ImGui::PushID(label);
+		ImGui::BeginGroup(); // makes the whole widget one IsItemHovered() target, not just its last field
 		bool changed = false;
 
 		// Raw R field, kept in sync with the normalised colour + intensity split.
@@ -156,6 +160,8 @@ namespace ImGuiWidgets {
 			changed = true;
 		}
 
+		ImGui::EndGroup();
+		if (outHovered) *outHovered = ImGui::IsItemHovered();
 		ImGui::PopID();
 
 		if (changed) {
@@ -236,11 +242,13 @@ namespace ImGuiWidgets {
 		ImGui::EndPopup();
 	}
 
-	bool KeyBindPicker(const char* label, int* dik) {
+	bool KeyBindPicker(const char* label, int* dik, bool* outHovered) {
 		ImGui::PushID(label);
 		int value = *dik;
 		bool changed = ImGui::DragInt(label, &value, 1.0f, 0, 255);
-		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
+		bool hovered = ImGui::IsItemHovered();
+		if (outHovered) *outHovered = hovered;
+		if (hovered && (s_plusPressed || s_minusPressed)) {
 			value = ImClamp(value + (s_plusPressed ? 1 : -1), 0, 255);
 			changed = true;
 		}
@@ -288,9 +296,8 @@ namespace ImGuiWidgets {
 
 	// ---- chrome ------------------------------------------------------------------
 
-	void TooltipIfHovered(const char* text) {
-		if (!text || !text[0]) return;
-		if (!ImGui::IsItemHovered()) return;
+	void TooltipIfHovered(bool hovered, const char* text) {
+		if (!hovered || !text || !text[0]) return;
 		ImGui::BeginTooltip();
 		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
 		ImGui::TextUnformatted(text);

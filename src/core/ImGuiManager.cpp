@@ -657,6 +657,16 @@ static void SetOverlayVisible(bool visible) {
 	}
 }
 
+// Toggles a shader's enabled/disabled status, first snapshotting its Status
+// section so "Revert" can undo the toggle -- Status is deliberately hidden
+// from the sidebar (see ShouldHideSection), so RenderGenericSection() never
+// renders it and never gets a chance to snapshot it the normal way.
+static void SnapshotAndSwitchShaderStatus(const char* shaderName) {
+	std::string statusSection = std::string("Shaders.") + shaderName + ".Status";
+	EffectRecord::SnapshotSettingIfUnseen(statusSection.c_str(), "Enabled");
+	TheShaderManager->SwitchShaderStatus(shaderName);
+}
+
 // Restore all snapshotted values and sync shader states.
 static void RevertToSnapshot() {
 	EffectRecord::RevertMenuSnapshot(); // re-applies every value + clears menu state
@@ -923,7 +933,7 @@ void ImGuiManager::NewFrame() {
 			size_t dot2 = SelectedSection.find('.', dot1 + 1);
 			if (dot1 != std::string::npos && dot2 != std::string::npos) {
 				std::string shaderName = SelectedSection.substr(dot1 + 1, dot2 - dot1 - 1);
-				TheShaderManager->SwitchShaderStatus(shaderName.c_str());
+				SnapshotAndSwitchShaderStatus(shaderName.c_str());
 				TheSettingManager->LoadSettings();
 			}
 		}
@@ -1045,7 +1055,7 @@ static void RenderContent() {
 				? ImVec4(0.15f, 0.55f, 0.15f, 1.0f)
 				: ImVec4(0.40f, 0.15f, 0.15f, 1.0f));
 			if (ImGui::SmallButton(enabled ? "Enabled [Ins]" : "Disabled [Ins]")) {
-				TheShaderManager->SwitchShaderStatus(shaderName.c_str());
+				SnapshotAndSwitchShaderStatus(shaderName.c_str());
 				TheSettingManager->LoadSettings();
 			}
 			ImGui::PopStyleColor();
@@ -1105,7 +1115,7 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 		ImGui::SameLine();
 		ImGui::BeginDisabled(forced);
 		if (ImGui::Checkbox(name.c_str(), &enabled)) {
-			TheShaderManager->SwitchShaderStatus(name.c_str());
+			SnapshotAndSwitchShaderStatus(name.c_str());
 			TheSettingManager->LoadSettings();
 		}
 		ImGui::EndDisabled();

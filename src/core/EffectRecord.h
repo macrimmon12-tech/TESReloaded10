@@ -58,6 +58,18 @@ public:
 	// (i.e. "revert everything touched this session"), then clears menu state.
 	static void				RevertMenuSnapshot();
 
+	// Lazily records `section`.`key`'s current persisted value into the
+	// revert snapshot, if it hasn't been recorded this session yet -- the
+	// same lazy-seed RenderGenericSection() does for every setting it
+	// renders, exposed for callers that mutate a setting through a path
+	// RenderGenericSection() never sees. The one user today is the shader
+	// enable/disable toggle: its setting lives in a `Status` section that's
+	// deliberately hidden from the sidebar (see ShouldHideSection in
+	// ImGuiManager.cpp), so it's never rendered, never lazily snapshotted by
+	// RenderMenuNode, and previously never actually reverted by "Revert"
+	// despite looking like it should.
+	static void				SnapshotSettingIfUnseen(const char* section, const char* key);
+
 	// ---- R3d: HLSL <> annotation parsing ------------------------------------
 
 	enum class MenuWidget {

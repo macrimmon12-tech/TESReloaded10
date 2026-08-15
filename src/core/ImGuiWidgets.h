@@ -33,8 +33,12 @@ namespace ImGuiWidgets {
 	// when `showStepButtons` is set (these are the same value for an
 	// annotated uniform, whose single `step` field controls both per
 	// docs/refactor-plan.md -- pass the same value for both to get that).
-	// Returns true if the value changed.
-	bool FloatSlider(const char* label, float* value, float min, float max, float dragStep, float quickAdjustStep, bool showStepButtons);
+	// If `outHovered` is supplied, it's set to whether the drag field itself
+	// (not the trailing +/- buttons) is hovered this frame -- ImGui's own
+	// IsItemHovered() called after this function returns would report on
+	// whichever of those was drawn last instead, which is almost never what
+	// a caller wants for e.g. a tooltip. Returns true if the value changed.
+	bool FloatSlider(const char* label, float* value, float min, float max, float dragStep, float quickAdjustStep, bool showStepButtons, bool* outHovered = nullptr);
 
 	// Labelled int control. `min`/`max` both 0 means unbounded. `useSlider`
 	// renders ImGui::SliderInt (clamped drag) instead of the DragInt default --
@@ -62,13 +66,20 @@ namespace ImGuiWidgets {
 	};
 	// `rgb` is the raw (possibly > 1.0) colour in/out. On the first call for a
 	// given `state`, `rgb` seeds col/scale; afterwards `state` is authoritative
-	// and `rgb` is only written to, never read. Returns true if changed.
-	bool ColorTriplePicker(const char* label, float rgb[3], ColorTripleState* state);
+	// and `rgb` is only written to, never read. If `outHovered` is supplied,
+	// it's set to whether the mouse is over any part of this widget (the R
+	// field, the wheel, or the intensity field) -- the whole group counts as
+	// one hover target, unlike FloatSlider/KeyBindPicker where only the
+	// primary field does. Returns true if changed.
+	bool ColorTriplePicker(const char* label, float rgb[3], ColorTripleState* state, bool* outHovered = nullptr);
 
 	// DIK scancode field plus a "(?)" popup listing the DirectInput scancode
-	// reference table. `dik` is read/written in place (0-255). Returns true if
-	// the value changed.
-	bool KeyBindPicker(const char* label, int* dik);
+	// reference table. `dik` is read/written in place (0-255). If `outHovered`
+	// is supplied, it's set to whether the scancode field itself (not the
+	// trailing name label or "(?)" button) is hovered this frame -- see
+	// FloatSlider's `outHovered` for why that distinction matters. Returns
+	// true if the value changed.
+	bool KeyBindPicker(const char* label, int* dik, bool* outHovered = nullptr);
 
 	// Prev/name/next file-cycle picker. `files` is the list of filenames to
 	// cycle through -- this function does no filesystem access, the caller is
@@ -76,9 +87,17 @@ namespace ImGuiWidgets {
 	// and wraps at either end. Returns true if the selection changed.
 	bool FilePicker(const char* label, const std::vector<std::string>& files, int* index);
 
-	// Wrapped tooltip on the previously-drawn item, if it is hovered and
-	// `text` is non-empty/non-null. No-op otherwise.
-	void TooltipIfHovered(const char* text);
+	// Wrapped tooltip, shown when `hovered` is true and `text` is non-empty/
+	// non-null. No-op otherwise. Takes hover state as an explicit parameter
+	// rather than calling ImGui::IsItemHovered() itself: that only reports on
+	// the single most-recently-submitted ImGui item, which for any widget
+	// above that draws more than one (FloatSlider's step buttons,
+	// ColorTriplePicker, KeyBindPicker's popup button) is not the item the
+	// caller means by "hovered" -- making the caller pass the right bool in
+	// (via those functions' own outHovered parameters, or a plain
+	// IsItemHovered() call for single-item widgets) avoids silently
+	// attaching the tooltip to the wrong element.
+	void TooltipIfHovered(bool hovered, const char* text);
 
 	// Small "~" button rendered inline after the previously-drawn item;
 	// disabled when `isDirty` is false. Returns true if clicked -- this
