@@ -1,8 +1,25 @@
 // WaterLens fullscreen shader for Oblivion Reloaded
 
-float4 TESR_ReciprocalResolution;
-float4 TESR_GameTime;
-float4 TESR_WaterLensData;
+string PipelinePosition = "PostTonemapping";
+
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_GameTime
+<
+	string name = "Game Time";
+	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter used to animate the lens ripple, w = elapsed time in seconds since last frame. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_WaterLensData
+<
+	string name = "Water Lens Data";
+	string description = "Packed water-lens ripple parameters: x = TimeMultA (Shaders.WaterLens.Main.TimeMultA, first noise animation speed), y = TimeMultB (TimeMultB, second noise animation speed), z = Viscosity (refraction distortion amount), w = current effect amount (Amount setting scaled by the underwater fade-out animator).";
+	float defaultValue = 0.1;
+>;
 
 struct VS_OUTPUT
 {

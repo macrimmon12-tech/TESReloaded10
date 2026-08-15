@@ -17,8 +17,23 @@
 #define falloffExponent 4 // Set the falloff exponent to control the curve steepness for depth falloff
 #define kernelSize 3 // Set kernel size for averaging, to find total samples multiply the number by it's self
 
-float4 TESR_SharpeningData; // X - Intensity Y - Clamp  Z - Offset(depth falloff) 
-float4 TESR_ReciprocalResolution;
+string PipelinePosition = "PostTonemapping";
+
+float4 TESR_SharpeningData
+<
+	string name = "Sharpening Data";
+	string description = "Packed sharpening parameters: x = Strength (Shaders.Sharpening.Main.Strength, sharpening intensity), y = Clamp (contrast clamp), z = Offset (depth falloff distance, x1000).";
+	float defaultValue = 0.75;
+	float min = 0.0;
+	float max = 2.0;
+	float step = 0.01;
+>;
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };

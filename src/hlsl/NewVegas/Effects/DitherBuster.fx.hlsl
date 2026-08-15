@@ -11,8 +11,20 @@
 // Constants:
 //-----------------------------------------//
 
-float4 TESR_ReciprocalResolution;
-float4 TESR_DitherBusterData;   // x: Strength (0-1), y: MaskPower
+string PipelinePosition = "PostTonemapping";
+
+float4 TESR_ReciprocalResolution
+<
+	string name = "Reciprocal Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = aspect ratio (width/height), w = reserved for FoV. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_DitherBusterData
+<
+	string name = "Dither Buster Data";
+	string description = "Packed anti-aliasing parameters: x = Strength (Shaders.DitherBuster.Main.Strength, AA blend strength, 0-1), y = MaskPower (edge detection sensitivity; higher = fewer edges AA'd).";
+	float defaultValue = 1.0;
+>;
 
 //-----------------------------------------//
 // Samplers:

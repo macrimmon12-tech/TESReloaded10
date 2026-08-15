@@ -1,6 +1,17 @@
 // Low health and fatigue (stamina) fullscreen shader for Oblivion/Skyrim Reloaded
 
-float4 TESR_LowHFData;
+string PipelinePosition = "PostTonemapping";
+
+// TESR_LowHFData is computed each frame from the player's current health/fatigue
+// percentage (see LowHFEffect::UpdateConstants()) blended with the Shaders.LowHF.Main
+// settings (LumaMultiplier, BlurMultiplier, VignetteMultiplier, DarknessMultiplier,
+// HealthLimit, FatigueLimit) -- it is not itself a directly user-editable setting.
+float4 TESR_LowHFData
+<
+	string name = "Low Health/Fatigue Data";
+	string description = "Packed per-frame low-health/fatigue screen effect strength: x = desaturation amount, y = blur sample offset, z = vignette exponent, w = darkness multiplier. Derived from current health/fatigue and the Shaders.LowHF.Main settings; not directly user-editable.";
+	float defaultValue = 0.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 

@@ -36,7 +36,14 @@
  * policies, either expressed or implied, of the copyright holders.
  */
 
-float4 TESR_SMAAResolution;
+string PipelinePosition = "PostTonemapping";
+
+float4 TESR_SMAAResolution
+<
+	string name = "SMAA Resolution";
+	string description = "Per-frame render target metrics supplied by the engine: x = 1/width, y = 1/height, z = height, w = width. Feeds SMAA_RT_METRICS. Not user-configurable.";
+	float defaultValue = 0.0;
+>;
 
 #ifndef SMAA_RT_METRICS
 #define SMAA_RT_METRICS TESR_SMAAResolution

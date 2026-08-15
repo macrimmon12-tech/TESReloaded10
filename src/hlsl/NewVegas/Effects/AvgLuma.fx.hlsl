@@ -1,9 +1,36 @@
 // AvgLuma for Oblivion Reloaded
 
-float4 TESR_MotionBlurData;
-float4 TESR_DepthOfFieldData;
-float4 TESR_GameTime;
-float4 TESR_ExposureData; // x:min brightness, y;max brightness, z:dark adapt speed, w: light adapt speed
+string PipelinePosition = "PreTonemapping";
+
+// AvgLuma is a utility shader with no settings of its own -- it computes a 1x1
+// average-luma/autofocus texture consumed by other effects, reading several of
+// those effects' own registered constants directly. See MotionBlur.fx.hlsl,
+// DepthOfField.fx.hlsl and Exposure.fx.hlsl for the canonical annotation of
+// TESR_MotionBlurData/TESR_DepthOfFieldData/TESR_ExposureData respectively.
+float4 TESR_MotionBlurData
+<
+	string name = "Motion Blur Data";
+	string description = "MotionBlurEffect's own registered constant (see MotionBlur.fx.hlsl); read here only for .x/.y (per-frame camera turn speed) to scale the autofocus sampling radius.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_DepthOfFieldData
+<
+	string name = "Depth Of Field Data";
+	string description = "DepthOfFieldEffect's own registered constant (see DepthOfField.fx.hlsl); read here only for .x (focus distance) to derive the hyperfocal distance for autofocus.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_GameTime
+<
+	string name = "Game Time";
+	string description = "Per-frame game clock supplied by the engine: x = time in milliseconds, y = time in hours (0-24), z = frame time counter, w = elapsed time in seconds since last frame (used here to animate the luma/focus adaptation speed). Not user-configurable.";
+	float defaultValue = 0.0;
+>;
+float4 TESR_ExposureData
+<
+	string name = "Exposure Data";
+	string description = "ExposureEffect's own registered constant (see Exposure.fx.hlsl); read here for .z/.w (dark/light adaptation speed) to pace the animated luma value. x:min brightness, y:max brightness, z:dark adapt speed, w:light adapt speed.";
+	float defaultValue = 50.0;
+>;
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_AvgLumaBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
