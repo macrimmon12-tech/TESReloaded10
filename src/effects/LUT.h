@@ -34,6 +34,17 @@ public:
 	void UpdateConstants();
 
 	void ScanLUTFolder();
+
+	// Assigns an already-loaded texture to a slot (member pointer, sampler binding,
+	// day cell count, LUTFiles index sync). Does not load or persist anything —
+	// loading is TextureManager::GetFileTexture()'s job, persistence is SaveLUTSetting()'s.
+	void AssignLUTSlot(int slot, IDirect3DBaseTexture9* texture, const char* filename); // slot: 0=day, 1=night, 2=interior
+
+	// Persists the chosen filename for a slot back to settings.
+	void SaveLUTSetting(int slot, const char* filename); // slot: 0=day, 1=night, 2=interior
+
+	// Convenience orchestrator for a user-driven LUT pick: loads the file via
+	// TheTextureManager->GetFileTexture(), assigns it to the slot, and saves the choice.
 	void LoadLUT(int slot, const char* filename); // slot: 0=day, 1=night, 2=interior
 
 	static const char* LUTFolder;
