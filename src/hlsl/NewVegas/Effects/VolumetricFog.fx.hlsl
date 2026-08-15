@@ -109,38 +109,76 @@ float4 TESR_SunAmount
 >;
 float4 TESR_VolumetricFogLow
 <
+	string widget = "packed";
 	string name = "Volumetric Fog Low";
 	string description = "Packed low/simple-fog parameters (Shaders.VolumetricFog.Main/Interiors): x = FogSaturation, y = WeatherImpact, z = DistantFogRange (exteriors only), w = SunPower (exteriors only).";
+	string componentKeys     = "FogSaturation,WeatherImpact,DistantFogRange,SunPower";
+	string componentDefaults = "1.7,0.5,0.9,0.2";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "5,1,1,2";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 0.0;
 >;
 float4 TESR_VolumetricFogHigh
 <
+	string widget = "packed";
 	string name = "Volumetric Fog High";
 	string description = "Packed height-fog density parameters (Shaders.VolumetricFog.Main/Interiors): x = HeightFogDensity, y = HeightFogFalloff, z = HeightFogDist, w = HeightFogSkyColor (exteriors only).";
+	string componentKeys     = "HeightFogDensity,HeightFogFalloff,HeightFogDist,HeightFogSkyColor";
+	string componentDefaults = "0.6,50.0,0.4,4.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "3,200,2,20";
+	string componentSteps    = "0.01,1,0.01,0.1";
 	float defaultValue = 0.0;
 >;
 float4 TESR_VolumetricFogSimple
 <
+	string widget = "packed";
 	string name = "Volumetric Fog Simple";
 	string description = "Packed simple-fog light transport parameters (Shaders.VolumetricFog.Main/Interiors): x = Extinction, y = Inscattering, z = FogNight (exteriors) / 1.0 (interiors), w = SimpleFogSkyColor (exteriors) / 0.0 (interiors).";
+	string componentKeys     = "Extinction,Inscattering,FogNight,SimpleFogSkyColor";
+	string componentDefaults = "3.0,1.6,2.0,20.0";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "10,10,10,50";
+	string componentSteps    = "0.01,0.01,0.01,0.1";
 	float defaultValue = 0.0;
 >;
 float4 TESR_VolumetricFogBlend
 <
+	string widget = "packed";
 	string name = "Volumetric Fog Blend";
 	string description = "Packed fog-layer blend parameters (Shaders.VolumetricFog.Main/Interiors): x = DistantFogBlend (exteriors only), y = HeightFogBlend, z = HeightFogRolloff, w = SimpleFogBlend.";
+	string componentKeys     = "DistantFogBlend,HeightFogBlend,HeightFogRolloff,SimpleFogBlend";
+	string componentDefaults = "0.3,1.0,1.3,0.5";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "1,3,5,1";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 0.0;
 >;
+// w (isExterior) is deliberately left out of componentKeys below: it's a
+// 0/1 flag derived from GameState, not a setting.
 float4 TESR_VolumetricFogHeight
 <
+	string widget = "packed";
 	string name = "Volumetric Fog Height";
 	string description = "Packed height/limit parameters (Shaders.VolumetricFog.Main/Interiors): x = DistantFogHeight (exteriors only), y = HeightFogHeight, z = SimpleFogHeight, w = 1.0 if exterior else 0.0.";
+	string componentKeys     = "DistantFogHeight,HeightFogHeight,SimpleFogHeight";
+	string componentDefaults = "0.3,3.0,0.2";
+	string componentMins     = "0,0,0";
+	string componentMaxs     = "2,10,2";
+	string componentSteps    = "0.01,0.01,0.01";
 	float defaultValue = 0.0;
 >;
 float4 TESR_VolumetricFogData
 <
+	string widget = "packed";
 	string name = "Volumetric Fog Data";
 	string description = "Packed general fog parameters (Shaders.VolumetricFog.Main/Interiors): x = MinimumBaseFog, y = HeightFogSaturation, z = Amount (global fog strength multiplier), w = HeightFogInscattering.";
+	string componentKeys     = "MinimumBaseFog,HeightFogSaturation,Amount,HeightFogInscattering";
+	string componentDefaults = "0.2,1.7,0.4,1.6";
+	string componentMins     = "0,0,0,0";
+	string componentMaxs     = "2,5,2,5";
+	string componentSteps    = "0.01,0.01,0.01,0.01";
 	float defaultValue = 0.2;
 >;
 
