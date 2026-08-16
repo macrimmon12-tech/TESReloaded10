@@ -56,18 +56,35 @@ This is self-contained and has no dependencies.
 
 ## UI-1 — Color Picker Layout Rework
 
-**File:** `src/core/ImGuiManager.cpp`, `RenderColorTriple()` (~line 1099)
+**File:** `src/core/ImGuiManager.cpp`, `RenderColorTriple()` (~line 1099) and `RenderContent()` triple detection (~line 1476)
 
-Two problems to fix together:
+Three problems to fix together:
 
-**Bug — R label on wrong line:** The R channel `DragFloat` uses `nodeR.Key` (no `##` prefix) as its ImGui ID, causing the key name to render as a visible label inline on the header row (alongside the section label and revert `~` button). G and B render on their own lines via the outer loop, making R visually inconsistent.
+**Bug 1 — Triple detection only fires on 'R' suffix:** The detection loop at ~line 1476 checks `key.back() == 'R'` only. Settings iterate alphabetically, so `EffectGammaB` and `EffectGammaG` reach `RenderSetting()` as plain vertical floats before `EffectGammaR` triggers the color picker. Result: B and G render as stray rows above the wheel; R is absorbed into the picker; ImGui's own built-in R/G/B display at the bottom of the wheel then shows the same values again — duplicated.
 
-**Layout — horizontal R/G/B value boxes:** The three channel inputs should be displayed as a compact horizontal row of numeric fields, matching ReShade's color picker layout. Currently R, G, B are stacked vertically as separate `DragFloat` rows. The target is all three inline on one row — `R [ 0.800 ]  G [ 0.600 ]  B [ 0.400 ]` — with the color wheel above.
+**Fix:** Fire detection on any of `'B'`, `'G'`, `'R'` suffix, use `!handled.count(kR)` as the render-once guard:
+```cpp
+char last = key.back();
+if (last == 'R' || last == 'G' || last == 'B') {
+    std::string pfx = key.substr(0, key.size() - 1);
+    std::string kR = pfx + "R", kG = pfx + "G", kB = pfx + "B";
+    bool isColorCurve = (pfx == "ColorCurve" && strstr(s.Section, "Shaders.Coloring") != nullptr);
+    if (!isColorCurve && keyIdx.count(kR) && keyIdx.count(kG) && keyIdx.count(kB) && !handled.count(kR)) {
+        handled.insert(kR); handled.insert(kG); handled.insert(kB);
+        RenderColorTriple(settings[keyIdx[kR]], settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
+        continue;
+    }
+}
+```
 
-**Fix:**
+**Bug 2 — R label on wrong line:** Inside `RenderColorTriple`, the R channel `DragFloat` uses `nodeR.Key` (no `##` prefix) as its ImGui ID, rendering the key name as a visible label inline on the header row alongside the section label and `~` button.
+
+**Layout — horizontal R/G/B value boxes:** The three channel inputs should be a compact horizontal row matching ReShade's layout — `R [ 0.800 ]  G [ 0.600 ]  B [ 0.400 ]` — with the color wheel above. Currently they are stacked vertically.
+
+**Fix for Bug 2 + layout:**
 - Replace the three separate vertical `DragFloat` calls with a single row using `SameLine()` between `##r`, `##g`, `##b` fields, each sized to one-third of available width
-- Use `##r` / `##g` / `##b` IDs throughout — no visible key-name labels on the input fields
-- Label each field with a short colored or plain prefix (`R`, `G`, `B`) via `Text()` + `SameLine()` before each input
+- Use `##r` / `##g` / `##b` IDs — no visible key-name labels
+- Label each field with a plain prefix (`R`, `G`, `B`) via `Text()` + `SameLine()`
 - Color wheel remains above the input row, unchanged
 
 ---
