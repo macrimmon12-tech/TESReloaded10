@@ -36,7 +36,7 @@ void FlashlightEffect::UpdateSettings() {
 	Settings.NearFade = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "NearFade");
 	Settings.HotspotLimit = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "HotspotLimit");
 	Settings.CookieStrength = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "CookieStrength");
-	Settings.softEdges = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "SoftEdges");
+	Settings.softEdges = TheSettingManager->GetSettingI("Shaders.Flashlight.Main", "SoftEdges");
 
 	Settings.MaterialLight.Enabled = TheSettingManager->GetSettingI("Shaders.Flashlight.MaterialLight", "Enabled");
 	Settings.MaterialLight.Intensity = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "Intensity");
@@ -54,7 +54,7 @@ void FlashlightEffect::UpdateSettings() {
 
 	// These come purely from settings, so they are published here rather than in
 	// UpdateConstants - PointShadows reads the spot size even when the flashlight is off
-	Constants.Tuning = D3DXVECTOR4(Settings.SpotSize, Settings.Intensity, Settings.NearFade, Settings.softEdges);
+	Constants.Tuning = D3DXVECTOR4(Settings.SpotSize, Settings.Intensity, Settings.NearFade, Settings.softEdges ? 1.0f : 0.0f);
 	Constants.Hotspot = D3DXVECTOR4(Settings.HotspotLimit, Settings.CookieStrength, sourceIsLinear, 0.0f);
 
 	if (!SpotLight)

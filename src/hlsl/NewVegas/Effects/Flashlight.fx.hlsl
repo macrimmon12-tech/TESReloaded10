@@ -129,19 +129,18 @@ float4 Flashlight(VSOUT IN) : COLOR0
     float3 lightToWorld = lightpos - worldPos;
     float3 lightVector = normalize(lightToWorld);
 
-	// Soft edges blend the clamped N.L towards wrap lighting. The normals here are
-	// reconstructed from depth, which is near-random across alpha tested foliage, and a
-	// clamped N.L turns that into hard speckle with a lot of exact zeros. Wrapping removes
-	// the zeros and compresses the spread.
+	// Soft edges replace the clamped N.L with wrap lighting. The normals here are
+	// reconstructed from depth, which is near-random across alpha tested foliage, and the
+	// clamp turns that into hard speckle because so many samples land on exactly zero.
 	//
-	// The wrap term is squared. A plain (N.L * 0.5 + 0.5) reads 0.5 on a surface edge on to
-	// the light where the clamped term reads 0, which roughly doubles the average and makes
-	// the beam visibly brighter as soon as the option is used. Squaring holds the response
-	// at 1 for a surface facing the light, so the lit pool keeps the brightness the dimmer
-	// asks for and only the grazing angles are lifted.
+	// The wrap is cubed, which is what keeps it from changing the exposure. For a wrap of
+	// the form ((N.L + 1) / 2)^k the mean over uniformly distributed normals is 1/(k+1),
+	// and clamped N.L has a mean of 1/4, so k = 3 is the exponent that matches it. It also
+	// still reaches 1 for a surface facing the light, so the brightest part of the pool is
+	// unchanged too and the dimmer keeps meaning what it meant.
     float ndl = dot(lightVector, normal);
-    float softDiffuse = sqr(saturate(ndl * 0.5 + 0.5));
-    float diffuse = lerp(max(ndl, 0.0), softDiffuse, saturate(FL_SOFTEDGE));
+    float wrapped = saturate(ndl * 0.5 + 0.5);
+    float diffuse = (FL_SOFTEDGE > 0.5) ? (wrapped * wrapped * wrapped) : max(ndl, 0.0);
     float specular = pows(shades(normalize(eyeDirection + lightVector * -1), normal), 5);
 
 	// radius based attenuation based on https://lisyarus.github.io/blog/graphics/2022/07/30/point-light-attenuation.html

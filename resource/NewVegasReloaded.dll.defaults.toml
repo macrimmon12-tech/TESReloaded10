@@ -328,7 +328,7 @@ Intensity = 1.0                        # Overall strength of the light added to 
 NearFade = 0.0                         # Fades the light out on surfaces closer than this many units, so point blank walls don't clip to white. 0 disables
 HotspotLimit = 0.0                     # Rolls off the brightest part of the lit pool without dimming the falloff around it. 0 disables
 CookieStrength = 0.0                   # Procedural rings and mottling in the beam, for structure on flat surfaces. 0 disables
-SoftEdges = 0.0                        # Blends diffuse towards wrap lighting, 0 to 1. Removes the speckle the reconstructed normals produce on grass and foliage. 0 disables
+SoftEdges = false                      # Wrap lighting instead of clamped diffuse. Removes the speckle the reconstructed normals produce on grass and foliage, at the cost of a flatter beam. Does not change overall brightness
 
 [_Shaders.Flashlight.MaterialLight]
 Enabled = false                        # Re-light nearby static geometry with its own normals, normal map and specular settings, instead of relying on normals reconstructed from depth
