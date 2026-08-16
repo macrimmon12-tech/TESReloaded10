@@ -38,10 +38,15 @@ void FlashlightEffect::UpdateSettings() {
 	Settings.CookieStrength = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "CookieStrength");
 	Settings.softEdges = TheSettingManager->GetSettingI("Shaders.Flashlight.Main", "SoftEdges");
 
+	// With RenderPreTonemapping the effect chain draws onto the game's HDR scene surface,
+	// whose content is already linear. Combine has to know, so it can skip the sRGB
+	// decode that is only correct on the post tonemapping LDR surface.
+	float sourceIsLinear = TheSettingManager->SettingsMain.Main.RenderPreTonemapping ? 1.0f : 0.0f;
+
 	// These come purely from settings, so they are published here rather than in
 	// UpdateConstants - PointShadows reads the spot size even when the flashlight is off
 	Constants.Tuning = D3DXVECTOR4(Settings.SpotSize, Settings.Intensity, Settings.NearFade, Settings.softEdges ? 1.0f : 0.0f);
-	Constants.Hotspot = D3DXVECTOR4(Settings.HotspotLimit, Settings.CookieStrength, 0.0f, 0.0f);
+	Constants.Hotspot = D3DXVECTOR4(Settings.HotspotLimit, Settings.CookieStrength, sourceIsLinear, 0.0f);
 
 	if (!SpotLight)
 		SpotLight = NiSpotLight::CreateObject();

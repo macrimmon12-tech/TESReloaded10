@@ -16,6 +16,7 @@ float4 TESR_FlashLightHotspot;	// x hotspot limit, y cookie strength
 #define FL_SOFTEDGE			TESR_FlashLightTuning.w
 #define FL_HOTSPOTLIMIT		TESR_FlashLightHotspot.x
 #define FL_COOKIESTRENGTH	TESR_FlashLightHotspot.y
+#define FL_LINEARSOURCE		TESR_FlashLightHotspot.z
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -207,7 +208,15 @@ float4 BoxBlurAvg (VSOUT IN, uniform sampler2D buffer, uniform float scaleFactor
 
 float4 Combine (VSOUT IN) : COLOR0
 {
-	float4 color = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
+	// With RenderPreTonemapping, which is the default, this pass draws onto the game's HDR
+	// scene surface and TESR_SourceBuffer is already linear. Decoding it as sRGB and
+	// re-encoding on the way out is then a second transform. It almost cancels where no
+	// light is added, but it also feeds the exp() rolloff below a value divided by 12.92
+	// in the dark end, so the rolloff stops rolling off and close surfaces blow out.
+	// Only apply the transform when this really is the post tonemapping LDR surface.
+	bool sourceIsLinear = FL_LINEARSOURCE > 0.5;
+	float4 source = tex2D(TESR_SourceBuffer, IN.UVCoord);
+	float4 color = sourceIsLinear ? source : linearize(source);
 	float4 light = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 
 	float3 addLight = color.rgb * max(0.0, luma(exp(-color.rgb * 3.5)) * light.rgb) * FL_INTENSITY; // modulate light with base color brightness to compensate for the post process aspect
@@ -221,7 +230,7 @@ float4 Combine (VSOUT IN) : COLOR0
 
 	color.rgb += addLight;
 
-    return delinearize(color);
+    return sourceIsLinear ? color : delinearize(color);
 }
 
 technique {
