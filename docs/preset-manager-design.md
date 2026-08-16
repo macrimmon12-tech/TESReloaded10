@@ -136,6 +136,15 @@ a full standalone snapshot, not a diff. Four kinds of preset, stored separately:
 | Override (exterior) | one per tagged worldspace | `<WorldspaceEditorID>.ini` |
 | Variant | up to 5 | `<VariantName>.ini` |
 
+**Never cached — always read fresh from disk at the point of use** (a location
+resolving, the Reload button, a Load-browser selection), unlike keyword files.
+Presets are written in-session via the Save actions below, so caching their
+content would risk the cache going stale relative to what was just saved — this
+way there's nothing to keep in sync, the file on disk is simply the truth. The
+"Preset browser / Load" list only needs *filenames* to populate itself and tag
+each row's kind (trivial from which subfolder it came from) — actual content is
+read on demand only once something is selected and loaded.
+
 ## Variants
 
 Up to 5, independently toggleable via checkbox, **end-user facing** — a preset
@@ -246,10 +255,14 @@ is needed, not just optional. Fits naturally in the same **NVR Dev Tools** panel
 as the relocated Cell/Worldspace picker above, as a general utility rather than
 something preset-manager-specific.
 
-Cartographer's hot-reload-key idea (re-read all keyword/preset files and
-re-apply the current selection live, without restarting) is still worth carrying
-over separately — cheap, reuses the existing `NVR*` console command surface, and
-would show up immediately in the log window above once that exists.
+Cartographer's global hot-reload-key idea (re-scan every keyword/preset file
+without restarting) is **not** being carried over — keyword reassignment is
+deliberately offline-only and already requires a full game restart to take
+effect, so there's no reason for preset changes to be hot-reloadable while
+keyword changes aren't. Presets already read fresh from disk on every use (see
+"Preset files" below) — "Reload current preset" (see "In-game UI — location
+assignment" below) covers the in-session case that actually matters, at no
+extra implementation cost.
 
 ## Application mechanism
 
@@ -259,9 +272,13 @@ existing edge-triggered flag already set every frame in
 `ShaderManager::UpdateConstants()` by comparing `Player->parentCell` against a
 persisted `PreviousCell` member. No new cell-change hook needed.
 
-1. Resolve which single base preset wins (per "Resolution order" above) — its
-   full contents become the target map directly. No merging with any other tier.
-2. Layer each currently-enabled Variant's diff on top of the target map.
+1. Resolve which single base preset wins (per "Resolution order" above) and
+   **read its file fresh off disk** — presets are never cached (see "Preset
+   files" above), so this is a real file open/parse every time, not a cache
+   lookup. Its full contents become the target map directly; no merging with
+   any other tier.
+2. Layer each currently-enabled Variant's diff on top of the target map —
+   also read fresh from disk, same rule.
 3. Diff the target map against `currentSettings` (what's actually live).
 4. For each changed key, call `TheSettingManager->SetSettingF()` or `SetSettingS()`
    directly — no console command round-trip, this is native code in the same DLL.
@@ -270,9 +287,10 @@ persisted `PreviousCell` member. No new cell-change hook needed.
    (`FillMenuSections("Shaders")` + `GetMenuShaderEnabled` + `GetEffectByName`/
    `GetShaderCollectionByName`).
 
-Because step 1 always resolves fresh from the winning preset rather than layering
-onto whatever's currently live, moving between any two locations is correct with
-no separate "revert" step.
+Because step 1 always resolves fresh from disk rather than layering onto
+whatever's currently live, moving between any two locations is correct with no
+separate "revert" step — and it's also exactly what makes "Reload current
+preset" trivial: that button is just this same sequence, re-run on demand.
 
 ## In-game UI — location assignment
 
@@ -309,13 +327,13 @@ saving silently discards the preview and returns to normal resolution; no
 additional warning beyond the Load confirmation itself.
 
 **Reload current preset** — a separate button, always available, distinct from
-the Load browser below: re-reads *the file backing whichever tier is actually
-resolved right now* from disk and re-applies it, discarding any live unsaved
-edits (including an in-progress preview from Load, if one is active) in favor of
-what's actually saved on disk. Exists for the case where the file itself was
-just hand-edited externally — e.g. testing a change made directly in a text
-editor without leaving the game. Same "you'll lose unsaved changes" risk as
-Load, so it gets the same OK/Cancel treatment.
+the Load browser below: discards any live unsaved edits (including an
+in-progress preview from Load, if one is active) and resets to whatever's
+actually assigned to this location. Nothing bespoke under the hood — since
+presets are always read fresh from disk anyway (see "Preset files" above),
+this is just the normal "Application mechanism" resolve step, re-run on
+demand. Same "you'll lose unsaved changes" risk as Load, so it gets the same
+OK/Cancel treatment.
 
 ## In-game UI — Preset browser / Load
 
@@ -345,9 +363,6 @@ plus the **Save Variant** authoring flow described above.
 
 ## Open items to resolve during implementation
 
-- Exact wiring for the global hot-reload key (which console command triggers
-  it, and confirming a full reload doesn't fight with an in-progress Load
-  preview) — distinct from the scoped "Reload current preset" button, which
-  only re-reads the one file currently resolved rather than rescanning
-  keyword/preset directories for structural changes (new files, cells moved
-  between keyword sections).
+None currently outstanding — the last one (global hot-reload wiring) was
+resolved by dropping that feature entirely; see "Debug/authoring tooling"
+above.
