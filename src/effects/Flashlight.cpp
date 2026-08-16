@@ -3,9 +3,9 @@
 
 void FlashlightEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_FlashLightViewProjTransform", (D3DXVECTOR4*)&Constants.FlashlightViewProj);
-	TheShaderManager->RegisterConstant("TESR_FlashLightPosition", (D3DXVECTOR4*)&Constants.FlashlightViewProj);
-	TheShaderManager->RegisterConstant("TESR_FlashLightDirection", (D3DXVECTOR4*)&Constants.FlashlightViewProj);
-	TheShaderManager->RegisterConstant("TESR_FlashLightColor", (D3DXVECTOR4*)&Constants.FlashlightViewProj);
+	TheShaderManager->RegisterConstant("TESR_FlashLightPosition", &Constants.Position);
+	TheShaderManager->RegisterConstant("TESR_FlashLightDirection", &Constants.Direction);
+	TheShaderManager->RegisterConstant("TESR_FlashLightColor", &Constants.Color);
 };
 
 void FlashlightEffect::UpdateSettings() {
@@ -52,7 +52,7 @@ void FlashlightEffect::UpdateConstants() {
 	NiPoint3 WeaponPos;
 	NiMatrix33 WeaponRot;
 	bool melee = false;
-	if (Player->process->IsWeaponOut()) {
+	if (Player->process->IsWeaponOut() && Player->ActorSkinInfo) {
 		melee = !Player->ActorSkinInfo->WeaponForm ||
 			Player->ActorSkinInfo->WeaponForm->weaponType == TESObjectWEAP::WeaponType::kWeapType_HandToHandMelee ||
 			Player->ActorSkinInfo->WeaponForm->weaponType == TESObjectWEAP::WeaponType::kWeapType_OneHandMelee ||
@@ -63,12 +63,16 @@ void FlashlightEffect::UpdateConstants() {
 			Player->ActorSkinInfo->WeaponForm->weaponType == TESObjectWEAP::WeaponType::kWeapType_OneHandThrown;
 	}
 
+	// The bone the light rides must be chosen from what is equipped, never from the weapon
+	// animation state. IsAiming() is false during the attack and follow-through states, so
+	// testing it here made the light switch between two bones with different positions and
+	// different forward axes on alternating frames while firing - that is the snapping.
 	if (Player->isThirdPerson) {
-		if (Settings.attachToWeapon && !melee && Player->process->IsWeaponOut() && Player->IsReloading() && Player->IsAiming()) {
+		if (Settings.attachToWeapon && !melee && Player->process->IsWeaponOut() && Player->ActorSkinInfo && Player->ActorSkinInfo->WeaponNode) {
 			WeaponPos = Player->ActorSkinInfo->WeaponNode->m_worldTransform.pos;
 			WeaponRot = Player->ActorSkinInfo->WeaponNode->m_worldTransform.rot;
 		}
-		else {
+		else if (Player->ActorSkinInfo && Player->ActorSkinInfo->HeadNode) {
 			// matrix that will rotate 90 degrees on the Z then X axis
 			NiMatrix33 rotation = NiMatrix33();
 			rotation.data[0][0] = 0;
@@ -86,10 +90,13 @@ void FlashlightEffect::UpdateConstants() {
 			rotation = rotation * WeaponRot; // we place the rotation matrix in the referential of the bone
 			WeaponRot = WeaponRot * rotation; // we apply it
 		}
+		else {
+			WeaponPos = WorldSceneGraph->camera->m_worldTransform.pos;
+			WeaponRot = WorldSceneGraph->camera->m_worldTransform.rot;
+		}
 	}
 	else {
-		// isReloading is inverted and returns 0 when player is reloading
-		if (Settings.attachToWeapon && !melee && Player->process->IsWeaponOut() && Player->IsReloading()) {
+		if (Settings.attachToWeapon && !melee && Player->process->IsWeaponOut() && Player->firstPersonSkinInfo && Player->firstPersonSkinInfo->WeaponNode) {
 			WeaponPos = Player->firstPersonSkinInfo->WeaponNode->m_worldTransform.pos;
 			WeaponRot = Player->firstPersonSkinInfo->WeaponNode->m_worldTransform.rot;
 		}
@@ -126,6 +133,11 @@ void FlashlightEffect::UpdateConstants() {
 	SpotLight->m_worldTransform.scale = 1.0f;
 	SpotLight->OuterSpotAngle = Settings.ConeAngle;
 	SpotLight->Spec = NiColor(Settings.Distance, 0, 0); // radius in r channel
+
+	// Same packing as the shared TESR_SpotLight* constants: w carries radius, cone angle and dimmer
+	Constants.Position = D3DXVECTOR4(WeaponPos.x, WeaponPos.y, WeaponPos.z, Settings.Distance);
+	Constants.Direction = D3DXVECTOR4(WeaponRot.data[0][0], WeaponRot.data[1][0], WeaponRot.data[2][0], Settings.ConeAngle);
+	Constants.Color = D3DXVECTOR4(Settings.Color.r, Settings.Color.g, Settings.Color.b, Settings.Dimmer);
 
 	GetFlashlightViewProj();
 };
