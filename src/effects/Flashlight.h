@@ -26,7 +26,6 @@ public:
 			bool	Enabled;
 			float	Intensity;
 			float	Specular;
-			float	SpecularPower;
 			float	NormalStrength;
 			int		MaxGeometry;
 			int		DebugMode;

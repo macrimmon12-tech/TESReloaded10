@@ -14,12 +14,13 @@ namespace MaterialPass {
 	static constexpr UInt32 kRTTI_NiSwitchNode = 0x11F5EB4;
 	static constexpr UInt32 kRenderTriShapeAlt = 0xE745A0;
 	static constexpr UInt32 kRenderTriStripsAlt = 0xE74840;
+	static constexpr int kDebugXRay = 8;	// see-through view of everything queued
 	static constexpr UInt32 kSavedStreamCount = 8;
 	static constexpr UInt32 kSavedTextureCount = 2;
 	static constexpr UInt32 kSavedSamplerStateCount = 5;
 
 	static const char* kVertexShaderSource =
-		"row_major float4x4 gWorldViewProj : register(c0);\n"
+		"row_major float4x4 gViewProj : register(c0);\n"
 		"row_major float4x4 gWorld : register(c4);\n"
 		"struct VS_IN { float4 pos : POSITION0; float3 normal : NORMAL0; float4 uv : TEXCOORD0; };\n"
 		"struct VS_OUT { float4 pos : POSITION; float2 uv : TEXCOORD0; float3 worldRel : TEXCOORD1; float3 normalRel : TEXCOORD2; };\n"
@@ -27,7 +28,7 @@ namespace MaterialPass {
 		"    VS_OUT OUT;\n"
 		"    float4 localPos = float4(IN.pos.xyz, 1.0);\n"
 		"    float4 worldPos = mul(localPos, gWorld);\n"
-		"    OUT.pos = mul(localPos, gWorldViewProj);\n"
+		"    OUT.pos = mul(float4(worldPos.xyz * 0.999, 1.0), gViewProj);\n"
 		"    OUT.uv = IN.uv.xy;\n"
 		"    OUT.worldRel = worldPos.xyz;\n"
 		"    OUT.normalRel = normalize(mul(float4(IN.normal.xyz, 0.0), gWorld).xyz);\n"
@@ -40,7 +41,6 @@ namespace MaterialPass {
 		"float4 gTuning : register(c2);\n"
 		"float4 gLightPosRadius : register(c3);\n"
 		"float4 gSpecular : register(c4);\n"
-		"float4 gSpecularTuning : register(c5);\n"
 		"float4 gHotspot : register(c6);\n"
 		"sampler2D DiffuseMap : register(s0);\n"
 		"struct PS_IN { float2 uv : TEXCOORD0; float3 worldRel : TEXCOORD1; float3 normalRel : TEXCOORD2; };\n"
@@ -68,7 +68,7 @@ namespace MaterialPass {
 		"    float3 halfVector = normalize(lightVector + viewVector);\n"
 		"    float nDotH = saturate(dot(normal, halfVector));\n"
 		"    float gloss = smoothstep(0.45, 0.95, saturate(gSpecular.z));\n"
-		"    float specPower = max(gSpecularTuning.x, gSpecular.y * 2.0);\n"
+		"    float specPower = gSpecular.y * 2.0;\n"
 		"    float specExponent = max(specPower / 32.0, 1.0);\n"
 		"    float specLobe = pow(saturate((nDotH - 0.72) / 0.28), specExponent);\n"
 		"    float specular = gSpecular.x * gloss * specLobe;\n"
@@ -92,7 +92,7 @@ namespace MaterialPass {
 		"}\n";
 
 	static const char* kNormalMapVertexShaderSource =
-		"row_major float4x4 gWorldViewProj : register(c0);\n"
+		"row_major float4x4 gViewProj : register(c0);\n"
 		"row_major float4x4 gWorld : register(c4);\n"
 		"struct VS_IN { float4 pos : POSITION0; float3 tangent : TANGENT0; float3 binormal : BINORMAL0; float3 normal : NORMAL0; float4 uv : TEXCOORD0; };\n"
 		"struct VS_OUT { float4 pos : POSITION; float2 uv : TEXCOORD0; float3 worldRel : TEXCOORD1; float3 tangentRel : TEXCOORD2; float3 binormalRel : TEXCOORD3; float3 normalRel : TEXCOORD4; };\n"
@@ -100,7 +100,7 @@ namespace MaterialPass {
 		"    VS_OUT OUT;\n"
 		"    float4 localPos = float4(IN.pos.xyz, 1.0);\n"
 		"    float4 worldPos = mul(localPos, gWorld);\n"
-		"    OUT.pos = mul(localPos, gWorldViewProj);\n"
+		"    OUT.pos = mul(float4(worldPos.xyz * 0.999, 1.0), gViewProj);\n"
 		"    OUT.uv = IN.uv.xy;\n"
 		"    OUT.worldRel = worldPos.xyz;\n"
 		"    OUT.tangentRel = normalize(mul(float4(IN.tangent.xyz, 0.0), gWorld).xyz);\n"
@@ -115,7 +115,6 @@ namespace MaterialPass {
 		"float4 gTuning : register(c2);\n"
 		"float4 gLightPosRadius : register(c3);\n"
 		"float4 gSpecular : register(c4);\n"
-		"float4 gSpecularTuning : register(c5);\n"
 		"float4 gHotspot : register(c6);\n"
 		"sampler2D DiffuseMap : register(s0);\n"
 		"sampler2D NormalMap : register(s1);\n"
@@ -153,7 +152,7 @@ namespace MaterialPass {
 		"    float glossInput = saturate(normalSample.a);\n"
 		"    float gloss = smoothstep(0.45, 0.95, glossInput);\n"
 		"    float nDotH = saturate(dot(worldNormal, halfVector));\n"
-		"    float specPower = max(gSpecularTuning.x, gSpecular.y * 2.0);\n"
+		"    float specPower = gSpecular.y * 2.0;\n"
 		"    float specExponent = max(specPower / 32.0, 1.0);\n"
 		"    float specLobe = pow(saturate((nDotH - 0.72) / 0.28), specExponent);\n"
 		"    float specular = gSpecular.x * gloss * specLobe;\n"
@@ -205,7 +204,7 @@ namespace MaterialPass {
 		IDirect3DIndexBuffer9* indexBuffer;
 		StreamState streams[kSavedStreamCount];
 		DWORD fvf;
-		DWORD renderStates[10];
+		DWORD renderStates[12];
 		DWORD samplerStates[kSavedTextureCount][kSavedSamplerStateCount];
 
 		void Save(IDirect3DDevice9* apDevice) {
@@ -239,6 +238,8 @@ namespace MaterialPass {
 			apDevice->GetRenderState(D3DRS_CULLMODE, &renderStates[7]);
 			apDevice->GetRenderState(D3DRS_COLORWRITEENABLE, &renderStates[8]);
 			apDevice->GetRenderState(D3DRS_FOGENABLE, &renderStates[9]);
+			apDevice->GetRenderState(D3DRS_ZFUNC, &renderStates[10]);
+			apDevice->GetRenderState(D3DRS_DEPTHBIAS, &renderStates[11]);
 
 			for (UInt32 i = 0; i < kSavedTextureCount; ++i) {
 				apDevice->GetSamplerState(i, D3DSAMP_ADDRESSU, &samplerStates[i][0]);
@@ -270,6 +271,8 @@ namespace MaterialPass {
 				renderState->SetRenderState(D3DRS_CULLMODE, renderStates[7], RenderStateArgs);
 				renderState->SetRenderState(D3DRS_COLORWRITEENABLE, renderStates[8], RenderStateArgs);
 				renderState->SetRenderState(D3DRS_FOGENABLE, renderStates[9], RenderStateArgs);
+				renderState->SetRenderState(D3DRS_ZFUNC, renderStates[10], RenderStateArgs);
+				renderState->SetRenderState(D3DRS_DEPTHBIAS, renderStates[11], RenderStateArgs);
 				for (UInt32 i = 0; i < kSavedTextureCount; ++i) {
 					renderState->SetSamplerState(i, D3DSAMP_ADDRESSU, samplerStates[i][0], false);
 					renderState->SetSamplerState(i, D3DSAMP_ADDRESSV, samplerStates[i][1], false);
@@ -540,10 +543,11 @@ namespace MaterialPass {
 			return;
 		if (apObject->m_flags & NiAVObject::APP_CULLED)
 			return;
-		//world bounds enclose children, so this prunes whole subtrees outside the
-		//beam before any RTTI or property work
-		if (!IsWithinLight(apObject))
-			return;
+		// No subtree prune by world bound here. The scene graph root does not maintain one
+		// that encloses its children - it reads as centre (0,0,0) radius 1 - so testing it
+		// rejects the whole scene on the first node and nothing is ever captured. Geometry
+		// is bound tested individually in ShouldQueueGeometry, so this only ever saved the
+		// walk, never correctness.
 
 		if (IsGeometry(apObject)) {
 			CaptureGeometry(static_cast<NiGeometry*>(apObject));
@@ -578,6 +582,7 @@ namespace MaterialPass {
 		CaptureObject(apSceneGraph);
 	}
 
+
 	void BeginFrame(bool abActive) {
 		g_renderQueue.clear();
 		g_renderActive = abActive && FL().MaterialLight.Enabled &&
@@ -608,6 +613,7 @@ namespace MaterialPass {
 			!CompileShader(kNormalMapVertexShaderSource, "main", "vs_3_0", &normalVsCode) ||
 			!CompileShader(kNormalMapPixelShaderSource, "main", "ps_3_0", &normalPsCode)) {
 			g_shaderFailed = true;
+			Logger::Log("[MaterialPass] shader COMPILE failed");
 			if (vsCode) vsCode->Release();
 			if (psCode) psCode->Release();
 			if (normalVsCode) normalVsCode->Release();
@@ -650,9 +656,28 @@ namespace MaterialPass {
 
 	static void ApplyRenderState() {
 		NiDX9RenderState* renderState = TheRenderManager->renderState;
+
+		// This pass re-draws geometry the engine has already drawn, so every fragment lands on
+		// a depth value that ought to compare equal, and only an inclusive comparison lets an
+		// equal depth redraw through. It used to set no ZFUNC at all and inherit whatever the
+		// engine last left, which is not stable frame to frame - the sky and particles leave
+		// compares of their own behind. Set it explicitly. Do not try to infer the direction
+		// from whatever happens to be set either - ask the renderer, exactly as ShadowManager
+		// does, because this game runs an inverted depth buffer on some setups and the wrong
+		// direction turns the test inside out and draws precisely what is occluded.
+		//
+		// DebugMode 8 deliberately drops the depth test entirely, so every object the pass
+		// queued is drawn through whatever is in front of it. That answers "did this object
+		// get captured at all", which is otherwise indistinguishable from "it was captured
+		// and then failed the depth test".
+		const bool xray = (FL().MaterialLight.DebugMode == kDebugXRay);
+		float noDepthBias = 0.0f;
+		renderState->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL, RenderStateArgs);
+		renderState->SetRenderState(D3DRS_DEPTHBIAS, *(DWORD*)&noDepthBias, RenderStateArgs);
+
 		renderState->SetVertexShader(g_vertexShader, false);
 		renderState->SetPixelShader(g_pixelShader, false);
-		renderState->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE, RenderStateArgs);
+		renderState->SetRenderState(D3DRS_ZENABLE, xray ? D3DZB_FALSE : D3DZB_TRUE, RenderStateArgs);
 		renderState->SetRenderState(D3DRS_ZWRITEENABLE, D3DZB_FALSE, RenderStateArgs);
 		renderState->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE, RenderStateArgs);
 		renderState->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE, RenderStateArgs);
@@ -751,14 +776,31 @@ namespace MaterialPass {
 		lightColor.y *= scale;
 		lightColor.z *= scale;
 		lightColor.w = FL().MaterialLight.Intensity;
-		D3DXVECTOR4 tuning(FL().NearFade, (float)FL().MaterialLight.DebugMode, 0.0f, 0.0f);
+		// x-ray reuses mode 1's flat colour, so the shaders need no branch of their own
+		const int debugMode = FL().MaterialLight.DebugMode;
+		D3DXVECTOR4 tuning(FL().NearFade, (float)(debugMode == kDebugXRay ? 1 : debugMode), 0.0f, 0.0f);
+
+		// Same for every item, so it goes up once. The vertex shaders scale each position
+		// slightly towards the camera before projecting it. This pass re-draws geometry the
+		// engine already drew, so every fragment lands on a depth that ought to compare equal,
+		// but ours comes from a projection we rebuilt and the low bits disagree, which loses
+		// the tie about half the time. A D3D depth bias is the wrong instrument: it is constant
+		// in non-linear depth, so any value large enough to help nearby reaches through walls
+		// at distance. Positions here are camera relative, so scaling them is a proportional
+		// pull along the view ray - small at every range, and indifferent to which way round
+		// the depth buffer runs. Only the projected position moves; worldRel keeps the true
+		// position so the lighting is unaffected.
+		//
+		// The magnitude matters more than it looks. 0.001 was enough to reach through real
+		// geometry on an inverted depth buffer, which reads as a wallhack; 0.00001 still
+		// clears the float error in the rebuilt projection by a wide margin while staying far
+		// below the separation between any two real surfaces.
+		device->SetVertexShaderConstantF(0, (float*)&TheRenderManager->ViewProjMatrix, 4);
 
 		device->SetPixelShaderConstantF(0, (float*)&lightColor, 1);
 		device->SetPixelShaderConstantF(1, (float*)&lightDir, 1);
 		device->SetPixelShaderConstantF(2, (float*)&tuning, 1);
 		device->SetPixelShaderConstantF(3, (float*)&lightPos, 1);
-		D3DXVECTOR4 specularTuning(FL().MaterialLight.SpecularPower, 0.0f, 0.0f, 0.0f);
-		device->SetPixelShaderConstantF(5, (float*)&specularTuning, 1);
 		D3DXVECTOR4 hotspot(FL().HotspotLimit, 0.0f, 0.0f, 0.0f);
 		device->SetPixelShaderConstantF(6, (float*)&hotspot, 1);
 
@@ -770,8 +812,6 @@ namespace MaterialPass {
 
 			D3DXMATRIX world;
 			TheRenderManager->CreateD3DMatrix(&world, &item.geometry->m_worldTransform);
-			D3DXMATRIX worldViewProj = world * TheRenderManager->ViewProjMatrix;
-			device->SetVertexShaderConstantF(0, (float*)&worldViewProj, 4);
 			device->SetVertexShaderConstantF(4, (float*)&world, 4);
 
 			D3DXVECTOR4 specular(specularStrength, item.specularPower, item.fallbackGloss, FL().MaterialLight.NormalStrength);

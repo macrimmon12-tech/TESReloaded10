@@ -332,10 +332,9 @@ SoftEdges = false                      # Wrap lighting instead of clamped diffus
 Enabled = false                        # Re-light nearby static geometry with its own normals, normal map and specular settings, instead of relying on normals reconstructed from depth
 Intensity = 0.3                        # Strength of the re-lit contribution
 Specular = 8.0                         # Scales the specular highlight. Multiplies the material own specular strength
-SpecularPower = 160.0                  # Minimum specular exponent. Higher gives a tighter highlight
 NormalStrength = 2.5                   # Scales the sideways component of the normal map
 MaxGeometry = 2048                     # Cap on the number of objects re-lit in one frame
-DebugMode = 0                          # 0 renders normally, 1 to 7 visualise the pass
+DebugMode = 0                          # 0 renders normally, 1 to 7 visualise the pass, 8 draws everything it captured through walls
 
 [_Shaders.Flashlight.Status]
 Enabled = false                         # Replace the pipboy light with a post process flashlight attached to the weapon
