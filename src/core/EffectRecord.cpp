@@ -573,6 +573,58 @@ static void RenderMenuNode(SettingManager::Configuration::ConfigNode& node, bool
 			changed = ImGuiWidgets::EnumCombo(label, kNames, &newVal);
 			hovered = ImGui::IsItemHovered();
 		}
+		// Same shape as TonemappingMode above, for a different reason: Cinema
+		// IS an EffectRecord with an annotatable constant table, but "Mode"
+		// never reaches the shader as a uniform at all (see Cinema.cpp --
+		// CinemaEffect::UpdateConstants() only ever *consumes* Mode in C++ to
+		// decide TESR_CinemaData.x, it's never written back out), so there's
+		// nothing for GetUniformAnnotation() to reflect on. Reported as
+		// "Mode isn't constrained to the actual available modes" -- it was
+		// previously falling through to the unbounded int-drag default.
+		// "Mode" alone isn't a safe key to switch on: DepthOfField and
+		// ShadowsExteriors.ShadowMaps both have their own unrelated "Mode"
+		// settings (see below), so this checks node.Section too.
+		else if (strcmp(node.Key, "Mode") == 0 && strcmp(node.Section, "Shaders.Cinema.Main") == 0) {
+			// Labels re-derived from CinemaEffect::UpdateConstants()'s actual
+			// condition for each Mode value -- the TOML comment on this
+			// setting only documents modes 0-2 and is stale (3 and 4 are
+			// real, reachable behaviors; the shipped default is 3).
+			static const std::vector<std::string> kNames = {
+				"0 - Always", "1 - Hidden During Dialog/Persuasion",
+				"2 - Only During Dialog", "3 - Only During Persuasion",
+				"4 - During Dialog Or Persuasion",
+			};
+			changed = ImGuiWidgets::EnumCombo(label, kNames, &newVal);
+			hovered = ImGui::IsItemHovered();
+		}
+		// Same gap as Cinema's Mode above -- DepthOfFieldEffect::UpdateConstants()
+		// only ever reads Mode in C++, never writes it to a uniform. Applies
+		// identically across all three DepthOfField sections (same struct,
+		// same condition), hence the section *prefix* check rather than an
+		// exact match.
+		else if (strcmp(node.Key, "Mode") == 0 && strncmp(node.Section, "Shaders.DepthOfField.", 21) == 0) {
+			// Labels re-derived from DepthOfFieldEffect::UpdateConstants().
+			// Mode 4 there uses OR (not Cinema's AND) between the two
+			// negated conditions, so it disables DOF unless the (rare)
+			// dialog-and-persuasion states overlap -- described as such
+			// rather than as a clean "shown during either" like Cinema's.
+			static const std::vector<std::string> kNames = {
+				"0 - Always", "1 - Disabled During Dialog/Persuasion",
+				"2 - Only During Dialog", "3 - Only During Persuasion",
+				"4 - Only During Dialog And Persuasion (rare overlap)",
+			};
+			changed = ImGuiWidgets::EnumCombo(label, kNames, &newVal);
+			hovered = ImGui::IsItemHovered();
+		}
+		// Shadow map format -- unlike the two above, this one's meaning is
+		// fully and accurately documented by its own TOML comment already;
+		// still gets the same hardcoded-enum treatment since ShadowMode
+		// likewise never reaches a shader uniform.
+		else if (strcmp(node.Key, "Mode") == 0 && strcmp(node.Section, "Shaders.ShadowsExteriors.ShadowMaps") == 0) {
+			static const std::vector<std::string> kNames = { "0 - VSM", "1 - EVSM2", "2 - EVSM4" };
+			changed = ImGuiWidgets::EnumCombo(label, kNames, &newVal);
+			hovered = ImGui::IsItemHovered();
+		}
 		else if (hasAnn && ann.Widget == EffectRecord::MenuWidget::Enum) {
 			std::vector<std::string> labels;
 			std::stringstream ss(ann.EnumNames);

@@ -210,7 +210,7 @@ Enabled = false                         # Increases the blurriness and light ble
 AspectRatio = 2.35                      # Letterbox/black bars effect. Use the value of Width/Height of the visible window (1 to disable).
 ChromaticAberration = 1.0               # Lens distortion effect that separates the red/green and blue channels slightly as a real lens would.
 FilmGrainAmount = 0.3                   # Animated cinema grain at 24fps like film.
-Mode = 3                                # Chose when the letterbox effect is activated 0: always, 1: not during dialog, 2: only during dialog.
+Mode = 3                                # Chose when the letterbox effect is activated: 0: always, 1: hidden during dialog/persuasion, 2: only during dialog, 3: only during persuasion, 4: during dialog or persuasion.
 OverlayStrength = 0.1                   # Overlays the screen image onto itself to increase color intensity and contrast.
 VignetteDarkness = 1.2                  # Darkening of the edges of the screen.
 VignetteRadius = 0.6                    # Distance to the center for the start of the Vignette effect.
@@ -262,7 +262,7 @@ DistantBlur = true                     # Activate a constant blurriness in the f
 DistantBlurEndRange = 150000           # Far end of the area blurred in the distance (fully blurry).
 DistantBlurStartRange = 30000          # Start of the area blurred in the distance (not yet blurry).
 Enabled = false                        # Wether to activate the DOF effect in first person.
-Mode = 0                               # Chose when the DOF is activated: 0: always, 1: not during dialog, 2: only in dialog.
+Mode = 0                               # Chose when the DOF is activated: 0: always, 1: disabled during dialog/persuasion, 2: only during dialog, 3: only during persuasion, 4: only during dialog and persuasion (rare overlap).
 NearBlurCutOff = 100                   # Close up range that doesn't get blurred to avoid blurry gun/player character.
 Radius = 1.5                           # Radius for the bokeh blur.
 
@@ -277,7 +277,7 @@ DistantBlur = true                     # Activate a constant blurriness in the f
 DistantBlurEndRange = 150000           # Far end of the area blurred in the distance (fully blurry).
 DistantBlurStartRange = 30000          # Start of the area blurred in the distance (not yet blurry).
 Enabled = false                        # Wether to activate the DOF effect in third person.
-Mode = 0                               # Chose when the DOF is activated: 0: always, 1: not during dialog, 2: only in dialog.
+Mode = 0                               # Chose when the DOF is activated: 0: always, 1: disabled during dialog/persuasion, 2: only during dialog, 3: only during persuasion, 4: only during dialog and persuasion (rare overlap).
 NearBlurCutOff = 200                   # Close up range that doesn't get blurred to avoid blurry gun/player character.
 Radius = 1.5                           # Radius for the bokeh blur.
 
@@ -289,7 +289,7 @@ DistantBlur = true                     # Activate a constant blurriness in the f
 DistantBlurEndRange = 150000           # Far end of the area blurred in the distance (fully blurry).
 DistantBlurStartRange = 30000          # Start of the area blurred in the distance (not yet blurry).
 Enabled = false                        # Wether to activate the DOF effect in vanity camera (free rotation camera).
-Mode = 0                               # Chose when the DOF is activated: 0: always, 1: not during dialog, 2: only in dialog.
+Mode = 0                               # Chose when the DOF is activated: 0: always, 1: disabled during dialog/persuasion, 2: only during dialog, 3: only during persuasion, 4: only during dialog and persuasion (rare overlap).
 NearBlurCutOff = 0                     # Close up range that doesn't get blurred to avoid blurry gun/player character.
 Radius = 1.5                           # Radius for the bokeh blur.
 
