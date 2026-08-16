@@ -38,6 +38,15 @@ void FlashlightEffect::UpdateSettings() {
 	Settings.CookieStrength = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "CookieStrength");
 	Settings.softEdges = TheSettingManager->GetSettingI("Shaders.Flashlight.Main", "SoftEdges");
 
+	Settings.MaterialLight.Enabled = TheSettingManager->GetSettingI("Shaders.Flashlight.MaterialLight", "Enabled");
+	Settings.MaterialLight.Intensity = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "Intensity");
+	Settings.MaterialLight.Specular = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "Specular");
+	Settings.MaterialLight.SpecularPower = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "SpecularPower");
+	Settings.MaterialLight.SpecularBoost = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "SpecularBoost");
+	Settings.MaterialLight.NormalStrength = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "NormalStrength");
+	Settings.MaterialLight.MaxGeometry = TheSettingManager->GetSettingI("Shaders.Flashlight.MaterialLight", "MaxGeometry");
+	Settings.MaterialLight.DebugMode = TheSettingManager->GetSettingI("Shaders.Flashlight.MaterialLight", "DebugMode");
+
 	// With RenderPreTonemapping the effect chain draws onto the game's HDR scene surface,
 	// whose content is already linear. Combine has to know, so it can skip the sRGB
 	// decode that is only correct on the post tonemapping LDR surface.

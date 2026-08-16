@@ -22,6 +22,19 @@ public:
 		float		HotspotLimit;
 		float		CookieStrength;
 		bool		softEdges;
+
+		// Forward re-light of nearby static geometry, drawn by MaterialPass
+		struct MaterialLightStruct {
+			bool	Enabled;
+			float	Intensity;
+			float	Specular;
+			float	SpecularPower;
+			float	SpecularBoost;
+			float	NormalStrength;
+			int		MaxGeometry;
+			int		DebugMode;
+		};
+		MaterialLightStruct	MaterialLight;
 	};
 	FlashlightSettingsStruct	Settings;
 

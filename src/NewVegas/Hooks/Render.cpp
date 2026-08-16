@@ -11,6 +11,13 @@ void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTe
 	TheRenderManager->SetupSceneCamera();
 
 	TheShaderManager->UpdateConstants();
+
+	// Reset the material pass queue for the frame. Passing false when the flashlight is
+	// not lit leaves it inactive, so the scene walk in RenderWorldSceneGraphHook costs
+	// nothing while the light is off.
+	FlashlightEffect* Flashlight = TheShaderManager->Effects.Flashlight;
+	MaterialPass::BeginFrame(Flashlight->Enabled && Flashlight->spotLightActive);
+
 	//if (SettingsMain->Develop.TraceShaders && InterfaceManager->IsActive(Menu::MenuType::kMenuType_None) && Global->OnKeyDown(SettingsMain->Develop.TraceShaders) && DWNode::Get() == NULL) DWNode::Create();
 	(*Render)(This, RenderedTexture, Arg2, Arg3);
 
@@ -70,6 +77,13 @@ HRESULT __fastcall SetSamplerStateHook(NiDX9RenderState* This, UInt32 edx, UInt3
 void (__thiscall* RenderWorldSceneGraph)(Main*, Sun*, UInt8, UInt8, UInt8) = (void (__thiscall*)(Main*, Sun*, UInt8, UInt8, UInt8))Hooks::RenderWorldSceneGraph;
 void __fastcall RenderWorldSceneGraphHook(Main* This, UInt32 edx, Sun* SkySun, UInt8 IsFirstPerson, UInt8 WireFrame, UInt8 Arg4) {
 	(*RenderWorldSceneGraph)(This, SkySun, IsFirstPerson, WireFrame, Arg4);
+
+	// Re-light nearby statics inside the flashlight cone. This has to happen here, before
+	// the viewmodel depth handling below clears the Z buffer: the pass draws with depth
+	// testing on and depth writes off, so with a cleared Z buffer it would draw straight
+	// through world geometry.
+	MaterialPass::CaptureScene(WorldSceneGraph);
+	MaterialPass::RenderWorld();
 
 	const bool bPipBoyOpen = InterfaceManager->IsPipBoyOpen();
 	const bool bPipBoyLive = (TheGameMenuManager->IsLiveMenu && TheGameMenuManager->IsLiveMenu(Menu::kMenuType_BigFour, false, false) == GameMenuManager::MenuPauseState::MENU_LIVE);

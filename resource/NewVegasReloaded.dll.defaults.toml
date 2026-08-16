@@ -330,6 +330,16 @@ HotspotLimit = 0.0                     # Rolls off the brightest part of the lit
 CookieStrength = 0.0                   # Procedural rings and mottling in the beam, for structure on flat surfaces. 0 disables
 SoftEdges = false                      # Wrap lighting instead of clamped diffuse. Softens the harsh speckled rim the reconstructed normals produce on foliage
 
+[_Shaders.Flashlight.MaterialLight]
+Enabled = false                        # Re-light nearby static geometry with its own normals, normal map and specular settings, instead of relying on normals reconstructed from depth
+Intensity = 0.3                        # Strength of the re-lit contribution
+Specular = 0.5                         # Scales the specular highlight
+SpecularPower = 160.0                  # Minimum specular exponent. Higher gives a tighter highlight
+SpecularBoost = 16.0                   # Multiplier applied to the specular mask
+NormalStrength = 2.5                   # Scales the sideways component of the normal map
+MaxGeometry = 2048                     # Cap on the number of objects re-lit in one frame
+DebugMode = 0                          # 0 renders normally, 1 to 7 visualise the pass
+
 [_Shaders.Flashlight.Status]
 Enabled = false                         # Replace the pipboy light with a post process flashlight attached to the weapon
 
