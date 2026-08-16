@@ -1737,8 +1737,12 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 
 	if (isLeaf) {
 		bool selected = (SelectedSection == path);
+		// Mute non-selected leaves so they read as lower-weight nav targets
+		// rather than siblings of the category/shader-toggle rows above them.
+		if (!selected) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.68f, 0.75f, 1.0f));
 		if (ImGui::Selectable(name.c_str(), selected))
 			SelectedSection = path;
+		if (!selected) ImGui::PopStyleColor();
 		ImGui::PopID();
 		return;
 	}
@@ -1800,8 +1804,15 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 static void RenderSidebar() {
 	StringList topSections;
 	TheSettingManager->FillMenuSections(&topSections, nullptr);
+	// The active theme's global IndentSpacing is 0 (tight layout for the
+	// settings panel), which leaves TreeNode children flush with their
+	// parent here. Restore a modest per-depth indent scoped to just the
+	// sidebar tree so nesting is visually legible without reintroducing
+	// the wide default indent (21px) that would eat into this narrow panel.
+	ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 14.0f);
 	for (auto& section : topSections)
 		RenderSectionNode(section, section, false);
+	ImGui::PopStyleVar();
 }
 
 static void RenderMainMenuToast() {
