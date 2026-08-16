@@ -1260,6 +1260,7 @@ static void RenderColorTriple(
 	ImGui::PushID(prefix.c_str());
 
 	ImGui::TextUnformatted(label.c_str());
+	bool labelHovered = ImGui::IsItemHovered();
 	ImGui::SameLine();
 	if (!colorDirty) ImGui::BeginDisabled();
 	if (ImGui::SmallButton("~")) {
@@ -1321,7 +1322,7 @@ static void RenderColorTriple(
 		TheSettingManager->LoadSettings();
 	}
 
-	if (!nodeR.Description.empty()) {
+	if (labelHovered && !nodeR.Description.empty()) {
 		ImGui::BeginTooltip();
 		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
 		ImGui::TextUnformatted(nodeR.Description.c_str());
