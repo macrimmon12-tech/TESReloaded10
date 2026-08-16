@@ -142,8 +142,9 @@ Presets are written in-session via the Save actions below, so caching their
 content would risk the cache going stale relative to what was just saved — this
 way there's nothing to keep in sync, the file on disk is simply the truth. The
 "Preset browser / Load" list only needs *filenames* to populate itself and tag
-each row's kind (trivial from which subfolder it came from) — actual content is
-read on demand only once something is selected and loaded.
+each row's kind — classified by name lookup against the two reserved Default
+names and the cached keyword set (see "Folder layout" below) — actual content
+is read on demand only once something is selected and loaded.
 
 ## Variants
 
@@ -201,7 +202,9 @@ on top of the catalog rather than a fact recoverable from any file's existence
 
 ## Folder layout
 
-Proposed, not load-bearing for anything else in this design — easy to adjust:
+Proposed, not load-bearing for anything else in this design — easy to adjust.
+Default/Keyword/Override presets are stored **flat**, distinguished purely by
+filename lookup, not by subfolder:
 
 ```
 Data\NVR\
@@ -209,31 +212,37 @@ Data\NVR\
     HonestHearts.ini
     Freeside.ini
   Presets\
-    Default\
-      DefaultInterior.ini
-      DefaultExterior.ini
-    Keyword\
-      HonestHeartsCave.ini
-      Casino.ini
-    Override\
-      Interior\
-        NVDLC02ZionLodge.ini
-      Exterior\
-        NVDLC02TheStrip.ini
-    Variant\
-      Performance.ini
-      WarmTone.ini
-  EnabledVariants.ini         not a preset — persisted UI state, kept out of Presets\
+    DefaultInterior.ini      reserved name
+    DefaultExterior.ini      reserved name
+    HonestHeartsCave.ini     Keyword preset
+    Casino.ini               Keyword preset
+    NVDLC02ZionLodge.ini     Override, interior cell
+    NVDLC02TheStrip.ini      Override, exterior worldspace
+  Variants\
+    Performance.ini
+    WarmTone.ini
+  EnabledVariants.ini        not a preset — persisted UI state, kept out of Presets\
 ```
 
-`Keywords\` (membership lists) is kept physically separate from `Presets\` (actual
-settings content) since they're different formats serving different purposes —
-avoids a directory scan for one ever mistaking a file from the other. Within
-`Presets\`, one subfolder per kind makes the four preset kinds trivially
-distinguishable by path alone: the "Preset browser/Load" UI's kind tag (Keyword
-grouped first) falls straight out of which subfolder a file came from, no separate
-bookkeeping needed. `Override\` splits Interior/Exterior since the two use
-different EditorID namespaces (cell vs. worldspace).
+Kind-per-subfolder was dropped as unnecessary: it never actually prevented a
+collision or saved any classification work. FNV EditorIDs are already globally
+unique across form types, so a flat `<EditorID>.ini` naming scheme was always
+collision-free between interior and exterior Overrides regardless of folder.
+And the Keyword-vs-Override distinction is something the resolution logic
+already has to compute by cross-referencing the cached keyword set and the
+current location's EditorID — folder location wasn't providing any information
+that lookup doesn't already need to produce anyway. Consistent with the same
+"don't let two things claim to know the same fact" principle behind not caching
+presets and not building a master index file.
+
+The one rule this introduces: `DefaultInterior` and `DefaultExterior` are
+reserved filenames — a keyword can't be named either, or classification breaks.
+
+`Keywords\` and `Variants\` stay physically separate from `Presets\`, since both
+are genuinely different in kind rather than just differently-named: Keywords are
+an entirely different file format (membership lists, not settings snapshots),
+and Variants are diffs rather than full snapshots, browsed through a completely
+separate panel of checkboxes rather than the tiered preset browser.
 
 ## Debug/authoring tooling — in-game log window
 
