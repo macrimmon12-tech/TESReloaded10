@@ -7,17 +7,15 @@ float4 TESR_SunColor;
 float4 TESR_SunDirection;
 float4 TESR_DebugVar;
 float4 TESR_ReciprocalResolution;
-float4 TESR_FlashLightTuning;	// x spot size, y intensity, z near fade, w soft edges
-float4 TESR_FlashLightHotspot;	// x hotspot limit, y cookie strength
-float4 TESR_VolumetricControl;	// x beam strength, 0 when the FlashlightBeam effect is off
+float4 TESR_FlashLightTuning;		// x near fade, y soft edges, z hotspot limit, w cookie strength
+float4 TESR_FlashLightComposite;	// x source buffer is already linear
+float4 TESR_VolumetricControl;		// x beam strength, 0 when the FlashlightBeam effect is off
 
-#define FL_SIZE				TESR_FlashLightTuning.x
-#define FL_INTENSITY		TESR_FlashLightTuning.y
-#define FL_NEARFADE			TESR_FlashLightTuning.z
-#define FL_SOFTEDGE			TESR_FlashLightTuning.w
-#define FL_HOTSPOTLIMIT		TESR_FlashLightHotspot.x
-#define FL_COOKIESTRENGTH	TESR_FlashLightHotspot.y
-#define FL_LINEARSOURCE		TESR_FlashLightHotspot.z
+#define FL_NEARFADE			TESR_FlashLightTuning.x
+#define FL_SOFTEDGE			TESR_FlashLightTuning.y
+#define FL_HOTSPOTLIMIT		TESR_FlashLightTuning.z
+#define FL_COOKIESTRENGTH	TESR_FlashLightTuning.w
+#define FL_LINEARSOURCE		TESR_FlashLightComposite.x
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -156,16 +154,14 @@ float4 Flashlight(VSOUT IN) : COLOR0
 	float4 lightSpaceCoord = ScreenCoordToTexCoord(mul(float4(worldPos, 1), TESR_FlashLightViewProjTransform));
 	float isShadow = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 
-	// Zoom the cookie about its centre so its dark edge stays on the cone cutoff as the
-	// spot size changes - the two have to move together or the beam grows a hard rim.
-	float2 cookieUV = (lightSpaceCoord.xy - 0.5) / max(0.05, FL_SIZE) + 0.5;
+	float2 cookieUV = lightSpaceCoord.xy;
 	float lightTexture = tex2D(TESR_SpotLightTexture, cookieUV).r * BeamBreakup(cookieUV);
 
 	float sunLuma = 1 / max(0.05, luma(TESR_SunColor));
     float3 lightColor = TESR_SpotLightColor.rgb * TESR_SpotLightColor.w * sunLuma;
 
-	float angleCosMax = cos(radians(TESR_SpotLightDirection.w * FL_SIZE));
-	float angleCosMin = cos(radians(TESR_SpotLightDirection.w * FL_SIZE * 0.5));
+	float angleCosMax = cos(radians(TESR_SpotLightDirection.w));
+	float angleCosMin = cos(radians(TESR_SpotLightDirection.w * 0.5));
 	float cone = pow(invlerps(angleCosMax, angleCosMin, shades(lightDir, lightVector * -1)), 2.0);
 
 	// Ramp the pool down point blank so a wall a foot away doesn't clip to white
@@ -231,7 +227,7 @@ float4 Combine (VSOUT IN) : COLOR0
 	float4 color = sourceIsLinear ? source : linearize(source);
 	float4 light = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 
-	float3 addLight = color.rgb * max(0.0, luma(exp(-color.rgb * 3.5)) * light.rgb) * FL_INTENSITY; // modulate light with base color brightness to compensate for the post process aspect
+	float3 addLight = color.rgb * max(0.0, luma(exp(-color.rgb * 3.5)) * light.rgb); // modulate light with base color brightness to compensate for the post process aspect
 
 	// In-air light shaft from the FlashlightBeam effect. Gated on the same value the march
 	// is gated on, so the half res buffer can never bleed in once the beam is switched off.
@@ -248,8 +244,8 @@ float4 Combine (VSOUT IN) : COLOR0
 		float3 surfToL = TESR_SpotLightPosition.xyz - surfPos;
 		float  surfDist = length(surfToL);
 		float surfCone = pow(invlerps(
-			cos(radians(TESR_SpotLightDirection.w * FL_SIZE)),
-			cos(radians(TESR_SpotLightDirection.w * FL_SIZE * 0.5)),
+			cos(radians(TESR_SpotLightDirection.w)),
+			cos(radians(TESR_SpotLightDirection.w * 0.5)),
 			shades(TESR_SpotLightDirection.xyz, -surfToL / max(surfDist, 0.001))), 2.0);
 		float sSurf = saturate(sqr(surfDist / TESR_SpotLightPosition.w));
 		float surfAtten = saturate(sqr(1.0 - sSurf) / (1.0 + 5.0 * sSurf));

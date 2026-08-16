@@ -16,8 +16,6 @@ public:
 		bool		renderShadows;
 		NiPoint3	Offset;
 		bool		attachToWeapon;
-		float		SpotSize;
-		float		Intensity;
 		float		NearFade;
 		float		HotspotLimit;
 		float		CookieStrength;
@@ -29,7 +27,6 @@ public:
 			float	Intensity;
 			float	Specular;
 			float	SpecularPower;
-			float	SpecularBoost;
 			float	NormalStrength;
 			int		MaxGeometry;
 			int		DebugMode;
@@ -43,8 +40,8 @@ public:
 		D3DXVECTOR4	Position;
 		D3DXVECTOR4	Direction;
 		D3DXVECTOR4	Color;
-		D3DXVECTOR4	Tuning;		// x spot size, y intensity, z near fade, w soft edges
-		D3DXVECTOR4	Hotspot;	// x hotspot limit, y cookie strength, z source buffer is linear
+		D3DXVECTOR4	Tuning;		// x near fade, y soft edges, z hotspot limit, w cookie strength
+		D3DXVECTOR4	Composite;	// x source buffer is already linear
 	};
 	FlashlightStruct	Constants;
 

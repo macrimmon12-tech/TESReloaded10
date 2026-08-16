@@ -7,7 +7,7 @@ void FlashlightEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_FlashLightDirection", &Constants.Direction);
 	TheShaderManager->RegisterConstant("TESR_FlashLightColor", &Constants.Color);
 	TheShaderManager->RegisterConstant("TESR_FlashLightTuning", &Constants.Tuning);
-	TheShaderManager->RegisterConstant("TESR_FlashLightHotspot", &Constants.Hotspot);
+	TheShaderManager->RegisterConstant("TESR_FlashLightComposite", &Constants.Composite);
 };
 
 void FlashlightEffect::UpdateSettings() {
@@ -31,8 +31,6 @@ void FlashlightEffect::UpdateSettings() {
 	Settings.ConeAngle = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "Angle");
 	Settings.Distance = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "Distance");
 
-	Settings.SpotSize = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "SpotSize");
-	Settings.Intensity = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "Intensity");
 	Settings.NearFade = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "NearFade");
 	Settings.HotspotLimit = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "HotspotLimit");
 	Settings.CookieStrength = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "CookieStrength");
@@ -42,7 +40,6 @@ void FlashlightEffect::UpdateSettings() {
 	Settings.MaterialLight.Intensity = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "Intensity");
 	Settings.MaterialLight.Specular = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "Specular");
 	Settings.MaterialLight.SpecularPower = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "SpecularPower");
-	Settings.MaterialLight.SpecularBoost = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "SpecularBoost");
 	Settings.MaterialLight.NormalStrength = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "NormalStrength");
 	Settings.MaterialLight.MaxGeometry = TheSettingManager->GetSettingI("Shaders.Flashlight.MaterialLight", "MaxGeometry");
 	Settings.MaterialLight.DebugMode = TheSettingManager->GetSettingI("Shaders.Flashlight.MaterialLight", "DebugMode");
@@ -53,9 +50,9 @@ void FlashlightEffect::UpdateSettings() {
 	float sourceIsLinear = TheSettingManager->SettingsMain.Main.RenderPreTonemapping ? 1.0f : 0.0f;
 
 	// These come purely from settings, so they are published here rather than in
-	// UpdateConstants - PointShadows reads the spot size even when the flashlight is off
-	Constants.Tuning = D3DXVECTOR4(Settings.SpotSize, Settings.Intensity, Settings.NearFade, Settings.softEdges ? 1.0f : 0.0f);
-	Constants.Hotspot = D3DXVECTOR4(Settings.HotspotLimit, Settings.CookieStrength, sourceIsLinear, 0.0f);
+	// UpdateConstants, which only runs while the effect is enabled
+	Constants.Tuning = D3DXVECTOR4(Settings.NearFade, Settings.softEdges ? 1.0f : 0.0f, Settings.HotspotLimit, Settings.CookieStrength);
+	Constants.Composite = D3DXVECTOR4(sourceIsLinear, 0.0f, 0.0f, 0.0f);
 
 	if (!SpotLight)
 		SpotLight = NiSpotLight::CreateObject();

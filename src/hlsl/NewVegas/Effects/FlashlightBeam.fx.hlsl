@@ -18,7 +18,6 @@ float4 TESR_SunColor;
 float4 TESR_ReciprocalResolution;
 float4 TESR_VolumetricControl;		// x strength, y anisotropy, z height falloff, w max distance
 float4 TESR_VolumetricData;			// xyz march light position, w first person strength floor
-float4 TESR_FlashLightTuning;		// x spot size, must match the cone the Flashlight effect draws
 float4x4 TESR_FlashLightViewProjTransform;
 
 sampler2D TESR_DepthBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
@@ -35,7 +34,6 @@ static const float VOL_CALIBRATION = 0.0008;
 // Distance over which a sample fades out as it approaches the surface the ray lands on
 static const float VOL_SURFACE_FADE = 256.0;
 
-#define FL_SIZE TESR_FlashLightTuning.x
 
 struct VSOUT { float4 vertPos : POSITION; float2 UVCoord : TEXCOORD0; };
 struct VSIN  { float4 vertPos : POSITION0; float2 UVCoord : TEXCOORD0; };
@@ -126,8 +124,8 @@ float4 Volumetric(VSOUT IN) : COLOR0 {
 	float fpBlend   = saturate(TESR_VolumetricData.w);
 	float3 lightDir = TESR_SpotLightDirection.xyz;
 	float radius    = TESR_SpotLightPosition.w;
-	float angleCosMax = cos(radians(TESR_SpotLightDirection.w * FL_SIZE));
-	float angleCosMin = cos(radians(TESR_SpotLightDirection.w * FL_SIZE * 0.5));
+	float angleCosMax = cos(radians(TESR_SpotLightDirection.w));
+	float angleCosMin = cos(radians(TESR_SpotLightDirection.w * 0.5));
 	float groundZ   = camPos.z - 128.0;		// roughly the player's feet; dust settles low
 
 	float sceneDist = length(rayVec) * readDepth(IN.UVCoord);
@@ -154,7 +152,7 @@ float4 Volumetric(VSOUT IN) : COLOR0 {
 		float atten = saturate(((1 - s) * (1 - s)) / (1 + 5.0 * s));
 
 		float4 lsc = ScreenCoordToTexCoord(mul(float4(p, 1), TESR_FlashLightViewProjTransform));
-		float2 cookieUV = (lsc.xy - 0.5) / max(0.05, FL_SIZE) + 0.5;
+		float2 cookieUV = lsc.xy;
 		// The cookie projects from the true light position, but in first person the march
 		// runs from a virtual offset one, so blend it flat to hide the parallax mismatch
 		float cookie = lerp(tex2D(TESR_SpotLightTexture, cookieUV).r, 1.0, fpBlend);

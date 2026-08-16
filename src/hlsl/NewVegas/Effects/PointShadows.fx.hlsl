@@ -7,7 +7,6 @@ float4 TESR_ShadowFade;
 float4 TESR_SpotLightPosition;
 float4 TESR_SpotLightDirection;
 float4 TESR_SpotLightColor;
-float4 TESR_FlashLightTuning;	// x spot size - must match the cone the Flashlight effect draws
 
 
 //sampler_state removed to avoid a artifact. TODO investigate
@@ -56,12 +55,8 @@ float GetSpotLightAmount(float4 worldPos, float4 spotLightPosition, float4 spotL
 	float s = saturate(Distance * Distance); 
 	float atten = saturate(((1 - s) * (1 - s)) / (1 + 5.0 * s));
 
-	// This buffer's green channel is a local light mask that lifts shadows where a nearby
-	// light is shining, so this cone has to be the same width as the one the Flashlight
-	// effect lights with, or a non default spot size leaves a ring of lifted shadow.
-	float spotSize = max(TESR_FlashLightTuning.x, 0.05);
-	float angleCosMax = cos(radians(spotLightDirection.w * spotSize));
-	float angleCosMin = cos(radians(spotLightDirection.w * spotSize * 0.5));
+	float angleCosMax = cos(radians(spotLightDirection.w));
+	float angleCosMin = cos(radians(spotLightDirection.w * 0.5));
 	float cone = pow(invlerps(angleCosMax, angleCosMin, shades(spotLightDirection.xyz, lightVector * -1)), 2.0);
 
     float diffuse = shade(lightVector, normal.xyz);

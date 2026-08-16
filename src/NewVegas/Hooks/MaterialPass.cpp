@@ -48,7 +48,7 @@ namespace MaterialPass {
 		"float luma(float3 color) { return dot(color, float3(0.2126, 0.7152, 0.0722)); }\n"
 		"float4 main(PS_IN IN) : COLOR0 {\n"
 		"    float debugStrength = 4.0 * max(gLightColorIntensity.w, 0.25);\n"
-		"    if (gTuning.z > 0.5 && gTuning.z < 1.5) return float4(debugStrength, 0.0, 0.0, 1.0);\n"
+		"    if (gTuning.y > 0.5 && gTuning.y < 1.5) return float4(debugStrength, 0.0, 0.0, 1.0);\n"
 		"    float4 base = tex2D(DiffuseMap, IN.uv);\n"
 		"    float3 toLight = gLightPosRadius.xyz - IN.worldRel;\n"
 		"    float distToLight = length(toLight);\n"
@@ -56,11 +56,11 @@ namespace MaterialPass {
 		"    float radius = max(gLightPosRadius.w, 1.0);\n"
 		"    float s = saturate((distToLight / radius) * (distToLight / radius));\n"
 		"    float atten = saturate(((1.0 - s) * (1.0 - s)) / (1.0 + 5.0 * s));\n"
-		"    float angle = max(1.0, gLightDirAngle.w * max(gTuning.x, 0.05));\n"
+		"    float angle = max(1.0, gLightDirAngle.w);\n"
 		"    float angleCosMax = cos(radians(angle));\n"
 		"    float angleCosMin = cos(radians(angle * 0.5));\n"
 		"    float cone = pow(invlerp(angleCosMax, angleCosMin, dot(normalize(gLightDirAngle.xyz), -lightVector)), 2.0);\n"
-		"    float nearFade = (gTuning.y > 0.0) ? smoothstep(0.0, gTuning.y, distToLight) : 1.0;\n"
+		"    float nearFade = (gTuning.x > 0.0) ? smoothstep(0.0, gTuning.x, distToLight) : 1.0;\n"
 		"    float contribution = atten * cone * nearFade;\n"
 		"    float3 normal = normalize(IN.normalRel);\n"
 		"    float diffuse = saturate(dot(normal, lightVector));\n"
@@ -74,14 +74,14 @@ namespace MaterialPass {
 		"    float specular = gSpecular.x * gloss * specLobe;\n"
 		"    specular *= (diffuse <= 0.2) ? saturate(diffuse + 0.5) : 1.0;\n"
 		"    float3 diffuseLight = base.rgb * diffuse * gLightColorIntensity.rgb * gLightColorIntensity.w * contribution;\n"
-		"    float specularMask = saturate(specular * gSpecularTuning.y);\n"
+		"    float specularMask = saturate(specular);\n"
 		"    float3 specularLight = saturate(specularMask * contribution * gLightColorIntensity.rgb);\n"
-		"    if (gTuning.z > 6.5) return float4(saturate(specLobe * 8.0), gloss, saturate(specLobe * gloss * 16.0), 1.0);\n"
-		"    if (gTuning.z > 5.5) return float4(0.0, 0.0, 0.0, 1.0);\n"
-		"    if (gTuning.z > 4.5) return float4(pow(nDotH, 16.0) * debugStrength * contribution, pow(nDotH, 16.0) * debugStrength * contribution, pow(nDotH, 16.0) * debugStrength * contribution, 1.0);\n"
-		"    if (gTuning.z > 3.5) return float4(0.0, 0.0, 0.0, 1.0);\n"
-		"    if (gTuning.z > 2.5) return float4(specularLight * 4.0, 1.0);\n"
-		"    if (gTuning.z > 1.5) return float4(0.0, 0.0, debugStrength * contribution, 1.0);\n"
+		"    if (gTuning.y > 6.5) return float4(saturate(specLobe * 8.0), gloss, saturate(specLobe * gloss * 16.0), 1.0);\n"
+		"    if (gTuning.y > 5.5) return float4(0.0, 0.0, 0.0, 1.0);\n"
+		"    if (gTuning.y > 4.5) return float4(pow(nDotH, 16.0) * debugStrength * contribution, pow(nDotH, 16.0) * debugStrength * contribution, pow(nDotH, 16.0) * debugStrength * contribution, 1.0);\n"
+		"    if (gTuning.y > 3.5) return float4(0.0, 0.0, 0.0, 1.0);\n"
+		"    if (gTuning.y > 2.5) return float4(specularLight * 4.0, 1.0);\n"
+		"    if (gTuning.y > 1.5) return float4(0.0, 0.0, debugStrength * contribution, 1.0);\n"
 		"    float3 outLight = diffuseLight + specularLight;\n"
 		"    if (gHotspot.x > 0.0) {\n"
 		"        float limit = 1.0 / gHotspot.x;\n"
@@ -124,7 +124,7 @@ namespace MaterialPass {
 		"float luma(float3 color) { return dot(color, float3(0.2126, 0.7152, 0.0722)); }\n"
 		"float4 main(PS_IN IN) : COLOR0 {\n"
 		"    float debugStrength = 4.0 * max(gLightColorIntensity.w, 0.25);\n"
-		"    if (gTuning.z > 0.5 && gTuning.z < 1.5) return float4(debugStrength, 0.0, 0.0, 1.0);\n"
+		"    if (gTuning.y > 0.5 && gTuning.y < 1.5) return float4(debugStrength, 0.0, 0.0, 1.0);\n"
 		"    float4 base = tex2D(DiffuseMap, IN.uv);\n"
 		"    float3 toLight = gLightPosRadius.xyz - IN.worldRel;\n"
 		"    float distToLight = length(toLight);\n"
@@ -132,11 +132,11 @@ namespace MaterialPass {
 		"    float radius = max(gLightPosRadius.w, 1.0);\n"
 		"    float s = saturate((distToLight / radius) * (distToLight / radius));\n"
 		"    float atten = saturate(((1.0 - s) * (1.0 - s)) / (1.0 + 5.0 * s));\n"
-		"    float angle = max(1.0, gLightDirAngle.w * max(gTuning.x, 0.05));\n"
+		"    float angle = max(1.0, gLightDirAngle.w);\n"
 		"    float angleCosMax = cos(radians(angle));\n"
 		"    float angleCosMin = cos(radians(angle * 0.5));\n"
 		"    float cone = pow(invlerp(angleCosMax, angleCosMin, dot(normalize(gLightDirAngle.xyz), -lightVector)), 2.0);\n"
-		"    float nearFade = (gTuning.y > 0.0) ? smoothstep(0.0, gTuning.y, distToLight) : 1.0;\n"
+		"    float nearFade = (gTuning.x > 0.0) ? smoothstep(0.0, gTuning.x, distToLight) : 1.0;\n"
 		"    float contribution = atten * cone * nearFade;\n"
 		"    float3 tangent = normalize(IN.tangentRel);\n"
 		"    float3 binormal = normalize(IN.binormalRel);\n"
@@ -159,19 +159,19 @@ namespace MaterialPass {
 		"    float specular = gSpecular.x * gloss * specLobe;\n"
 		"    specular *= (diffuse <= 0.2) ? saturate(diffuse + 0.5) : 1.0;\n"
 		"    float3 diffuseLight = base.rgb * diffuse * gLightColorIntensity.rgb * gLightColorIntensity.w * contribution;\n"
-		"    float specularMask = saturate(specular * gSpecularTuning.y);\n"
+		"    float specularMask = saturate(specular);\n"
 		"    float3 specularLight = saturate(specularMask * contribution * gLightColorIntensity.rgb);\n"
-		"    if (gTuning.z > 6.5) return float4(saturate(specLobe * 8.0), gloss, saturate(specLobe * gloss * 16.0), 1.0);\n"
-		"    if (gTuning.z > 5.5) {\n"
+		"    if (gTuning.y > 6.5) return float4(saturate(specLobe * 8.0), gloss, saturate(specLobe * gloss * 16.0), 1.0);\n"
+		"    if (gTuning.y > 5.5) {\n"
 		"        float normalDelta = diffuse - vertexDiffuse;\n"
 		"        float posDelta = saturate(normalDelta * 8.0) * debugStrength * contribution;\n"
 		"        float negDelta = saturate(-normalDelta * 8.0) * debugStrength * contribution;\n"
 		"        return float4(posDelta, negDelta, negDelta, 1.0);\n"
 		"    }\n"
-		"    if (gTuning.z > 4.5) return float4(pow(nDotH, 16.0) * debugStrength * contribution, pow(nDotH, 16.0) * debugStrength * contribution, pow(nDotH, 16.0) * debugStrength * contribution, 1.0);\n"
-		"    if (gTuning.z > 3.5) return float4(glossInput * debugStrength * contribution, glossInput * debugStrength * contribution, glossInput * debugStrength * contribution, 1.0);\n"
-		"    if (gTuning.z > 2.5) return float4(specularLight * 4.0, 1.0);\n"
-		"    if (gTuning.z > 1.5) return float4(0.0, debugStrength * contribution, 0.0, 1.0);\n"
+		"    if (gTuning.y > 4.5) return float4(pow(nDotH, 16.0) * debugStrength * contribution, pow(nDotH, 16.0) * debugStrength * contribution, pow(nDotH, 16.0) * debugStrength * contribution, 1.0);\n"
+		"    if (gTuning.y > 3.5) return float4(glossInput * debugStrength * contribution, glossInput * debugStrength * contribution, glossInput * debugStrength * contribution, 1.0);\n"
+		"    if (gTuning.y > 2.5) return float4(specularLight * 4.0, 1.0);\n"
+		"    if (gTuning.y > 1.5) return float4(0.0, debugStrength * contribution, 0.0, 1.0);\n"
 		"    float3 outLight = diffuseLight + specularLight;\n"
 		"    if (gHotspot.x > 0.0) {\n"
 		"        float limit = 1.0 / gHotspot.x;\n"
@@ -738,17 +738,13 @@ namespace MaterialPass {
 
 		D3DXVECTOR4 lightColor = TheShaderManager->SpotLightColor[0];
 		lightColor.w = FL().MaterialLight.Intensity;
-		D3DXVECTOR4 tuning(
-			FL().SpotSize,
-			FL().NearFade,
-			(float)FL().MaterialLight.DebugMode,
-			0.0f);
+		D3DXVECTOR4 tuning(FL().NearFade, (float)FL().MaterialLight.DebugMode, 0.0f, 0.0f);
 
 		device->SetPixelShaderConstantF(0, (float*)&lightColor, 1);
 		device->SetPixelShaderConstantF(1, (float*)&lightDir, 1);
 		device->SetPixelShaderConstantF(2, (float*)&tuning, 1);
 		device->SetPixelShaderConstantF(3, (float*)&lightPos, 1);
-		D3DXVECTOR4 specularTuning(FL().MaterialLight.SpecularPower, FL().MaterialLight.SpecularBoost, 0.0f, 0.0f);
+		D3DXVECTOR4 specularTuning(FL().MaterialLight.SpecularPower, 0.0f, 0.0f, 0.0f);
 		device->SetPixelShaderConstantF(5, (float*)&specularTuning, 1);
 		D3DXVECTOR4 hotspot(FL().HotspotLimit, 0.0f, 0.0f, 0.0f);
 		device->SetPixelShaderConstantF(6, (float*)&hotspot, 1);
