@@ -193,6 +193,34 @@ editor exposes, not a diff), each with escalating warnings:
 pattern, covering only Default and Override (no Keyword row, per "Resolution
 order" above).
 
+**Unsaved/previewing state**: while a preset is loaded via the browser below but
+not yet saved (see next section), the status indicators switch to a distinct
+**Unsaved** state instead of their normal shown/highlighted display — the
+location's actually-resolved tier hasn't changed, only the live editing state has,
+and this needs to stay visibly obvious. Walking to a different location without
+saving silently discards the preview and returns to normal resolution; no
+additional warning beyond the Load confirmation itself.
+
+## In-game UI — Preset browser / Load
+
+A persistent, always-visible list of every existing **Default**, **Keyword**, and
+**Override** preset — Variants excluded, since they're diffs rather than
+standalone starting points. Each row is tagged with its kind; **Keyword presets
+are grouped first**, ahead of Default and Override.
+
+- Select a preset, click **Load**.
+- OK/Cancel confirmation: *"This will override your current unsaved settings."*
+- Confirmed load replaces the live editing state wholesale with that preset's
+  full contents. Nothing is written to disk — the source preset file is
+  untouched, and the current location's actual resolved assignment is unchanged
+  until an explicit Save.
+
+Typical workflow: arrive at a new, untagged interior (currently showing Default)
+→ browse the list for an existing preset that looks close to the desired result
+→ Load it as a working starting point → tweak live → **Save to Keyword** or
+**Save to Override** under the *current* location's own identity, leaving the
+borrowed preset untouched.
+
 ## In-game UI — Variants
 
 Separate from location assignment — a panel of up to 5 checkboxes reflecting
