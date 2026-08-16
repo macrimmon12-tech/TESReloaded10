@@ -1745,7 +1745,14 @@ void ImGuiManager::BuildUI() {
 		ImGui::TextDisabled("New Vegas Reloaded  %s", PluginVersion::VersionString);
 
 	{
-		const float btnRevert = 54.0f, btnDisk = 38.0f, btnCopy = 72.0f, btnSave = 48.0f;
+		// Size each button from its label so the theme's FramePadding is
+		// respected (a fixed pixel width clips/squishes text if FramePadding
+		// changes, e.g. with the wide horizontal padding of the current theme).
+		auto BtnWidth = [](const char* label) {
+			return ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+		};
+		const float btnRevert = BtnWidth("Revert"), btnDisk = BtnWidth("Disk"),
+			btnCopy = BtnWidth("Save Copy"), btnSave = BtnWidth("Save");
 		const float spacing   = ImGui::GetStyle().ItemSpacing.x;
 		const float totalW    = btnRevert + btnDisk + btnCopy + btnSave + spacing * 3.0f;
 		ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - totalW);
