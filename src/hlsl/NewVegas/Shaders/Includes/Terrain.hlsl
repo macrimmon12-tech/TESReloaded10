@@ -7,20 +7,27 @@
     #include "includes/PBR.hlsl"
 #endif
 
+#if defined(__INTELLISENSE__)
+    #include "SkyAmbient.hlsl"
+#else
+    #include "includes/SkyAmbient.hlsl"
+#endif
+
 float4 TESR_TerrainData : register(c89);
 float4 TESR_TerrainExtraData : register(c90);
 
 // Hemisphere skylight, mirroring Includes/Object.hlsl. Terrain never includes that file -- it
 // carries its own getVanillaLightingAtt -- so the constants are declared here. c134/c135 are
 // clear on this side: the terrain chain tops out at c92 and Shadow.hlsl pins c100-c133.
-float4 TESR_SkyColor : register(c134);
-float4 TESR_DebugVar : register(c135);
+// [Shaders.Terrain.*] SkylightingScale in .x. Its own constant because TESR_TerrainExtraData is
+// full: x usePBR, y saturation, z NoiseScale, w NoiseTile.
+float4 TESR_TerrainSkyData : register(c135);
 
 // Additive upper-sky term on top of the weather ambient, weighted by w = (1 + N.up) / 2.
 // w must stay linear in the dot product: that is the exact cosine-weighted form factor.
+// No separate toggle: a strength of 0 disables it.
 #ifndef SKY_AMBIENT_STRENGTH
-    #define SKY_AMBIENT_STRENGTH  (TESR_DebugVar.x)          // scale on skyUpper at w = 1
-    #define SKY_AMBIENT_ON        (TESR_DebugVar.y >= 1.0f)  // off by default
+    #define SKY_AMBIENT_STRENGTH  (TESR_TerrainSkyData.x)    // scale on skyUpper at w = 1
 #endif
 
 float3 blendDiffuseMaps(float3 vertexColor, float2 uv, int texCount, sampler2D tex[7], float blends[7]) {
@@ -89,11 +96,11 @@ float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 no
     float3 ambientColor = AmbientColor * TESR_TerrainData.w;
 
     // Hemisphere skylight, matching getAmbientLighting in Object.hlsl. worldNormal is the
-    // geometric world normal, not the tangent-space shading normal used above. Scaled by
-    // terrain's own ambient multiplier so the two move together when that is tuned.
-    float wSky = 0.5f * dot(worldNormal, float3(0.0f, 0.0f, 1.0f)) + 0.5f;
-    float3 skyTerm = TESR_SkyColor.rgb * SKY_AMBIENT_STRENGTH * TESR_TerrainData.w * wSky;
-    ambientColor += skyTerm * (SKY_AMBIENT_ON ? 1.0f : 0.0f);
+    // geometric world normal, not the tangent-space shading normal used above. AmbientScale
+    // (TESR_TerrainData.w) scales the weather ambient above but not this: the sky is a second,
+    // independent light source, so SkylightingScale is its only strength knob and it survives
+    // AmbientScale = 0.
+    ambientColor += SkyAmbientRadiance(worldNormal, TESR_TerrainSkyData.y) * SKY_AMBIENT_STRENGTH;
     float3 color = albedo;
     color = lerp(luma(albedo), color, TESR_TerrainExtraData.y);
 

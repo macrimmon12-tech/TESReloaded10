@@ -178,6 +178,13 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	AppendDefine("FORWARD_SHADOWS",
 		TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows") ? "1" : "0");
 
+	// Which skylighting model is compiled in. 0 = spherical harmonic irradiance, 1 = the older
+	// single directional sample. Compile time rather than a runtime branch: ps_3_0 flattens
+	// branches like this, so a runtime switch would make every lit pixel pay for BOTH paths.
+	// Changing the setting alters the preprocessed source, so the cache recompiles on next load.
+	AppendDefine("SKYLIGHTING_MODE",
+		TheSettingManager->GetSettingI("Shaders.PBR.Main", "SkylightingMode") ? "1" : "0");
+
 	HRESULT prepass = D3DXPreprocessShaderFromFileA(ShaderSourcePath, Macros, NULL, &ShaderSource, &Errors);
 	if (prepass == D3D_OK) {
 		bool Compile = !CheckPreprocessResult(ShaderPreprocessedPath, ShaderSource);

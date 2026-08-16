@@ -85,7 +85,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     // Vanilla: max(0, sun*NdotL + sun*0.5*sat(dot(E,-L))*(1-NdotV)^2 + Ambient) * albedo
     // The middle term is backscatter; GetLighting's fresnel covers it.
     // Specular sits outside the albedo multiply. SKIN_SPECULAR_STRENGTH defaults to 0.
-    float3 finalColor = max(lighting + PBRAmbient(AmbientColor.rgb), 0) * baseColor.rgb + spec;
+    float3 finalColor = max(lighting + PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f), 0) * baseColor.rgb + spec;
 
     color.rgb = ApplyFog(finalColor, IN.color_1, Toggles);
     color.a = baseColor.a * AmbientColor.a;

@@ -17,18 +17,6 @@
 #include "includes/Helpers.hlsl"
 #include "includes/PBRScale.hlsl"
 
-// PBRScale pins TESR_PBRData at c134, so the skylight constants sit above it. Registers only
-// decide where the values live; binding is by name.
-float4 TESR_SkyColor : register(c135);
-float4 TESR_DebugVar : register(c136);
-
-// Matches Includes/Object.hlsl. w = (1 + N.up) / 2 must stay linear in the dot product: that is
-// the exact cosine-weighted form factor.
-#ifndef SKY_AMBIENT_STRENGTH
-    #define SKY_AMBIENT_STRENGTH  (TESR_DebugVar.x)          // scale on skyUpper at w = 1
-    #define SKY_AMBIENT_ON        (TESR_DebugVar.y >= 1.0f)  // off by default
-#endif
-
 float4 AmbientColor    : register(c0);
 float4 EyePosition     : register(c1);
 float4 MatAlpha        : register(c3);
@@ -145,13 +133,8 @@ VS_OUTPUT main(VS_INPUT IN) {
         specular += lightColor * (specStrength * ToggleNumLights.w * att);
     }
 
-    // Hemisphere skylight on top of the weather ambient, matching getAmbientLighting in
-    // Object.hlsl. shadowNormal is the geometric WORLD normal; N above is tangent space.
-    float3 ambient = PBRAmbient(AmbientColor.rgb);
-    float wSky = 0.5f * dot(shadowNormal, float3(0.0f, 0.0f, 1.0f)) + 0.5f;
-    float3 skyTerm = TESR_SkyColor.rgb * SKY_AMBIENT_STRENGTH * TESR_PBRData.w * wSky;
-    float skyValid = SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f;
-    ambient += skyTerm * skyValid * (SKY_AMBIENT_ON ? 1.0f : 0.0f);
+    // shadowNormal is the geometric WORLD normal; N above is tangent space.
+    float3 ambient = PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
 
     // Vanilla: (diffuseSum + AmbientColor) * albedo + specSum * specScale
     float4 baseTex = tex2D(BaseMap, uv);

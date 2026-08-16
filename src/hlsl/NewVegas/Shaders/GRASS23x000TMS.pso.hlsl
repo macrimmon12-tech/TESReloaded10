@@ -35,7 +35,7 @@ PS_OUTPUT main(PS_INPUT IN) {
 #endif
 
     // Same split getSunLighting/getAmbientLighting apply on the object path.
-    float3 lighting = PBRLight(sun) + PBRAmbient(IN.ambient.xyz);
+    float3 lighting = PBRLight(sun) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
 
     float4 albedo = tex2D(DiffuseMap, IN.uv.xy);
     float3 litColor = lighting * albedo.rgb;

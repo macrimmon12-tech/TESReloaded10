@@ -124,7 +124,7 @@ VS_OUTPUT main(VS_INPUT IN) {
 #endif
 
     r1.yzw = (saturate((1 - att3.x) - att4.x) * q40.xyz) + sunTerm;			// partial precision
-    r6.xyz = ((r2.w * ((q19.x * r4.yzw) + r0.yzw)) + r1.yzw) + PBRAmbient(AmbientColor.rgb);			// partial precision
+    r6.xyz = ((r2.w * ((q19.x * r4.yzw) + r0.yzw)) + r1.yzw) + PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);			// partial precision
 
     // Was a debug override: selectColor(TESR_DebugVar.x, ...) emitted a flat light colour
     // unless the dev var was zero. Kept only the real result.
