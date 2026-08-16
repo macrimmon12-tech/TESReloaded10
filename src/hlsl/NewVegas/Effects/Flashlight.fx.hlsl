@@ -133,14 +133,18 @@ float4 Flashlight(VSOUT IN) : COLOR0
 	// reconstructed from depth, which is near-random across alpha tested foliage, and the
 	// clamp turns that into hard speckle because so many samples land on exactly zero.
 	//
-	// The wrap is cubed, which is what keeps it from changing the exposure. For a wrap of
-	// the form ((N.L + 1) / 2)^k the mean over uniformly distributed normals is 1/(k+1),
-	// and clamped N.L has a mean of 1/4, so k = 3 is the exponent that matches it. It also
-	// still reaches 1 for a surface facing the light, so the brightest part of the pool is
-	// unchanged too and the dimmer keeps meaning what it meant.
+	// Squaring the wrap is what actually removes the speckle: it has to stay shallow around
+	// N.L = 0, where the reconstructed normals scatter, or the noise comes straight back.
+	// Cubing it is shallow enough nowhere near there and reintroduces the dithering.
+	//
+	// So the shape is fixed at squared, and the energy is corrected with a constant instead.
+	// For ((N.L + 1) / 2)^k the mean over uniformly distributed normals is 1/(k+1); clamped
+	// N.L has a mean of 1/4, so squared runs a third bright and 3/4 brings it back. That
+	// costs a quarter off a surface facing the light head on, which is simply what lifting
+	// the grazing angles has to be paid for with if the total is to stay put.
     float ndl = dot(lightVector, normal);
     float wrapped = saturate(ndl * 0.5 + 0.5);
-    float diffuse = (FL_SOFTEDGE > 0.5) ? (wrapped * wrapped * wrapped) : max(ndl, 0.0);
+    float diffuse = (FL_SOFTEDGE > 0.5) ? (0.75 * wrapped * wrapped) : max(ndl, 0.0);
     float specular = pows(shades(normalize(eyeDirection + lightVector * -1), normal), 5);
 
 	// radius based attenuation based on https://lisyarus.github.io/blog/graphics/2022/07/30/point-light-attenuation.html
