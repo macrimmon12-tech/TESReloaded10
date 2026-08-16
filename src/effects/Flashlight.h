@@ -21,7 +21,7 @@ public:
 		float		NearFade;
 		float		HotspotLimit;
 		float		CookieStrength;
-		bool		softEdges;
+		float		softEdges;
 
 		// Forward re-light of nearby static geometry, drawn by MaterialPass
 		struct MaterialLightStruct {
@@ -58,4 +58,5 @@ public:
 	bool	ShouldRender();
 
 	void	GetFlashlightViewProj();
+	void	PublishLightConstants(bool abActive);
 };

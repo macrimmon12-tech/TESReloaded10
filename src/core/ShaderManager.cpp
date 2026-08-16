@@ -584,51 +584,14 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 	D3DXVECTOR4 Empty = D3DXVECTOR4(0, 0, 0, 0);
 
 	// TEMP : get data for spotlights. Right now, is done manually since spotlights aren't implemented in the engine
+	// FlashlightEffect::UpdateConstants publishes SpotLightPosition/Direction/Color itself,
+	// so the cone constants and the cookie matrix always come from one read of the bone.
 	TheShaderManager->Effects.Flashlight->UpdateConstants();
 	if (TheShaderManager->Effects.Flashlight->Enabled && TheShaderManager->Effects.Flashlight->spotLightActive) {
 		SpotLightList[0] = TheShaderManager->Effects.Flashlight->SpotLight;
 	}
 	else {
 		SpotLightList[0] = nullptr;
-	}
-
-	//Setting constants
-	if (SpotLightList[0] != nullptr) {
-		TheShaderManager->SpotLightPosition[0] = SpotLightList[0]->m_worldTransform.pos.toD3DXVEC4();
-		TheShaderManager->SpotLightPosition[0].w = SpotLightList[0]->Spec.r; // radius
-		TheShaderManager->SpotLightDirection[0] = D3DXVECTOR4(
-			SpotLightList[0]->m_worldTransform.rot.data[0][0],
-			SpotLightList[0]->m_worldTransform.rot.data[1][0], 
-			SpotLightList[0]->m_worldTransform.rot.data[2][0], 
-			SpotLightList[0]->OuterSpotAngle); // outside angle of the light cone
-		TheShaderManager->SpotLightColor[0] = D3DXVECTOR4(SpotLightList[0]->Diff.r, SpotLightList[0]->Diff.g, SpotLightList[0]->Diff.b, SpotLightList[0]->Dimmer);
-
-		// The beam march needs parallax to produce a visible shaft. In first person the
-		// light sits on the camera, so every view ray runs down the beam and there is
-		// nothing to see; give the march a virtual origin pushed right and down in camera
-		// space while the surface pool and the cookie keep the true position. w carries the
-		// first person strength floor, which also blends the cookie flat in the march so
-		// the parallax mismatch between the two positions does not show.
-		// Derived here, inside the same snapshot that fills the SpotLight constants, so the
-		// two can never describe different frames.
-		TheShaderManager->VolumetricData = TheShaderManager->SpotLightPosition[0];
-		TheShaderManager->VolumetricData.w = 0.0f;
-		FlashlightBeamEffect* Beam = TheShaderManager->Effects.FlashlightBeam;
-		if (Player && !Player->isThirdPerson && WorldSceneGraph && WorldSceneGraph->camera) {
-			NiMatrix33& rot = WorldSceneGraph->camera->m_worldTransform.rot;
-			float offR = Beam->Settings.FirstPersonOffsetRight;
-			float offD = Beam->Settings.FirstPersonOffsetDown;
-			TheShaderManager->VolumetricData.x += rot.data[0][2] * offR - rot.data[0][1] * offD;
-			TheShaderManager->VolumetricData.y += rot.data[1][2] * offR - rot.data[1][1] * offD;
-			TheShaderManager->VolumetricData.z += rot.data[2][2] * offR - rot.data[2][1] * offD;
-			TheShaderManager->VolumetricData.w = Beam->Settings.FirstPersonStrength;
-		}
-	}
-	else {
-		TheShaderManager->SpotLightPosition[0] = Empty;
-		TheShaderManager->SpotLightDirection[0] = Empty;
-		TheShaderManager->SpotLightColor[0] = Empty;
-		TheShaderManager->VolumetricData = Empty;
 	}
 
 	std::map<int, ShadowSceneLight*>::iterator v = SceneLights.begin();

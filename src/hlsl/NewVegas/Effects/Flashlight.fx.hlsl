@@ -129,12 +129,19 @@ float4 Flashlight(VSOUT IN) : COLOR0
     float3 lightToWorld = lightpos - worldPos;
     float3 lightVector = normalize(lightToWorld);
 
-	// Soft edges use wrap lighting instead of a clamped N.L. The normals here are
+	// Soft edges blend the clamped N.L towards wrap lighting. The normals here are
 	// reconstructed from depth, which is near-random across alpha tested foliage, and a
-	// clamped N.L turns that into hard speckle with a lot of exact zeros. Wrapping halves
-	// the spread and removes the zeros, at the cost of a flatter looking beam.
+	// clamped N.L turns that into hard speckle with a lot of exact zeros. Wrapping removes
+	// the zeros and compresses the spread.
+	//
+	// The wrap term is squared. A plain (N.L * 0.5 + 0.5) reads 0.5 on a surface edge on to
+	// the light where the clamped term reads 0, which roughly doubles the average and makes
+	// the beam visibly brighter as soon as the option is used. Squaring holds the response
+	// at 1 for a surface facing the light, so the lit pool keeps the brightness the dimmer
+	// asks for and only the grazing angles are lifted.
     float ndl = dot(lightVector, normal);
-    float diffuse = (FL_SOFTEDGE > 0.5) ? saturate(ndl * 0.5 + 0.5) : max(ndl, 0.0);
+    float softDiffuse = sqr(saturate(ndl * 0.5 + 0.5));
+    float diffuse = lerp(max(ndl, 0.0), softDiffuse, saturate(FL_SOFTEDGE));
     float specular = pows(shades(normalize(eyeDirection + lightVector * -1), normal), 5);
 
 	// radius based attenuation based on https://lisyarus.github.io/blog/graphics/2022/07/30/point-light-attenuation.html

@@ -36,7 +36,7 @@ void FlashlightEffect::UpdateSettings() {
 	Settings.NearFade = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "NearFade");
 	Settings.HotspotLimit = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "HotspotLimit");
 	Settings.CookieStrength = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "CookieStrength");
-	Settings.softEdges = TheSettingManager->GetSettingI("Shaders.Flashlight.Main", "SoftEdges");
+	Settings.softEdges = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "SoftEdges");
 
 	Settings.MaterialLight.Enabled = TheSettingManager->GetSettingI("Shaders.Flashlight.MaterialLight", "Enabled");
 	Settings.MaterialLight.Intensity = TheSettingManager->GetSettingF("Shaders.Flashlight.MaterialLight", "Intensity");
@@ -54,7 +54,7 @@ void FlashlightEffect::UpdateSettings() {
 
 	// These come purely from settings, so they are published here rather than in
 	// UpdateConstants - PointShadows reads the spot size even when the flashlight is off
-	Constants.Tuning = D3DXVECTOR4(Settings.SpotSize, Settings.Intensity, Settings.NearFade, Settings.softEdges ? 1.0f : 0.0f);
+	Constants.Tuning = D3DXVECTOR4(Settings.SpotSize, Settings.Intensity, Settings.NearFade, Settings.softEdges);
 	Constants.Hotspot = D3DXVECTOR4(Settings.HotspotLimit, Settings.CookieStrength, sourceIsLinear, 0.0f);
 
 	if (!SpotLight)
@@ -74,6 +74,7 @@ void FlashlightEffect::UpdateConstants() {
 		SpotLight->Dimmer = 0;
 		SpotLight->Spec = NiColor(0, 0, 0);
 		SpotLight->CastShadows = false;
+		PublishLightConstants(false);
 		return;
 	}
 
@@ -168,7 +169,54 @@ void FlashlightEffect::UpdateConstants() {
 	Constants.Color = D3DXVECTOR4(Settings.Color.r, Settings.Color.g, Settings.Color.b, Settings.Dimmer);
 
 	GetFlashlightViewProj();
+	PublishLightConstants(true);
 };
+
+// The shared TESR_SpotLight* constants are published here rather than by the caller,
+// because UpdateConstants runs more than once per frame - at frame start, again from
+// GetNearbyLights during the shadow pass, and again after the world render. Each call
+// re-reads the weapon bone. Publishing from the caller left the cone constants holding an
+// earlier read than TESR_FlashLightViewProjTransform, so the projected cookie tracked a
+// different snapshot than the cone it is projected into and slid against the beam as the
+// weapon moved. Writing both from the same read removes that by construction.
+void FlashlightEffect::PublishLightConstants(bool abActive) {
+	if (!abActive) {
+		D3DXVECTOR4 Empty = D3DXVECTOR4(0, 0, 0, 0);
+		TheShaderManager->SpotLightPosition[0] = Empty;
+		TheShaderManager->SpotLightDirection[0] = Empty;
+		TheShaderManager->SpotLightColor[0] = Empty;
+		TheShaderManager->VolumetricData = Empty;
+		return;
+	}
+
+	TheShaderManager->SpotLightPosition[0] = SpotLight->m_worldTransform.pos.toD3DXVEC4();
+	TheShaderManager->SpotLightPosition[0].w = SpotLight->Spec.r; // radius
+	TheShaderManager->SpotLightDirection[0] = D3DXVECTOR4(
+		SpotLight->m_worldTransform.rot.data[0][0],
+		SpotLight->m_worldTransform.rot.data[1][0],
+		SpotLight->m_worldTransform.rot.data[2][0],
+		SpotLight->OuterSpotAngle); // outside angle of the light cone
+	TheShaderManager->SpotLightColor[0] = D3DXVECTOR4(SpotLight->Diff.r, SpotLight->Diff.g, SpotLight->Diff.b, SpotLight->Dimmer);
+
+	// The beam march needs parallax to produce a visible shaft. In first person the light
+	// sits on the camera, so every view ray runs down the beam and there is nothing to see;
+	// give the march a virtual origin pushed right and down in camera space while the
+	// surface pool and the cookie keep the true position. w carries the first person
+	// strength floor, which also blends the cookie flat in the march so the parallax
+	// mismatch between the two positions does not show.
+	FlashlightBeamEffect* Beam = TheShaderManager->Effects.FlashlightBeam;
+	TheShaderManager->VolumetricData = TheShaderManager->SpotLightPosition[0];
+	TheShaderManager->VolumetricData.w = 0.0f;
+	if (Beam && Player && !Player->isThirdPerson && WorldSceneGraph && WorldSceneGraph->camera) {
+		NiMatrix33& rot = WorldSceneGraph->camera->m_worldTransform.rot;
+		float offR = Beam->Settings.FirstPersonOffsetRight;
+		float offD = Beam->Settings.FirstPersonOffsetDown;
+		TheShaderManager->VolumetricData.x += rot.data[0][2] * offR - rot.data[0][1] * offD;
+		TheShaderManager->VolumetricData.y += rot.data[1][2] * offR - rot.data[1][1] * offD;
+		TheShaderManager->VolumetricData.z += rot.data[2][2] * offR - rot.data[2][1] * offD;
+		TheShaderManager->VolumetricData.w = Beam->Settings.FirstPersonStrength;
+	}
+}
 
 bool FlashlightEffect::ShouldRender() { return SpotLight && spotLightActive; };
 
