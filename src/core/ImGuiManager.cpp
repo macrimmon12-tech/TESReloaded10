@@ -1114,6 +1114,15 @@ static bool ShouldHideKey(const char* key) {
 	return false;
 }
 
+// Settings whose read path is commented out in the C++ (dead code) but that
+// still exist in the TOML for compatibility. Greyed out rather than hidden
+// so the keys stay visible/editable-in-file, or removed outright, instead of
+// silently doing nothing behind a live-looking widget.
+static bool IsInertSetting(const char* section, const char* key) {
+	if (strcmp(section, "Shaders.ShadowsExteriors.ShadowMaps") != 0) return false;
+	return strcmp(key, "Mipmaps") == 0 || strcmp(key, "Anisotropy") == 0;
+}
+
 static const struct { int dik; const char* name; } kDIKTable[] = {
 	{ 0x01, "Escape" },
 	{ 0x02, "1" }, { 0x03, "2" }, { 0x04, "3" }, { 0x05, "4" }, { 0x06, "5" },
@@ -1403,6 +1412,9 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 	};
 
+	bool inert = IsInertSetting(node.Section, node.Key);
+	if (inert) ImGui::BeginDisabled();
+
 	switch (node.Type) {
 	case NodeType::Boolean: {
 		bool val = (strcmp(node.Value, "1") == 0 || _stricmp(node.Value, "true") == 0);
@@ -1410,6 +1422,9 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
+		if (inert && ImGui::IsItemHovered())
+			ImGui::SetTooltip("Disabled: has no effect. Mipmaps/anisotropy are commented out in "
+				"ShadowsExterior.cpp (deferred shadows produce artifacted derivatives).");
 		RevertBtn();
 		break;
 	}
@@ -1440,6 +1455,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			}
 		}
 		RevertBtn();
+		if (inert) ImGui::EndDisabled();
 		if (hovered && !node.Description.empty()) {
 			ImGui::BeginTooltip();
 			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
@@ -1472,6 +1488,9 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 		} else {
 			if (ImGui::DragInt(node.Key, &newVal, 1.0f)) {}
 		}
+		if (inert && ImGui::IsItemHovered())
+			ImGui::SetTooltip("Disabled: has no effect. Mipmaps/anisotropy are commented out in "
+				"ShadowsExterior.cpp (deferred shadows produce artifacted derivatives).");
 		if (newVal != val) {
 			TheSettingManager->SetSetting(node.Section, node.Key, newVal);
 			TheSettingManager->LoadSettings();
@@ -1502,6 +1521,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			RenderDIKPopup();
 		}
 		RevertBtn();
+		if (inert) ImGui::EndDisabled();
 		if (hovered && !node.Description.empty()) {
 			ImGui::BeginTooltip();
 			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
@@ -1513,6 +1533,8 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 		return;
 	}
 	}
+
+	if (inert) ImGui::EndDisabled();
 
 	if (ImGui::IsItemHovered() && !node.Description.empty()) {
 		ImGui::BeginTooltip();
