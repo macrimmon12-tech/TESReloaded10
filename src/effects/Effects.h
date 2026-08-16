@@ -14,6 +14,7 @@
 #include "Exposure.h"
 #include "Debug.h"
 #include "Flashlight.h"
+#include "FlashlightBeam.h"
 #include "GodRays.h"
 #include "ImageAdjust.h"
 #include "Lens.h"

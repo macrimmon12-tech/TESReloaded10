@@ -9,6 +9,7 @@ float4 TESR_DebugVar;
 float4 TESR_ReciprocalResolution;
 float4 TESR_FlashLightTuning;	// x spot size, y intensity, z near fade, w soft edges
 float4 TESR_FlashLightHotspot;	// x hotspot limit, y cookie strength
+float4 TESR_VolumetricControl;	// x beam strength, 0 when the FlashlightBeam effect is off
 
 #define FL_SIZE				TESR_FlashLightTuning.x
 #define FL_INTENSITY		TESR_FlashLightTuning.y
@@ -25,6 +26,7 @@ sampler2D TESR_PointShadowBuffer : register(s3)  = sampler_state { ADDRESSU = CL
 sampler2D TESR_NormalsBuffer : register(s4) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_ShadowSpotlightBuffer0 : register(s5) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_SpotLightTexture : register(s6) < string ResourceName = "Effects\Flashlight.png"; > = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+sampler2D TESR_VolumetricBuffer : register(s7) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 
 
 struct VSOUT
@@ -220,6 +222,34 @@ float4 Combine (VSOUT IN) : COLOR0
 	float4 light = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 
 	float3 addLight = color.rgb * max(0.0, luma(exp(-color.rgb * 3.5)) * light.rgb) * FL_INTENSITY; // modulate light with base color brightness to compensate for the post process aspect
+
+	// In-air light shaft from the FlashlightBeam effect. Gated on the same value the march
+	// is gated on, so the half res buffer can never bleed in once the beam is switched off.
+	if (TESR_VolumetricControl.x > 0.0) {
+		// The s7 sampler is bilinear, so this upsamples the half res buffer for free
+		float3 vol = tex2D(TESR_VolumetricBuffer, IN.UVCoord).rgb;
+
+		// The shaft yields wherever this pixel's surface is already inside the beam. That
+		// surface gets the lit pool, and stacking the air glow on top of it just reads as a
+		// hotter cast. The test is geometric - the cone and attenuation evaluated at the
+		// surface - so the pool keeps its normal brightness at any shaft strength, while
+		// surfaces outside the beam still get the full shaft in front of them.
+		float3 surfPos = TESR_CameraPosition.xyz + toWorld(IN.UVCoord) * readDepth(IN.UVCoord);
+		float3 surfToL = TESR_SpotLightPosition.xyz - surfPos;
+		float  surfDist = length(surfToL);
+		float surfCone = pow(invlerps(
+			cos(radians(TESR_SpotLightDirection.w * FL_SIZE)),
+			cos(radians(TESR_SpotLightDirection.w * FL_SIZE * 0.5)),
+			shades(TESR_SpotLightDirection.xyz, -surfToL / max(surfDist, 0.001))), 2.0);
+		float sSurf = saturate(sqr(surfDist / TESR_SpotLightPosition.w));
+		float surfAtten = saturate(sqr(1.0 - sSurf) / (1.0 + 5.0 * sSurf));
+		vol *= 1.0 - 0.85 * saturate(surfCone * surfAtten * 4.0);
+
+		// Soft ceiling: a ray looking straight down the beam integrates the whole lit
+		// column and would otherwise fill the screen. Dim shafts pass nearly unchanged.
+		vol /= 1.0 + luma(vol) * 2.5;
+		addLight += vol;
+	}
 
 	// Reinhard style roll off on the added light only, so the centre of the pool stops
 	// short of clipping without dimming the falloff around it

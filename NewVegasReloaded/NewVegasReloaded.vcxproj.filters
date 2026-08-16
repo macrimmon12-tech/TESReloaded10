@@ -304,6 +304,9 @@
     <ClInclude Include="..\src\effects\Flashlight.h">
       <Filter>Effects</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\effects\FlashlightBeam.h">
+      <Filter>Effects</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\effects\PBR.h">
       <Filter>Effects</Filter>
     </ClInclude>
@@ -532,6 +535,9 @@
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\Flashlight.cpp">
+      <Filter>Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\effects\FlashlightBeam.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\PBR.cpp">
