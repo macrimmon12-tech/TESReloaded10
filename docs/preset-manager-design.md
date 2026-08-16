@@ -237,9 +237,13 @@ buffering. Mirroring each formatted message into a small capped ring buffer
 `imgui_demo.cpp`) alongside the existing file write gets a live, scrollable
 in-game log for free — and since it hooks `Logger::Log` itself rather than
 tailing the log file back off disk, it captures everything logged anywhere in
-the codebase, not just preset-manager activity, with an `ImGuiTextFilter` box to
-narrow it down. Fits naturally in the same **NVR Dev Tools** panel as the
-relocated Cell/Worldspace picker above, as a general utility rather than
+the codebase, not just preset-manager activity. Two ways to narrow it down,
+both included: a free-text `ImGuiTextFilter` box for general use, plus a
+**"Preset only" checkbox** for the common case. The checkbox requires every
+preset-manager log call to carry a consistent tag (e.g. a `[Preset]` prefix) to
+filter against — settling the earlier open question: yes, a tagging convention
+is needed, not just optional. Fits naturally in the same **NVR Dev Tools** panel
+as the relocated Cell/Worldspace picker above, as a general utility rather than
 something preset-manager-specific.
 
 Cartographer's hot-reload-key idea (re-read all keyword/preset files and
@@ -304,6 +308,15 @@ and this needs to stay visibly obvious. Walking to a different location without
 saving silently discards the preview and returns to normal resolution; no
 additional warning beyond the Load confirmation itself.
 
+**Reload current preset** — a separate button, always available, distinct from
+the Load browser below: re-reads *the file backing whichever tier is actually
+resolved right now* from disk and re-applies it, discarding any live unsaved
+edits (including an in-progress preview from Load, if one is active) in favor of
+what's actually saved on disk. Exists for the case where the file itself was
+just hand-edited externally — e.g. testing a change made directly in a text
+editor without leaving the game. Same "you'll lose unsaved changes" risk as
+Load, so it gets the same OK/Cancel treatment.
+
 ## In-game UI — Preset browser / Load
 
 A persistent, always-visible list of every existing **Default**, **Keyword**, and
@@ -332,9 +345,9 @@ plus the **Save Variant** authoring flow described above.
 
 ## Open items to resolve during implementation
 
-- Exact wiring for the hot-reload key (which console command triggers it, and
-  confirming re-applying the current selection after a reload doesn't fight with
-  an in-progress Load preview).
-- Whether the in-game log window needs a tagging convention (e.g. a `[Preset]`
-  prefix) so its filter box can isolate preset-manager activity specifically, or
-  whether free-text filtering against existing `Logger::Log` messages is enough.
+- Exact wiring for the global hot-reload key (which console command triggers
+  it, and confirming a full reload doesn't fight with an in-progress Load
+  preview) — distinct from the scoped "Reload current preset" button, which
+  only re-reads the one file currently resolved rather than rescanning
+  keyword/preset directories for structural changes (new files, cells moved
+  between keyword sections).
