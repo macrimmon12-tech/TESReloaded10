@@ -1250,28 +1250,37 @@ static void RenderColorTriple(
 	if (!colorDirty) ImGui::EndDisabled();
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 
-	// R field rendered here (G and B are rendered by the outer loop before detection fires)
 	bool changed = false;
-	{
-		float rawR = cs.col[0] * cs.scale;
-		bool rChanged = ImGui::DragFloat(nodeR.Key, &rawR, 0.001f, 0.0f, 0.0f, "%.4f");
-		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
-			rawR += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
-			rChanged = true;
-		}
-		ImGui::SameLine();
-		if (ImGui::SmallButton("-##r")) { rawR -= s_shaderStepSize; rChanged = true; }
-		ImGui::SameLine();
-		if (ImGui::SmallButton("+##r")) { rawR += s_shaderStepSize; rChanged = true; }
-		if (rChanged && cs.scale > 0.0f) {
-			cs.col[0] = rawR / cs.scale;
-			changed = true;
-		}
-	}
 
 	if (ImGui::ColorPicker3("##col", cs.col,
 		ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoSidePreview))
 		changed = true;
+
+	// R/G/B as a single horizontal row below the wheel, one field per third
+	// of the available width, each labeled with a plain "R"/"G"/"B" prefix.
+	{
+		float fieldW = ImGui::GetContentRegionAvail().x / 3.0f;
+		auto channel = [&](const char* label, const char* id, int idx) {
+			float raw = cs.col[idx] * cs.scale;
+			ImGui::Text("%s", label);
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(fieldW);
+			bool chg = ImGui::DragFloat(id, &raw, 0.001f, 0.0f, 0.0f, "%.4f");
+			if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
+				raw += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
+				chg = true;
+			}
+			if (chg && cs.scale > 0.0f) {
+				cs.col[idx] = raw / cs.scale;
+				changed = true;
+			}
+		};
+		channel("R", "##r", 0);
+		ImGui::SameLine();
+		channel("G", "##g", 1);
+		ImGui::SameLine();
+		channel("B", "##b", 2);
+	}
 
 	ImGui::Text("Intensity");
 	ImGui::SameLine();
@@ -1558,15 +1567,20 @@ static void RenderContent() {
 		}
 
 		// RGB triple → color picker (shader sections only)
-		if (isShader && key.size() > 1 && key.back() == 'R') {
+		// Settings iterate alphabetically (B, G, R), so detection must fire on
+		// whichever channel is encountered first, not just 'R' — otherwise B
+		// and G render as stray individual rows before R ever triggers this.
+		if (isShader && key.size() > 1 &&
+			(key.back() == 'R' || key.back() == 'G' || key.back() == 'B')) {
 			std::string pfx = key.substr(0, key.size() - 1);
-			std::string kG = pfx + "G", kB = pfx + "B";
+			std::string kR = pfx + "R", kG = pfx + "G", kB = pfx + "B";
 			bool isColorCurve = (pfx == "ColorCurve" && strstr(s.Section, "Shaders.Coloring") != nullptr);
-			if (!isColorCurve && keyIdx.count(kG) && keyIdx.count(kB)) {
-				handled.insert(key);
+			if (!isColorCurve && keyIdx.count(kR) && keyIdx.count(kG) && keyIdx.count(kB) &&
+				!handled.count(kR)) {
+				handled.insert(kR);
 				handled.insert(kG);
 				handled.insert(kB);
-				RenderColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
+				RenderColorTriple(settings[keyIdx[kR]], settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
 				continue;
 			}
 		}
