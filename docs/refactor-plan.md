@@ -43,25 +43,32 @@ Note: this texture is a debug-only occlusion map visualization and is never play
 
 The overlay currently applies only `StyleColorsDark()` and three rounding values. A proper NVR-specific theme should be applied — colors, spacing, padding, and font configuration — to give the overlay a consistent identity rather than stock Dear ImGui dark.
 
+**Workflow:** Theme is authored in [ImThemes](https://github.com/Patitotective/ImThemes) and exported as a C++ `ImGui::GetStyle()` block. Paste the exported code into the session and the implementation session will slot it in, replacing the existing style setup.
+
 **Scope:**
-- Custom color palette (window background, headers, accent color, widget fills)
-- Consistent padding and item spacing
-- Font size / scale configuration
-- Window title bar and border styling
+- Replace `StyleColorsDark()` call and the three rounding values with the ImThemes-exported style block
+- Preserve the existing `FontGlobalScale` / `TextSize` restore logic — do not overwrite scale
+- No other changes needed; style setup is self-contained
 
 This is self-contained and has no dependencies.
 
 ---
 
-## UI-1 — Color Picker Label Bug
+## UI-1 — Color Picker Layout Rework
 
-**File:** `src/core/ImGuiManager.cpp`, `RenderColorTriple()` (~line 1168)
+**File:** `src/core/ImGuiManager.cpp`, `RenderColorTriple()` (~line 1099)
 
-The R channel `DragFloat` is rendered on the same line as the section label and revert `~` button because the `DragFloat` call uses `nodeR.Key` (no `##` prefix) as its ID, causing ImGui to render the key name as a visible label to the right of the slider — while the cursor is still on the header row from the preceding `TextUnformatted` + `SameLine`. The G and B rows each start on their own lines (rendered by the outer loop), making R visually wrong.
+Two problems to fix together:
+
+**Bug — R label on wrong line:** The R channel `DragFloat` uses `nodeR.Key` (no `##` prefix) as its ImGui ID, causing the key name to render as a visible label inline on the header row (alongside the section label and revert `~` button). G and B render on their own lines via the outer loop, making R visually inconsistent.
+
+**Layout — horizontal R/G/B value boxes:** The three channel inputs should be displayed as a compact horizontal row of numeric fields, matching ReShade's color picker layout. Currently R, G, B are stacked vertically as separate `DragFloat` rows. The target is all three inline on one row — `R [ 0.800 ]  G [ 0.600 ]  B [ 0.400 ]` — with the color wheel above.
 
 **Fix:**
-- Use `"##r"` as the DragFloat ID for the R field to suppress the visible label
-- Insert `ImGui::NewLine()` or remove the lingering `SameLine()` before the R drag widget so it starts on its own row, consistent with G and B
+- Replace the three separate vertical `DragFloat` calls with a single row using `SameLine()` between `##r`, `##g`, `##b` fields, each sized to one-third of available width
+- Use `##r` / `##g` / `##b` IDs throughout — no visible key-name labels on the input fields
+- Label each field with a short colored or plain prefix (`R`, `G`, `B`) via `Text()` + `SameLine()` before each input
+- Color wheel remains above the input row, unchanged
 
 ---
 
