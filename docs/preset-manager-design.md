@@ -148,6 +148,41 @@ locations.
    a fixed absolute override rather than something relative to the preset it was
    authored against.
 
+**Persisting which Variants are enabled**: which toggles are currently on is
+global-to-install state that needs to survive a restart, but it's the *only*
+thing in this whole system that isn't already derivable from "does a file
+exist" (see "Do we need a master file?" below). Rather than route it through
+`SettingManager`/the main NVR TOML — which would require adding a new entry to
+the shipped defaults TOML just to satisfy `FillNode`'s typed-accessor
+requirement, and would inherit the main settings system's explicit-Save-button
+persistence model — this gets its own small, dedicated file, independent of the
+main settings GUI entirely:
+
+```ini
+[EnabledVariants]
+Performance
+WarmTone
+```
+
+Read once at boot alongside the keyword files. Written immediately whenever a
+Variant checkbox is toggled in-game — not deferred to any "Save Settings"
+action, since this file has nothing to do with the main settings persistence
+lifecycle.
+
+### Do we need a master file?
+
+Considered and rejected, beyond the small file above. Everything else in this
+design is already self-describing from the filesystem: a cell's keyword
+membership lives in the keyword files; a preset existing at
+`<KeywordName>.ini` / `<CellEditorID>.ini` *is* the record that it's assigned;
+the catalog of what presets/variants exist is just a directory listing. A
+general-purpose master index tracking any of that separately would be a second
+source of truth that can drift from the actual files (delete a preset
+externally, now a master file has a stale reference to reconcile). Enabled-
+Variant state is the one genuine exception, since it's a user preference layered
+on top of the catalog rather than a fact recoverable from any file's existence
+— hence the small dedicated file above, scoped to exactly that and nothing more.
+
 ## Application mechanism
 
 Modeled on the existing `RevertToSnapshot()` pattern (`ImGuiManager.cpp:660`):
@@ -235,9 +270,8 @@ plus the **Save Variant** authoring flow described above.
   prototype's Cell/Worldspace tabs) is still wanted at all now that assignment is
   purely "stand here, click a button" — nothing in the current design requires
   browsing to a location you aren't at.
-- Exact folder layout for the four preset kinds + keyword files.
-- Whether Variant toggles should ever be scoped narrower than global — current
-  assumption is they're not.
+- Exact folder layout for the four preset kinds + keyword files + the enabled-
+  Variants file.
 - Carrying over Cartographer's debug-mode (console log of current preset/tier) and
   hot-reload-key ideas — both cheap, both reuse the existing `NVR*` console command
   surface.
