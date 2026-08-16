@@ -60,7 +60,7 @@ This is self-contained and has no dependencies.
 
 Three problems to fix together:
 
-**Bug 1 — Triple detection only fires on 'R' suffix:** The detection loop at ~line 1476 checks `key.back() == 'R'` only. Settings iterate alphabetically, so `EffectGammaB` and `EffectGammaG` reach `RenderSetting()` as plain vertical floats before `EffectGammaR` triggers the color picker. Result: B and G render as stray rows above the wheel; R is absorbed into the picker; ImGui's own built-in R/G/B display at the bottom of the wheel then shows the same values again — duplicated.
+**Bug 1 — Triple detection only fires on 'R' suffix:** The detection loop at ~line 1476 checks `key.back() == 'R'` only. Settings iterate alphabetically, so the `B` and `G` members of every triple reach `RenderSetting()` as plain vertical floats before the `R` member triggers the color picker. Result: B and G render as stray rows above the wheel; R is absorbed into the picker; ImGui's own built-in R/G/B display at the bottom of the wheel then shows the same values again — duplicated. This affects all 13 color triples in the codebase: `CoeffFog`, `CoeffNight`, `CoeffSun`, `Color`, `ColorCurve`, `DarkColor`, `EffectGamma`, `LightColor`, `PuddleCoeff_`, `Ray`, `SnowColor`, `Sunset`, `inExtCoeff_`. The single detection fix covers all of them.
 
 **Fix:** Fire detection on any of `'B'`, `'G'`, `'R'` suffix, use `!handled.count(kR)` as the render-once guard:
 ```cpp
