@@ -41,6 +41,13 @@ Also not needed: any engine-level cell/worldspace enumerator, or any runtime
 dependency on JIP LN NVSE / the KEYWORDS plugin. Everything location-related is
 driven entirely by our own keyword files, read and cached at boot.
 
+Also explicitly out of scope for the preset manager itself: a Cell/Worldspace
+browse-and-`coc`/`cow` picker (present in the original prototype's Cell/Worldspace
+tabs). Nothing in this design needs it — assignment is always done by physically
+standing in a location. It's a genuinely useful utility on its own merits, so it's
+being added to the existing **NVR Dev Tools** panel (`ImGuiManager.cpp:472`)
+instead, independent of and unrelated to presets.
+
 ## Deliberate departures from Cartographer
 
 - **No runtime merging between Default / Keyword / Override.** Cartographer
@@ -183,9 +190,70 @@ Variant state is the one genuine exception, since it's a user preference layered
 on top of the catalog rather than a fact recoverable from any file's existence
 — hence the small dedicated file above, scoped to exactly that and nothing more.
 
+## Folder layout
+
+Proposed, not load-bearing for anything else in this design — easy to adjust:
+
+```
+Data\NVR\
+  Keywords\                  membership files (section = keyword, cells listed under)
+    HonestHearts.ini
+    Freeside.ini
+  Presets\
+    Default\
+      DefaultInterior.ini
+      DefaultExterior.ini
+    Keyword\
+      HonestHeartsCave.ini
+      Casino.ini
+    Override\
+      Interior\
+        NVDLC02ZionLodge.ini
+      Exterior\
+        NVDLC02TheStrip.ini
+    Variant\
+      Performance.ini
+      WarmTone.ini
+  EnabledVariants.ini         not a preset — persisted UI state, kept out of Presets\
+```
+
+`Keywords\` (membership lists) is kept physically separate from `Presets\` (actual
+settings content) since they're different formats serving different purposes —
+avoids a directory scan for one ever mistaking a file from the other. Within
+`Presets\`, one subfolder per kind makes the four preset kinds trivially
+distinguishable by path alone: the "Preset browser/Load" UI's kind tag (Keyword
+grouped first) falls straight out of which subfolder a file came from, no separate
+bookkeeping needed. `Override\` splits Interior/Exterior since the two use
+different EditorID namespaces (cell vs. worldspace).
+
+## Debug/authoring tooling — in-game log window
+
+Cartographer's debug-mode idea (console log of current preset/tier on every
+switch) is better served here by an actual **in-game log window** rather than a
+toggle that dumps to the console. `Logger::Log()` (`src/base/Logger.cpp:145`)
+currently only writes straight to `LogFile` via `vfprintf_s` — no in-memory
+buffering. Mirroring each formatted message into a small capped ring buffer
+(`std::deque<std::string>`, same pattern as ImGui's own `ExampleAppLog` in
+`imgui_demo.cpp`) alongside the existing file write gets a live, scrollable
+in-game log for free — and since it hooks `Logger::Log` itself rather than
+tailing the log file back off disk, it captures everything logged anywhere in
+the codebase, not just preset-manager activity, with an `ImGuiTextFilter` box to
+narrow it down. Fits naturally in the same **NVR Dev Tools** panel as the
+relocated Cell/Worldspace picker above, as a general utility rather than
+something preset-manager-specific.
+
+Cartographer's hot-reload-key idea (re-read all keyword/preset files and
+re-apply the current selection live, without restarting) is still worth carrying
+over separately — cheap, reuses the existing `NVR*` console command surface, and
+would show up immediately in the log window above once that exists.
+
 ## Application mechanism
 
-Modeled on the existing `RevertToSnapshot()` pattern (`ImGuiManager.cpp:660`):
+Triggered once per actual cell transition — gated on
+`TheShaderManager->GameState.isCellChanged` (`ShaderManager.cpp:245`), an
+existing edge-triggered flag already set every frame in
+`ShaderManager::UpdateConstants()` by comparing `Player->parentCell` against a
+persisted `PreviousCell` member. No new cell-change hook needed.
 
 1. Resolve which single base preset wins (per "Resolution order" above) — its
    full contents become the target map directly. No merging with any other tier.
@@ -264,14 +332,9 @@ plus the **Save Variant** authoring flow described above.
 
 ## Open items to resolve during implementation
 
-- Cell-change hook call site — does something already observe `TES::currentCell`
-  transitions, or does this need a new one.
-- Whether a Cell/Worldspace browse/teleport convenience picker (from the original
-  prototype's Cell/Worldspace tabs) is still wanted at all now that assignment is
-  purely "stand here, click a button" — nothing in the current design requires
-  browsing to a location you aren't at.
-- Exact folder layout for the four preset kinds + keyword files + the enabled-
-  Variants file.
-- Carrying over Cartographer's debug-mode (console log of current preset/tier) and
-  hot-reload-key ideas — both cheap, both reuse the existing `NVR*` console command
-  surface.
+- Exact wiring for the hot-reload key (which console command triggers it, and
+  confirming re-applying the current selection after a reload doesn't fight with
+  an in-progress Load preview).
+- Whether the in-game log window needs a tagging convention (e.g. a `[Preset]`
+  prefix) so its filter box can isolate preset-manager activity specifically, or
+  whether free-text filtering against existing `Logger::Log` messages is enough.
