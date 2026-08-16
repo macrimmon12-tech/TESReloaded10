@@ -1259,7 +1259,20 @@ static void RenderColorTriple(
 
 	ImGui::PushID(prefix.c_str());
 
+	// Extra top margin + separator so each triple reads as a distinct
+	// section (e.g. DarkColor vs. LightColor in ImageAdjust), not a stray
+	// label floating above the picker. Label itself is enlarged and tinted
+	// with the theme's accent color so it clearly reads as a header for the
+	// wheel/RGB row/Intensity slider below rather than a broken element.
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.03137255f, 0.9490196f, 0.84313726f, 1.0f));
+	ImGui::SetWindowFontScale(1.2f);
 	ImGui::TextUnformatted(label.c_str());
+	ImGui::SetWindowFontScale(1.0f);
+	ImGui::PopStyleColor();
 	bool labelHovered = ImGui::IsItemHovered();
 	ImGui::SameLine();
 	if (!colorDirty) ImGui::BeginDisabled();
