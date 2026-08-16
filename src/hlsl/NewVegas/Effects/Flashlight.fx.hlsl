@@ -7,6 +7,15 @@ float4 TESR_SunColor;
 float4 TESR_SunDirection;
 float4 TESR_DebugVar;
 float4 TESR_ReciprocalResolution;
+float4 TESR_FlashLightTuning;	// x spot size, y intensity, z near fade, w soft edges
+float4 TESR_FlashLightHotspot;	// x hotspot limit, y cookie strength
+
+#define FL_SIZE				TESR_FlashLightTuning.x
+#define FL_INTENSITY		TESR_FlashLightTuning.y
+#define FL_NEARFADE			TESR_FlashLightTuning.z
+#define FL_SOFTEDGE			TESR_FlashLightTuning.w
+#define FL_HOTSPOTLIMIT		TESR_FlashLightHotspot.x
+#define FL_COOKIESTRENGTH	TESR_FlashLightHotspot.y
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -82,6 +91,26 @@ float4 NoShadow(VSOUT IN) : COLOR0
 	return float4(1, 1, 1, 1);
 }
 
+// Procedural rings and mottling layered over the projected cookie, so a bare wall
+// shows some structure in the beam instead of a flat disc. Fades to 1 at strength 0.
+float BeamBreakup(float2 uv)
+{
+	if (FL_COOKIESTRENGTH <= 0.001) return 1.0;
+
+	float2 p = uv - 0.5;
+	float r = saturate(length(p) * 2.0);
+
+	float warp = sin(uv.x * 17.0 + uv.y * 5.5) * 0.45 + sin(uv.x * -6.5 + uv.y * 19.0) * 0.35;
+	float rings = sin(r * 36.0 + warp) * 0.5 + 0.5;
+	float mottled = sin(uv.x * 41.0 + sin(uv.y * 13.0) * 2.2) * sin(uv.y * 29.0 + sin(uv.x * 11.0) * 1.7);
+	mottled = mottled * 0.5 + 0.5;
+
+	float edge = smoothstep(0.25, 0.95, r);
+	float breakup = 1.0 + (rings - 0.5) * (0.10 + 0.14 * edge) + (mottled - 0.5) * 0.12;
+	breakup -= edge * (0.04 + 0.04 * mottled);
+	return lerp(1.0, saturate(breakup), saturate(FL_COOKIESTRENGTH));
+}
+
 float4 Flashlight(VSOUT IN) : COLOR0
 {
 	float depth = readDepth(IN.UVCoord);
@@ -97,7 +126,12 @@ float4 Flashlight(VSOUT IN) : COLOR0
     float3 lightToWorld = lightpos - worldPos;
     float3 lightVector = normalize(lightToWorld);
 
-    float diffuse = shade(lightVector, normal);
+	// Soft edges use wrap lighting instead of a clamped N.L. The normals here are
+	// reconstructed from depth, which is near-random across alpha tested foliage, and a
+	// clamped N.L turns that into hard speckle with a lot of exact zeros. Wrapping halves
+	// the spread and removes the zeros, at the cost of a flatter looking beam.
+    float ndl = dot(lightVector, normal);
+    float diffuse = (FL_SOFTEDGE > 0.5) ? saturate(ndl * 0.5 + 0.5) : max(ndl, 0.0);
     float specular = pows(shades(normalize(eyeDirection + lightVector * -1), normal), 5);
 
 	// radius based attenuation based on https://lisyarus.github.io/blog/graphics/2022/07/30/point-light-attenuation.html
@@ -109,16 +143,22 @@ float4 Flashlight(VSOUT IN) : COLOR0
 	float4 lightSpaceCoord = ScreenCoordToTexCoord(mul(float4(worldPos, 1), TESR_FlashLightViewProjTransform));
 	float isShadow = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 
-	float lightTexture = tex2D(TESR_SpotLightTexture, lightSpaceCoord.xy).r;
+	// Zoom the cookie about its centre so its dark edge stays on the cone cutoff as the
+	// spot size changes - the two have to move together or the beam grows a hard rim.
+	float2 cookieUV = (lightSpaceCoord.xy - 0.5) / max(0.05, FL_SIZE) + 0.5;
+	float lightTexture = tex2D(TESR_SpotLightTexture, cookieUV).r * BeamBreakup(cookieUV);
 
 	float sunLuma = 1 / max(0.05, luma(TESR_SunColor));
     float3 lightColor = TESR_SpotLightColor.rgb * TESR_SpotLightColor.w * sunLuma;
-	
-	float angleCosMax = cos(radians(TESR_SpotLightDirection.w));
-	float angleCosMin = cos(radians(TESR_SpotLightDirection.w * 0.5));
+
+	float angleCosMax = cos(radians(TESR_SpotLightDirection.w * FL_SIZE));
+	float angleCosMin = cos(radians(TESR_SpotLightDirection.w * FL_SIZE * 0.5));
 	float cone = pow(invlerps(angleCosMax, angleCosMin, shades(lightDir, lightVector * -1)), 2.0);
 
-    float3 light = (diffuse + specular) * lightColor * cone * atten * lightTexture * isShadow;
+	// Ramp the pool down point blank so a wall a foot away doesn't clip to white
+	float nearFade = (FL_NEARFADE > 0.0) ? smoothstep(0.0, FL_NEARFADE, length(lightToWorld)) : 1.0;
+
+    float3 light = (diffuse + specular) * lightColor * cone * atten * lightTexture * isShadow * nearFade;
 
 
 	// if (lightSpaceCoord.x > 0.0 && lightSpaceCoord.x < 1.0 && lightSpaceCoord.y > 0.0 && lightSpaceCoord.y < 1.0) return float4(light.xxx, 1);
@@ -170,7 +210,16 @@ float4 Combine (VSOUT IN) : COLOR0
 	float4 color = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
 	float4 light = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 
-	color.rgb += color.rgb * max(0.0, luma(exp(-color.rgb * 3.5)) * light.rgb); // modulate light with base color brightness to compensate for the post process aspect
+	float3 addLight = color.rgb * max(0.0, luma(exp(-color.rgb * 3.5)) * light.rgb) * FL_INTENSITY; // modulate light with base color brightness to compensate for the post process aspect
+
+	// Reinhard style roll off on the added light only, so the centre of the pool stops
+	// short of clipping without dimming the falloff around it
+	if (FL_HOTSPOTLIMIT > 0.0) {
+		float limit = 1.0 / FL_HOTSPOTLIMIT;
+		addLight *= limit / max(limit, luma(addLight));
+	}
+
+	color.rgb += addLight;
 
     return delinearize(color);
 }

@@ -323,6 +323,12 @@ OffsetY = 0.0                          # Y coordinate offset for the position of
 OffsetZ = 0.0                          # Z coordinate offset for the position of the light relative to the weapon position
 RenderShadows = false                  # Wether to use rendered shadows in the flashlight cone
 AttachToWeapon = true                  # The flashlight will move with the weapon instead of being fixed to the camera
+SpotSize = 1.0                         # Scales the width of the cone and the projected texture together. Below 1 tightens the beam
+Intensity = 1.0                        # Overall strength of the light added to the scene
+NearFade = 0.0                         # Fades the light out on surfaces closer than this many units, so point blank walls don't clip to white. 0 disables
+HotspotLimit = 0.0                     # Rolls off the brightest part of the lit pool without dimming the falloff around it. 0 disables
+CookieStrength = 0.0                   # Procedural rings and mottling in the beam, for structure on flat surfaces. 0 disables
+SoftEdges = false                      # Wrap lighting instead of clamped diffuse. Softens the harsh speckled rim the reconstructed normals produce on foliage
 
 [_Shaders.Flashlight.Status]
 Enabled = false                         # Replace the pipboy light with a post process flashlight attached to the weapon

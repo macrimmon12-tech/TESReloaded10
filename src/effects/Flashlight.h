@@ -16,6 +16,12 @@ public:
 		bool		renderShadows;
 		NiPoint3	Offset;
 		bool		attachToWeapon;
+		float		SpotSize;
+		float		Intensity;
+		float		NearFade;
+		float		HotspotLimit;
+		float		CookieStrength;
+		bool		softEdges;
 	};
 	FlashlightSettingsStruct	Settings;
 
@@ -24,6 +30,8 @@ public:
 		D3DXVECTOR4	Position;
 		D3DXVECTOR4	Direction;
 		D3DXVECTOR4	Color;
+		D3DXVECTOR4	Tuning;		// x spot size, y intensity, z near fade, w soft edges
+		D3DXVECTOR4	Hotspot;	// x hotspot limit, y cookie strength, z source buffer is linear
 	};
 	FlashlightStruct	Constants;
 

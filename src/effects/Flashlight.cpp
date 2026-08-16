@@ -6,6 +6,8 @@ void FlashlightEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_FlashLightPosition", &Constants.Position);
 	TheShaderManager->RegisterConstant("TESR_FlashLightDirection", &Constants.Direction);
 	TheShaderManager->RegisterConstant("TESR_FlashLightColor", &Constants.Color);
+	TheShaderManager->RegisterConstant("TESR_FlashLightTuning", &Constants.Tuning);
+	TheShaderManager->RegisterConstant("TESR_FlashLightHotspot", &Constants.Hotspot);
 };
 
 void FlashlightEffect::UpdateSettings() {
@@ -28,6 +30,18 @@ void FlashlightEffect::UpdateSettings() {
 	Settings.Dimmer = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "Dimmer");
 	Settings.ConeAngle = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "Angle");
 	Settings.Distance = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "Distance");
+
+	Settings.SpotSize = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "SpotSize");
+	Settings.Intensity = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "Intensity");
+	Settings.NearFade = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "NearFade");
+	Settings.HotspotLimit = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "HotspotLimit");
+	Settings.CookieStrength = TheSettingManager->GetSettingF("Shaders.Flashlight.Main", "CookieStrength");
+	Settings.softEdges = TheSettingManager->GetSettingI("Shaders.Flashlight.Main", "SoftEdges");
+
+	// These come purely from settings, so they are published here rather than in
+	// UpdateConstants - PointShadows reads the spot size even when the flashlight is off
+	Constants.Tuning = D3DXVECTOR4(Settings.SpotSize, Settings.Intensity, Settings.NearFade, Settings.softEdges ? 1.0f : 0.0f);
+	Constants.Hotspot = D3DXVECTOR4(Settings.HotspotLimit, Settings.CookieStrength, 0.0f, 0.0f);
 
 	if (!SpotLight)
 		SpotLight = NiSpotLight::CreateObject();
