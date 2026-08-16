@@ -736,7 +736,20 @@ namespace MaterialPass {
 		D3DXVec3Normalize((D3DXVECTOR3*)&lightDir, (D3DXVECTOR3*)&lightDir);
 		lightDir.w = TheShaderManager->SpotLightDirection[0].w;
 
+		// Fold the light's own dimmer and the night boost into the colour, exactly as the
+		// screen space pass does, so this pass tracks the flashlight instead of having to be
+		// re-balanced against it every time the dimmer moves or the sun goes down. The
+		// dimmer belongs in rgb rather than w because w only reaches the diffuse term -
+		// the specular term reads rgb alone. MaterialLight Intensity stays in w, where it
+		// is the diffuse strength of this pass alone, matching Specular for the highlight.
+		const D3DXVECTOR4& sun = TheShaderManager->ShaderConst.sunColor;
+		float sunLuma = 1.0f / max(0.05f, sun.x * 0.2126f + sun.y * 0.7152f + sun.z * 0.0722f);
+		float scale = TheShaderManager->SpotLightColor[0].w * sunLuma;
+
 		D3DXVECTOR4 lightColor = TheShaderManager->SpotLightColor[0];
+		lightColor.x *= scale;
+		lightColor.y *= scale;
+		lightColor.z *= scale;
 		lightColor.w = FL().MaterialLight.Intensity;
 		D3DXVECTOR4 tuning(FL().NearFade, (float)FL().MaterialLight.DebugMode, 0.0f, 0.0f);
 
