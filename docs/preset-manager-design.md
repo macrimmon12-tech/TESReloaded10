@@ -181,6 +181,53 @@ each row's kind — classified by name lookup against the two reserved Default
 names and the cached keyword set (see "Folder layout" below) — actual content
 is read on demand only once something is selected and loaded.
 
+**Save captures the full eligible-settings state, deliberately, not a diff.**
+Every Save writes a value for every non-blacklisted setting, not just ones the
+author changed. This trades away automatically inheriting future default
+improvements for a stronger guarantee: a preset file is always a complete,
+self-contained visual state, fully readable/portable on its own without also
+needing to know what NVR's defaults happened to be at save time. The forward-
+compatibility cost this creates for *new* settings introduced by a later NVR
+update — a preset predating a new setting has no opinion on it at all — is
+addressed explicitly, not implicitly (see "Refresh all presets" below), rather
+than papered over with a silent runtime fallback that would make a preset's
+actual behavior diverge from what its file shows.
+
+## Refresh all presets
+
+Batch maintenance action — keeps every preset file honestly complete as NVR
+evolves (new shaders, new settings) over time, without ever making a preset's
+*behavior* diverge from what its *file* actually contains (no implicit
+apply-time fallback for missing keys — "Application mechanism" below stays
+exactly as specified, reading only what a preset's file explicitly contains).
+
+For every Default/Keyword/Override preset file in `Presets\` (Variants
+excluded — they're deliberately diffs, not complete snapshots, so this
+doesn't apply to them):
+
+1. Compute the eligible-settings universe from the current `defaults.toml`
+   (everything, minus the blacklisted sections above).
+2. For each eligible key the file doesn't already have, add it with the
+   *current* default value.
+3. Leave every key the file already has completely untouched — never
+   overwrites an existing customization, even if its shipped default has
+   changed since. Same accepted tradeoff as above: a preset only inherits an
+   updated default for settings it never had an opinion on.
+4. **No pruning.** A key that no longer corresponds to any current NVR
+   setting is left in place, not removed — deliberately, for back-compat. A
+   preset file might be shared across NVR versions, or a removed setting
+   could return under the same name later; a stale entry costs nothing to
+   keep, since `SetSettingF`/`SetSettingS` already silently ignores any key
+   that doesn't exist in the current defaults.
+5. Write the file back, and log a summary — which files were touched, exactly
+   which keys were added to each and their backfilled values — tagged for the
+   "Preset only" log filter (see "Debug/authoring tooling" below).
+
+Lives in the **NVR Dev Tools** panel — a global, infrequent action, not tied
+to the player's current location — with a confirmation warning stating how
+many files will be touched before running, the same graduated-warning
+pattern as Save to Default/Save to Keyword.
+
 ## Variants
 
 Up to 5, independently toggleable via checkbox, **end-user facing** — a preset
