@@ -658,11 +658,24 @@ static void SetOverlayVisible(bool visible) {
 
 // Restore all snapshotted values and sync shader states.
 static void RevertToSnapshot() {
-	for (auto& [section, keys] : s_snapshot)
-		for (auto& [key, value] : keys)
+	LUTEffect* lut = TheShaderManager->Effects.LUT;
+	for (auto& [section, keys] : s_snapshot) {
+		for (auto& [key, value] : keys) {
+			// LUT filenames need the texture/index reloaded at runtime, not just
+			// the TOML value rewritten -- LUTEffect::UpdateSettings() never
+			// re-reads DayLUT/NightLUT/InteriorLUT, so a plain SetSettingS would
+			// revert the config but leave the picker/texture showing the stale pick.
+			if (lut && section == "Shaders.LUT.Main" &&
+				(key == "DayLUT" || key == "NightLUT" || key == "InteriorLUT")) {
+				int slot = (key == "DayLUT") ? 0 : (key == "NightLUT") ? 1 : 2;
+				lut->LoadLUT(slot, value.c_str());
+				continue;
+			}
 			TheSettingManager->SetSettingS(const_cast<char*>(section.c_str()),
 			                               const_cast<char*>(key.c_str()),
 			                               const_cast<char*>(value.c_str()));
+		}
+	}
 	TheSettingManager->LoadSettings();
 	// Sync shader enabled flags (same as RevertSettings does)
 	StringList shaders;
@@ -735,10 +748,95 @@ void ImGuiManager::Initialize() {
 		io.FontGlobalScale = (stored >= 50) ? (stored / 100.0f) : 1.0f;
 	}
 
-	ImGui::StyleColorsDark();
-	ImGui::GetStyle().WindowRounding    = 6.0f;
-	ImGui::GetStyle().FrameRounding     = 3.0f;
-	ImGui::GetStyle().ScrollbarRounding = 3.0f;
+	// Comfortable Dark Cyan style by SouthCraftX from ImThemes
+	{
+		ImGuiStyle& style = ImGui::GetStyle();
+
+		style.Alpha = 1.0f;
+		style.DisabledAlpha = 1.0f;
+		style.WindowPadding = ImVec2(20.0f, 20.0f);
+		style.WindowRounding = 11.5f;
+		style.WindowBorderSize = 0.0f;
+		style.WindowMinSize = ImVec2(20.0f, 20.0f);
+		style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+		style.WindowMenuButtonPosition = ImGuiDir_None;
+		style.ChildRounding = 20.0f;
+		style.ChildBorderSize = 1.0f;
+		style.PopupRounding = 17.4f;
+		style.PopupBorderSize = 1.0f;
+		style.FramePadding = ImVec2(20.0f, 3.4f);
+		style.FrameRounding = 11.9f;
+		style.FrameBorderSize = 0.0f;
+		style.ItemSpacing = ImVec2(8.9f, 13.4f);
+		style.ItemInnerSpacing = ImVec2(7.1f, 1.8f);
+		style.CellPadding = ImVec2(12.1f, 9.2f);
+		style.IndentSpacing = 0.0f;
+		style.ColumnsMinSpacing = 8.7f;
+		style.ScrollbarSize = 11.6f;
+		style.ScrollbarRounding = 15.9f;
+		style.GrabMinSize = 3.7f;
+		style.GrabRounding = 20.0f;
+		style.TabRounding = 9.8f;
+		style.TabBorderSize = 0.0f;
+		style.TabCloseButtonMinWidthUnselected = 0.0f;
+		style.ColorButtonPosition = ImGuiDir_Right;
+		style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+		style.SelectableTextAlign = ImVec2(0.0f, 0.0f);
+
+		style.Colors[ImGuiCol_Text] = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+		style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.27450982f, 0.31764707f, 0.4509804f, 1.0f);
+		style.Colors[ImGuiCol_WindowBg] = ImVec4(0.078431375f, 0.08627451f, 0.101960786f, 1.0f);
+		style.Colors[ImGuiCol_ChildBg] = ImVec4(0.09411765f, 0.101960786f, 0.11764706f, 1.0f);
+		style.Colors[ImGuiCol_PopupBg] = ImVec4(0.078431375f, 0.08627451f, 0.101960786f, 1.0f);
+		style.Colors[ImGuiCol_Border] = ImVec4(0.15686275f, 0.16862746f, 0.19215687f, 1.0f);
+		style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.078431375f, 0.08627451f, 0.101960786f, 1.0f);
+		style.Colors[ImGuiCol_FrameBg] = ImVec4(0.11372549f, 0.1254902f, 0.15294118f, 1.0f);
+		style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.15686275f, 0.16862746f, 0.19215687f, 1.0f);
+		style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.15686275f, 0.16862746f, 0.19215687f, 1.0f);
+		style.Colors[ImGuiCol_TitleBg] = ImVec4(0.047058824f, 0.05490196f, 0.07058824f, 1.0f);
+		style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.047058824f, 0.05490196f, 0.07058824f, 1.0f);
+		style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.078431375f, 0.08627451f, 0.101960786f, 1.0f);
+		style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.09803922f, 0.105882354f, 0.12156863f, 1.0f);
+		style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.047058824f, 0.05490196f, 0.07058824f, 1.0f);
+		style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.11764706f, 0.13333334f, 0.14901961f, 1.0f);
+		style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.15686275f, 0.16862746f, 0.19215687f, 1.0f);
+		style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.11764706f, 0.13333334f, 0.14901961f, 1.0f);
+		style.Colors[ImGuiCol_CheckMark] = ImVec4(0.03137255f, 0.9490196f, 0.84313726f, 1.0f);
+		style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.03137255f, 0.9490196f, 0.84313726f, 1.0f);
+		style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.6f, 0.9647059f, 0.03137255f, 1.0f);
+		style.Colors[ImGuiCol_Button] = ImVec4(0.11764706f, 0.13333334f, 0.14901961f, 1.0f);
+		style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.18039216f, 0.1882353f, 0.19607843f, 1.0f);
+		style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.15294118f, 0.15294118f, 0.15294118f, 1.0f);
+		style.Colors[ImGuiCol_Header] = ImVec4(0.14117648f, 0.16470589f, 0.20784314f, 1.0f);
+		style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.105882354f, 0.105882354f, 0.105882354f, 1.0f);
+		style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.078431375f, 0.08627451f, 0.101960786f, 1.0f);
+		style.Colors[ImGuiCol_Separator] = ImVec4(0.12941177f, 0.14901961f, 0.19215687f, 1.0f);
+		style.Colors[ImGuiCol_SeparatorHovered] = ImVec4(0.15686275f, 0.18431373f, 0.2509804f, 1.0f);
+		style.Colors[ImGuiCol_SeparatorActive] = ImVec4(0.15686275f, 0.18431373f, 0.2509804f, 1.0f);
+		style.Colors[ImGuiCol_ResizeGrip] = ImVec4(0.14509805f, 0.14509805f, 0.14509805f, 1.0f);
+		style.Colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.03137255f, 0.9490196f, 0.84313726f, 1.0f);
+		style.Colors[ImGuiCol_ResizeGripActive] = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+		style.Colors[ImGuiCol_Tab] = ImVec4(0.078431375f, 0.08627451f, 0.101960786f, 1.0f);
+		style.Colors[ImGuiCol_TabHovered] = ImVec4(0.11764706f, 0.13333334f, 0.14901961f, 1.0f);
+		style.Colors[ImGuiCol_TabActive] = ImVec4(0.11764706f, 0.13333334f, 0.14901961f, 1.0f);
+		style.Colors[ImGuiCol_TabUnfocused] = ImVec4(0.078431375f, 0.08627451f, 0.101960786f, 1.0f);
+		style.Colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.1254902f, 0.27450982f, 0.57254905f, 1.0f);
+		style.Colors[ImGuiCol_PlotLines] = ImVec4(0.52156866f, 0.6f, 0.7019608f, 1.0f);
+		style.Colors[ImGuiCol_PlotLinesHovered] = ImVec4(0.039215688f, 0.98039216f, 0.98039216f, 1.0f);
+		style.Colors[ImGuiCol_PlotHistogram] = ImVec4(0.03137255f, 0.9490196f, 0.84313726f, 1.0f);
+		style.Colors[ImGuiCol_PlotHistogramHovered] = ImVec4(0.15686275f, 0.18431373f, 0.2509804f, 1.0f);
+		style.Colors[ImGuiCol_TableHeaderBg] = ImVec4(0.047058824f, 0.05490196f, 0.07058824f, 1.0f);
+		style.Colors[ImGuiCol_TableBorderStrong] = ImVec4(0.047058824f, 0.05490196f, 0.07058824f, 1.0f);
+		style.Colors[ImGuiCol_TableBorderLight] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+		style.Colors[ImGuiCol_TableRowBg] = ImVec4(0.11764706f, 0.13333334f, 0.14901961f, 1.0f);
+		style.Colors[ImGuiCol_TableRowBgAlt] = ImVec4(0.09803922f, 0.105882354f, 0.12156863f, 1.0f);
+		style.Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.9372549f, 0.9372549f, 0.9372549f, 1.0f);
+		style.Colors[ImGuiCol_DragDropTarget] = ImVec4(0.49803922f, 0.5137255f, 1.0f, 1.0f);
+		style.Colors[ImGuiCol_NavHighlight] = ImVec4(0.26666668f, 0.2901961f, 1.0f, 1.0f);
+		style.Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(0.49803922f, 0.5137255f, 1.0f, 1.0f);
+		style.Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.19607843f, 0.1764706f, 0.54509807f, 0.5019608f);
+		style.Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.19607843f, 0.1764706f, 0.54509807f, 0.5019608f);
+	}
 
 	ImGui_ImplWin32_Init(hwnd);
 	ImGui_ImplDX9_Init(device);
@@ -1029,6 +1127,15 @@ static bool ShouldHideKey(const char* key) {
 	return false;
 }
 
+// Settings whose read path is commented out in the C++ (dead code) but that
+// still exist in the TOML for compatibility. Greyed out rather than hidden
+// so the keys stay visible/editable-in-file, or removed outright, instead of
+// silently doing nothing behind a live-looking widget.
+static bool IsInertSetting(const char* section, const char* key) {
+	if (strcmp(section, "Shaders.ShadowsExteriors.ShadowMaps") != 0) return false;
+	return strcmp(key, "Mipmaps") == 0 || strcmp(key, "Anisotropy") == 0;
+}
+
 static const struct { int dik; const char* name; } kDIKTable[] = {
 	{ 0x01, "Escape" },
 	{ 0x02, "1" }, { 0x03, "2" }, { 0x04, "3" }, { 0x05, "4" }, { 0x06, "5" },
@@ -1165,28 +1272,37 @@ static void RenderColorTriple(
 	if (!colorDirty) ImGui::EndDisabled();
 	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 
-	// R field rendered here (G and B are rendered by the outer loop before detection fires)
 	bool changed = false;
-	{
-		float rawR = cs.col[0] * cs.scale;
-		bool rChanged = ImGui::DragFloat(nodeR.Key, &rawR, 0.001f, 0.0f, 0.0f, "%.4f");
-		if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
-			rawR += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
-			rChanged = true;
-		}
-		ImGui::SameLine();
-		if (ImGui::SmallButton("-##r")) { rawR -= s_shaderStepSize; rChanged = true; }
-		ImGui::SameLine();
-		if (ImGui::SmallButton("+##r")) { rawR += s_shaderStepSize; rChanged = true; }
-		if (rChanged && cs.scale > 0.0f) {
-			cs.col[0] = rawR / cs.scale;
-			changed = true;
-		}
-	}
 
 	if (ImGui::ColorPicker3("##col", cs.col,
 		ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoSidePreview))
 		changed = true;
+
+	// R/G/B as a single horizontal row below the wheel, one field per third
+	// of the available width, each labeled with a plain "R"/"G"/"B" prefix.
+	{
+		float fieldW = ImGui::GetContentRegionAvail().x / 3.0f;
+		auto channel = [&](const char* label, const char* id, int idx) {
+			float raw = cs.col[idx] * cs.scale;
+			ImGui::Text("%s", label);
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(fieldW);
+			bool chg = ImGui::DragFloat(id, &raw, 0.001f, 0.0f, 0.0f, "%.4f");
+			if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed)) {
+				raw += s_plusPressed ? s_shaderStepSize : -s_shaderStepSize;
+				chg = true;
+			}
+			if (chg && cs.scale > 0.0f) {
+				cs.col[idx] = raw / cs.scale;
+				changed = true;
+			}
+		};
+		channel("R", "##r", 0);
+		ImGui::SameLine();
+		channel("G", "##g", 1);
+		ImGui::SameLine();
+		channel("B", "##b", 2);
+	}
 
 	ImGui::Text("Intensity");
 	ImGui::SameLine();
@@ -1216,6 +1332,75 @@ static void RenderColorTriple(
 	ImGui::PopID();
 }
 
+// Integer settings that are actually fixed enums render as labeled combos
+// instead of a bare DragInt. Keyed by "Section.Key" (the Key alone isn't
+// unique -- e.g. "Mode" means something different under Cinema, DepthOfField,
+// SleepingMode, and Shadows), so adding a new enum is one line here rather
+// than a new strcmp branch.
+struct EnumOptions { const char* const* Names; int Count; };
+
+static const char* kTonemappingModeNames[] = {
+	"0 - None (vanilla)", "1 - VTLottes", "2 - NVRLottes",
+	"3 - Reinhard", "4 - Reinhard Jodie", "5 - ACES Filmic",
+	"6 - ACES Fitted", "7 - Uncharted 2", "8 - Uchimura (GT)",
+	"9 - AGX", "10 - DICE",
+};
+// Cinema/DepthOfField Mode also accepts 3 and 4 in the C++ (Cinema.cpp /
+// DepthOfField.cpp), gating on isDialog/isPersuasion -- leftover from the
+// Oblivion codebase this was forked from. FNV has no Persuasion state, so
+// isPersuasion is always false there, which makes the Mode==3 branch's
+// condition always true: the effect is unconditionally disabled. Mode 4 is
+// degenerate for the same reason (redundant with 1/2, or permanently off
+// depending on effect) and isn't worth exposing, so the combo stops at the
+// one genuinely useful extra value: 3, labeled "Disabled".
+static const char* kCinemaDofModeNames[] = {
+	"0 - Always", "1 - Not during dialog", "2 - Only during dialog", "3 - Disabled",
+};
+static const char* kShadowsModeNames[] = {
+	"0 - VSM", "1 - EVSM2", "2 - EVSM4",
+};
+// SleepingMode.Mode has no TOML comment; values derived from
+// src/core/Hooks/SleepingCommon.cpp's ShowSleepWaitMenuHook.
+static const char* kSleepingModeNames[] = {
+	"0 - Always (Wait, Sit, Sleep)", "1 - Sleeping only",
+	"2 - Sitting only", "3 - Sitting & Sleeping",
+};
+static const char* kShadowQualityNames[] = {
+	"0 - Low", "1 - Medium", "2 - High", "3 - Full", "4 - Custom",
+};
+static const char* kShadowFormatNames[] = {
+	"0 - 16 bit", "1 - 32 bit",
+};
+static const char* kShadowCascadeResolutionNames[] = {
+	"0 - 1024", "1 - 1536", "2 - 2048",
+};
+static const char* kShadowOrthoResolutionNames[] = {
+	"0 - 128", "1 - 256", "2 - 512", "3 - 1024", "4 - 2048",
+};
+static const char* kEdgeDetectionNames[] = {
+	"0 - Luma", "1 - Color", "2 - Depth",
+};
+
+#define ENUM_OPT(names) EnumOptions{ names, (int)(sizeof(names) / sizeof(names[0])) }
+
+static const std::unordered_map<std::string, EnumOptions> kEnumSettings = {
+	{ "Shaders.Tonemapping.Main.TonemappingMode",              ENUM_OPT(kTonemappingModeNames) },
+	{ "Shaders.Tonemapping.Interiors.TonemappingMode",         ENUM_OPT(kTonemappingModeNames) },
+	{ "Shaders.Cinema.Main.Mode",                              ENUM_OPT(kCinemaDofModeNames) },
+	{ "Shaders.DepthOfField.FirstPersonView.Mode",             ENUM_OPT(kCinemaDofModeNames) },
+	{ "Shaders.DepthOfField.ThirdPersonView.Mode",             ENUM_OPT(kCinemaDofModeNames) },
+	{ "Shaders.DepthOfField.VanityView.Mode",                  ENUM_OPT(kCinemaDofModeNames) },
+	{ "Main.SleepingMode.Main.Mode",                           ENUM_OPT(kSleepingModeNames) },
+	{ "Shaders.ShadowsExteriors.ShadowMaps.Mode",              ENUM_OPT(kShadowsModeNames) },
+	{ "Shaders.ShadowsExteriors.Main.Quality",                 ENUM_OPT(kShadowQualityNames) },
+	{ "Shaders.ShadowsExteriors.ShadowMaps.Format",            ENUM_OPT(kShadowFormatNames) },
+	{ "Shaders.ShadowsExteriors.ShadowMaps.CascadeResolution", ENUM_OPT(kShadowCascadeResolutionNames) },
+	{ "Shaders.ShadowsExteriors.Ortho.Resolution",             ENUM_OPT(kShadowOrthoResolutionNames) },
+	{ "Shaders.SMAA.Main.EdgeDetection",                       ENUM_OPT(kEdgeDetectionNames) },
+};
+
+#undef ENUM_OPT
+
 static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool isShader = false) {
 	using NodeType = SettingManager::Configuration::NodeType;
 
@@ -1240,6 +1425,16 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 	};
 
+	bool inert = IsInertSetting(node.Section, node.Key);
+	if (inert) ImGui::BeginDisabled();
+
+	// Hover state of the *primary* widget for each case, captured immediately
+	// after that widget so RevertBtn()'s own "~" button (submitted right
+	// after) doesn't steal IsItemHovered() out from under the description
+	// tooltip below. Float/default capture their own local `hovered` instead
+	// since they return before reaching the shared tail.
+	bool mainHovered = false;
+
 	switch (node.Type) {
 	case NodeType::Boolean: {
 		bool val = (strcmp(node.Value, "1") == 0 || _stricmp(node.Value, "true") == 0);
@@ -1247,6 +1442,10 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
+		mainHovered = ImGui::IsItemHovered();
+		if (inert && mainHovered)
+			ImGui::SetTooltip("Disabled: has no effect. Mipmaps/anisotropy are commented out in "
+				"ShadowsExterior.cpp (deferred shadows produce artifacted derivatives).");
 		RevertBtn();
 		break;
 	}
@@ -1277,6 +1476,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			}
 		}
 		RevertBtn();
+		if (inert) ImGui::EndDisabled();
 		if (hovered && !node.Description.empty()) {
 			ImGui::BeginTooltip();
 			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
@@ -1290,28 +1490,29 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 	case NodeType::Integer: {
 		int val = atoi(node.Value);
 		int newVal = val;
-		if (strcmp(node.Key, "TonemappingMode") == 0) {
-			static const char* kNames[] = {
-				"0 - None (vanilla)", "1 - VTLottes", "2 - NVRLottes",
-				"3 - Reinhard", "4 - Reinhard Jodie", "5 - ACES Filmic",
-				"6 - ACES Fitted", "7 - Uncharted 2", "8 - Uchimura (GT)",
-				"9 - AGX", "10 - DICE",
-			};
-			static const int kCount = (int)(sizeof(kNames) / sizeof(kNames[0]));
-			int clamped = ImClamp(val, 0, kCount - 1);
-			if (ImGui::BeginCombo(node.Key, kNames[clamped])) {
-				for (int i = 0; i < kCount; i++) {
+		std::string enumKey = std::string(node.Section) + "." + node.Key;
+		auto enumIt = kEnumSettings.find(enumKey);
+		if (enumIt != kEnumSettings.end()) {
+			const char* const* names = enumIt->second.Names;
+			int count = enumIt->second.Count;
+			int clamped = ImClamp(val, 0, count - 1);
+			if (ImGui::BeginCombo(node.Key, names[clamped])) {
+				for (int i = 0; i < count; i++) {
 					bool sel = (clamped == i);
-					if (ImGui::Selectable(kNames[i], sel)) newVal = i;
+					if (ImGui::Selectable(names[i], sel)) newVal = i;
 					if (sel) ImGui::SetItemDefaultFocus();
 				}
 				ImGui::EndCombo();
 			}
 			if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed))
-				newVal = ImClamp(clamped + (s_plusPressed ? 1 : -1), 0, kCount - 1);
+				newVal = ImClamp(clamped + (s_plusPressed ? 1 : -1), 0, count - 1);
 		} else {
 			if (ImGui::DragInt(node.Key, &newVal, 1.0f)) {}
 		}
+		mainHovered = ImGui::IsItemHovered();
+		if (inert && mainHovered)
+			ImGui::SetTooltip("Disabled: has no effect. Mipmaps/anisotropy are commented out in "
+				"ShadowsExterior.cpp (deferred shadows produce artifacted derivatives).");
 		if (newVal != val) {
 			TheSettingManager->SetSetting(node.Section, node.Key, newVal);
 			TheSettingManager->LoadSettings();
@@ -1342,6 +1543,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			RenderDIKPopup();
 		}
 		RevertBtn();
+		if (inert) ImGui::EndDisabled();
 		if (hovered && !node.Description.empty()) {
 			ImGui::BeginTooltip();
 			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
@@ -1354,7 +1556,9 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 	}
 	}
 
-	if (ImGui::IsItemHovered() && !node.Description.empty()) {
+	if (inert) ImGui::EndDisabled();
+
+	if (mainHovered && !node.Description.empty()) {
 		ImGui::BeginTooltip();
 		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
 		ImGui::TextUnformatted(node.Description.c_str());
@@ -1422,7 +1626,24 @@ static void RenderContent() {
 			if (lut->LUTFiles.empty()) {
 				ImGui::TextDisabled("No LUTs found in Data/Textures/NewVegasReloaded/LUTs/");
 			} else {
-				auto renderPicker = [&](const char* label, int& idx, int slot) {
+				// DayLUT/NightLUT/InteriorLUT are hidden from the generic settings
+				// loop (ShouldHideKey) since they're rendered as cycle pickers here
+				// instead of raw InputText, which also means they never pass through
+				// RenderSetting()'s lazy snapshot -- so without this, neither a
+				// per-row revert button nor "Revert All" (RevertToSnapshot) has
+				// anything to restore them to. Snapshot lazily here to match.
+				auto snapLUT = [&](const char* key, int idx) -> std::string& {
+					auto& sec = s_snapshot["Shaders.LUT.Main"];
+					auto  it  = sec.find(key);
+					if (it == sec.end())
+						it = sec.emplace(key, lut->LUTFiles[idx]).first;
+					return it->second;
+				};
+				std::string& snapDay      = snapLUT("DayLUT", lut->DayIdx);
+				std::string& snapNight    = snapLUT("NightLUT", lut->NightIdx);
+				std::string& snapInterior = snapLUT("InteriorLUT", lut->InteriorIdx);
+
+				auto renderPicker = [&](const char* label, int& idx, int slot, const std::string& snapValue) {
 					ImGui::PushID(label);
 					ImGui::BeginGroup();
 					ImGui::Text("%s", label);
@@ -1434,6 +1655,13 @@ static void RenderContent() {
 					ImGui::TextUnformatted(lut->LUTFiles[idx].c_str());
 					ImGui::SameLine(nameStartX + 220.0f);
 					if (ImGui::ArrowButton("##next", ImGuiDir_Right)) delta = 1;
+					ImGui::SameLine();
+					bool dirty = lut->LUTFiles[idx] != snapValue;
+					if (!dirty) ImGui::BeginDisabled();
+					if (ImGui::SmallButton("~"))
+						lut->LoadLUT(slot, snapValue.c_str()); // re-syncs idx/texture via AssignLUTSlot
+					if (!dirty) ImGui::EndDisabled();
+					if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 					ImGui::EndGroup();
 					if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed))
 						delta = s_plusPressed ? 1 : -1;
@@ -1444,9 +1672,9 @@ static void RenderContent() {
 					}
 					ImGui::PopID();
 				};
-				renderPicker("Day     ", lut->DayIdx,      0);
-				renderPicker("Night   ", lut->NightIdx,    1);
-				renderPicker("Interior", lut->InteriorIdx, 2);
+				renderPicker("Day     ", lut->DayIdx,      0, snapDay);
+				renderPicker("Night   ", lut->NightIdx,    1, snapNight);
+				renderPicker("Interior", lut->InteriorIdx, 2, snapInterior);
 			}
 			ImGui::Spacing();
 			ImGui::Separator();
@@ -1473,15 +1701,20 @@ static void RenderContent() {
 		}
 
 		// RGB triple → color picker (shader sections only)
-		if (isShader && key.size() > 1 && key.back() == 'R') {
+		// Settings iterate alphabetically (B, G, R), so detection must fire on
+		// whichever channel is encountered first, not just 'R' — otherwise B
+		// and G render as stray individual rows before R ever triggers this.
+		if (isShader && key.size() > 1 &&
+			(key.back() == 'R' || key.back() == 'G' || key.back() == 'B')) {
 			std::string pfx = key.substr(0, key.size() - 1);
-			std::string kG = pfx + "G", kB = pfx + "B";
+			std::string kR = pfx + "R", kG = pfx + "G", kB = pfx + "B";
 			bool isColorCurve = (pfx == "ColorCurve" && strstr(s.Section, "Shaders.Coloring") != nullptr);
-			if (!isColorCurve && keyIdx.count(kG) && keyIdx.count(kB)) {
-				handled.insert(key);
+			if (!isColorCurve && keyIdx.count(kR) && keyIdx.count(kG) && keyIdx.count(kB) &&
+				!handled.count(kR)) {
+				handled.insert(kR);
 				handled.insert(kG);
 				handled.insert(kB);
-				RenderColorTriple(s, settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
+				RenderColorTriple(settings[keyIdx[kR]], settings[keyIdx[kG]], settings[keyIdx[kB]], pfx);
 				continue;
 			}
 		}
@@ -1504,8 +1737,12 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 
 	if (isLeaf) {
 		bool selected = (SelectedSection == path);
+		// Mute non-selected leaves so they read as lower-weight nav targets
+		// rather than siblings of the category/shader-toggle rows above them.
+		if (!selected) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.68f, 0.75f, 1.0f));
 		if (ImGui::Selectable(name.c_str(), selected))
 			SelectedSection = path;
+		if (!selected) ImGui::PopStyleColor();
 		ImGui::PopID();
 		return;
 	}
@@ -1567,8 +1804,15 @@ static void RenderSectionNode(const std::string& path, const std::string& name, 
 static void RenderSidebar() {
 	StringList topSections;
 	TheSettingManager->FillMenuSections(&topSections, nullptr);
+	// The active theme's global IndentSpacing is 0 (tight layout for the
+	// settings panel), which leaves TreeNode children flush with their
+	// parent here. Restore a modest per-depth indent scoped to just the
+	// sidebar tree so nesting is visually legible without reintroducing
+	// the wide default indent (21px) that would eat into this narrow panel.
+	ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 14.0f);
 	for (auto& section : topSections)
 		RenderSectionNode(section, section, false);
+	ImGui::PopStyleVar();
 }
 
 static void RenderMainMenuToast() {
@@ -1660,7 +1904,14 @@ void ImGuiManager::BuildUI() {
 		ImGui::TextDisabled("New Vegas Reloaded  %s", PluginVersion::VersionString);
 
 	{
-		const float btnRevert = 54.0f, btnDisk = 38.0f, btnCopy = 72.0f, btnSave = 48.0f;
+		// Size each button from its label so the theme's FramePadding is
+		// respected (a fixed pixel width clips/squishes text if FramePadding
+		// changes, e.g. with the wide horizontal padding of the current theme).
+		auto BtnWidth = [](const char* label) {
+			return ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+		};
+		const float btnRevert = BtnWidth("Revert"), btnDisk = BtnWidth("Disk"),
+			btnCopy = BtnWidth("Save Copy"), btnSave = BtnWidth("Save");
 		const float spacing   = ImGui::GetStyle().ItemSpacing.x;
 		const float totalW    = btnRevert + btnDisk + btnCopy + btnSave + spacing * 3.0f;
 		ImGui::SameLine(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - totalW);
