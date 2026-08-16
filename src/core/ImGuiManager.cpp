@@ -658,11 +658,24 @@ static void SetOverlayVisible(bool visible) {
 
 // Restore all snapshotted values and sync shader states.
 static void RevertToSnapshot() {
-	for (auto& [section, keys] : s_snapshot)
-		for (auto& [key, value] : keys)
+	LUTEffect* lut = TheShaderManager->Effects.LUT;
+	for (auto& [section, keys] : s_snapshot) {
+		for (auto& [key, value] : keys) {
+			// LUT filenames need the texture/index reloaded at runtime, not just
+			// the TOML value rewritten -- LUTEffect::UpdateSettings() never
+			// re-reads DayLUT/NightLUT/InteriorLUT, so a plain SetSettingS would
+			// revert the config but leave the picker/texture showing the stale pick.
+			if (lut && section == "Shaders.LUT.Main" &&
+				(key == "DayLUT" || key == "NightLUT" || key == "InteriorLUT")) {
+				int slot = (key == "DayLUT") ? 0 : (key == "NightLUT") ? 1 : 2;
+				lut->LoadLUT(slot, value.c_str());
+				continue;
+			}
 			TheSettingManager->SetSettingS(const_cast<char*>(section.c_str()),
 			                               const_cast<char*>(key.c_str()),
 			                               const_cast<char*>(value.c_str()));
+		}
+	}
 	TheSettingManager->LoadSettings();
 	// Sync shader enabled flags (same as RevertSettings does)
 	StringList shaders;
@@ -1415,6 +1428,13 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 	bool inert = IsInertSetting(node.Section, node.Key);
 	if (inert) ImGui::BeginDisabled();
 
+	// Hover state of the *primary* widget for each case, captured immediately
+	// after that widget so RevertBtn()'s own "~" button (submitted right
+	// after) doesn't steal IsItemHovered() out from under the description
+	// tooltip below. Float/default capture their own local `hovered` instead
+	// since they return before reaching the shared tail.
+	bool mainHovered = false;
+
 	switch (node.Type) {
 	case NodeType::Boolean: {
 		bool val = (strcmp(node.Value, "1") == 0 || _stricmp(node.Value, "true") == 0);
@@ -1422,7 +1442,8 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 			TheSettingManager->SetSetting(node.Section, node.Key, val);
 			TheSettingManager->LoadSettings();
 		}
-		if (inert && ImGui::IsItemHovered())
+		mainHovered = ImGui::IsItemHovered();
+		if (inert && mainHovered)
 			ImGui::SetTooltip("Disabled: has no effect. Mipmaps/anisotropy are commented out in "
 				"ShadowsExterior.cpp (deferred shadows produce artifacted derivatives).");
 		RevertBtn();
@@ -1488,7 +1509,8 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 		} else {
 			if (ImGui::DragInt(node.Key, &newVal, 1.0f)) {}
 		}
-		if (inert && ImGui::IsItemHovered())
+		mainHovered = ImGui::IsItemHovered();
+		if (inert && mainHovered)
 			ImGui::SetTooltip("Disabled: has no effect. Mipmaps/anisotropy are commented out in "
 				"ShadowsExterior.cpp (deferred shadows produce artifacted derivatives).");
 		if (newVal != val) {
@@ -1536,7 +1558,7 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 
 	if (inert) ImGui::EndDisabled();
 
-	if (ImGui::IsItemHovered() && !node.Description.empty()) {
+	if (mainHovered && !node.Description.empty()) {
 		ImGui::BeginTooltip();
 		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
 		ImGui::TextUnformatted(node.Description.c_str());
@@ -1604,7 +1626,24 @@ static void RenderContent() {
 			if (lut->LUTFiles.empty()) {
 				ImGui::TextDisabled("No LUTs found in Data/Textures/NewVegasReloaded/LUTs/");
 			} else {
-				auto renderPicker = [&](const char* label, int& idx, int slot) {
+				// DayLUT/NightLUT/InteriorLUT are hidden from the generic settings
+				// loop (ShouldHideKey) since they're rendered as cycle pickers here
+				// instead of raw InputText, which also means they never pass through
+				// RenderSetting()'s lazy snapshot -- so without this, neither a
+				// per-row revert button nor "Revert All" (RevertToSnapshot) has
+				// anything to restore them to. Snapshot lazily here to match.
+				auto snapLUT = [&](const char* key, int idx) -> std::string& {
+					auto& sec = s_snapshot["Shaders.LUT.Main"];
+					auto  it  = sec.find(key);
+					if (it == sec.end())
+						it = sec.emplace(key, lut->LUTFiles[idx]).first;
+					return it->second;
+				};
+				std::string& snapDay      = snapLUT("DayLUT", lut->DayIdx);
+				std::string& snapNight    = snapLUT("NightLUT", lut->NightIdx);
+				std::string& snapInterior = snapLUT("InteriorLUT", lut->InteriorIdx);
+
+				auto renderPicker = [&](const char* label, int& idx, int slot, const std::string& snapValue) {
 					ImGui::PushID(label);
 					ImGui::BeginGroup();
 					ImGui::Text("%s", label);
@@ -1616,6 +1655,13 @@ static void RenderContent() {
 					ImGui::TextUnformatted(lut->LUTFiles[idx].c_str());
 					ImGui::SameLine(nameStartX + 220.0f);
 					if (ImGui::ArrowButton("##next", ImGuiDir_Right)) delta = 1;
+					ImGui::SameLine();
+					bool dirty = lut->LUTFiles[idx] != snapValue;
+					if (!dirty) ImGui::BeginDisabled();
+					if (ImGui::SmallButton("~"))
+						lut->LoadLUT(slot, snapValue.c_str()); // re-syncs idx/texture via AssignLUTSlot
+					if (!dirty) ImGui::EndDisabled();
+					if (ImGui::IsItemHovered()) ImGui::SetTooltip("Revert to value at session start");
 					ImGui::EndGroup();
 					if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed))
 						delta = s_plusPressed ? 1 : -1;
@@ -1626,9 +1672,9 @@ static void RenderContent() {
 					}
 					ImGui::PopID();
 				};
-				renderPicker("Day     ", lut->DayIdx,      0);
-				renderPicker("Night   ", lut->NightIdx,    1);
-				renderPicker("Interior", lut->InteriorIdx, 2);
+				renderPicker("Day     ", lut->DayIdx,      0, snapDay);
+				renderPicker("Night   ", lut->NightIdx,    1, snapNight);
+				renderPicker("Interior", lut->InteriorIdx, 2, snapInterior);
 			}
 			ImGui::Spacing();
 			ImGui::Separator();
