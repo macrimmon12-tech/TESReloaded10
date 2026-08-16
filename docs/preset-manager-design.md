@@ -76,6 +76,30 @@ Default. The only thing that *can* ripple a change across every preset at once i
 a **Variant** (see below), which is the sole diff-style, stacking mechanism in the
 whole system.
 
+### Setting scope — a blacklist, still needed
+
+Dropping the "default preset defines the allowed key set" schema-merge rule
+doesn't mean every NVR setting is eligible to live in a preset — that was a
+separate concern, and reinstating it here: presets can only capture/apply
+settings in **graphics/visual sections**, not personal or system preferences.
+Same excluded sections as the rejected prototype got right:
+
+```
+Main.CameraMode.Main       Main.CameraMode.Positioning
+Main.Develop.Main          Main.FlyCam.Main
+Main.FrameRate.SmartControl   Main.FrameRate.Stuttering
+Main.LowHFSound.Main       Main.Main.Misc
+Main.Menu.Keys             Main.Menu.Style
+Main.SleepingMode.Main
+```
+
+Without this, loading a location's preset could silently overwrite someone's
+keybinds or camera setup along with the graphics settings it's actually meant
+to control. Checked both when a preset file is parsed (a blacklisted section
+in a preset file is simply never applied) and in the Save flow (the live state
+capture skips these sections entirely, so they can never end up in a preset
+file to begin with).
+
 ## Resolution order
 
 **Interior** (checked in order, first match wins):
@@ -93,6 +117,11 @@ and each one either wants a genuinely distinct full look (→ gets an Override) 
 is fine inheriting Default. This has a useful side effect: a worldspace added by
 some *other* mod, with no NVR-side authoring for it at all, falls straight through
 to `DefaultExterior` automatically rather than matching nothing.
+
+If `DefaultInterior.ini`/`DefaultExterior.ini` don't exist yet (fresh install,
+before anyone's authored one), resolution falls back to the raw TOML defaults
+directly — a location with nothing assigned behaves like normal, unmodified NVR,
+not an error or a no-op.
 
 Then, for both interior and exterior alike: any active **Variants** are applied as
 diffs on top of whichever base preset resolved.
@@ -121,6 +150,12 @@ NVDLC02ZionStation
 - A keyword's preset file is named identically to the keyword (`HonestHeartsCave`
   → `HonestHeartsCave.ini`), so "does this keyword have a preset" is a plain
   file-existence check.
+- **Duplicate membership** (a cell's EditorID accidentally listed under two
+  different keyword sections — typo, or files merged from two authors): first
+  one found wins, where "first" is a deterministic order — keyword files
+  processed alphabetically by filename, sections within a file processed in
+  the order they appear. Not left to directory-iteration order, which isn't
+  guaranteed stable across platforms or runs.
 
 ## Preset files
 
@@ -155,6 +190,13 @@ color-grade variant for taste). Any combination can be active simultaneously.
 Applied on top of whichever base preset resolved, for both interior and exterior
 locations.
 
+**Conflicts between simultaneously-enabled Variants**: if two active Variants
+both define the same key, **order wins deterministically** — specifically, the
+order names are listed in `EnabledVariants.ini` (see below), top to bottom,
+later entries overriding earlier ones. No separate numbered-slot concept
+needed; the file that already tracks which Variants are on doubles as the
+priority list, and reordering its lines is how an author changes precedence.
+
 **Authoring flow:**
 1. Load any base preset — doesn't matter which.
 2. Make only the intended change(s) in the live editor (e.g. reduce
@@ -181,10 +223,16 @@ Performance
 WarmTone
 ```
 
-Read once at boot alongside the keyword files. Written immediately whenever a
-Variant checkbox is toggled in-game — not deferred to any "Save Settings"
-action, since this file has nothing to do with the main settings persistence
-lifecycle.
+Line order is meaningful, not incidental — it's the same order used to break
+Variant conflicts above (later lines win). Read once at boot alongside the
+keyword files. Written immediately whenever a Variant checkbox is toggled in
+game — not deferred to any "Save Settings" action, since this file has nothing
+to do with the main settings persistence lifecycle. Toggling one **on**
+appends it to the bottom of the list (most-recently-enabled wins conflicts by
+default); toggling one **off** removes its line entirely, so re-enabling it
+later appends fresh at the bottom again rather than restoring its old
+position. An author can still hand-edit the file to set a specific priority
+order manually.
 
 ### Do we need a master file?
 
@@ -316,8 +364,14 @@ potentially relevant) from *highlighted* (this tier is the one currently active)
 | Keyword | cell has a keyword tag, even with no preset authored yet | a preset file matching that keyword exists and is active |
 | Override | a preset already exists for this exact cell | it's the active tier |
 
-Three matching save buttons, saving the full current live state (all keys the
-editor exposes, not a diff), each with escalating warnings:
+Three matching save buttons — each only shown when its corresponding status
+indicator above is shown, same condition, no exceptions. In particular,
+**Save to Keyword stays hidden/disabled whenever the current cell has no
+keyword tag at all** — keyword membership is strictly an offline, text-file
+operation (see "Keyword files" above), so there's no in-game path to assign
+one just to unlock this button. Saving captures the full current live state
+(all keys the editor exposes, minus the blacklisted sections above — not a
+diff), each with escalating warnings:
 - **Save to Default** — warns it rewrites the floor for *every* interior in the game
 - **Save to Keyword** — warns with a live count pulled from the keyword file
   ("this affects N cells")
