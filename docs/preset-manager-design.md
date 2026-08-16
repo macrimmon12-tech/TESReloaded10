@@ -5,16 +5,29 @@
 NVR currently has one active settings state — whatever's in the live TOML — with no
 concept of swapping visual configuration by location. Cartographer/Atlas (third-party
 companion mods many NVR users already run) solve this for NVR by tagging cells and
-worldspaces with keywords and layering presets on top of a default. This doc specs an
-equivalent system built directly into NVR, informed by:
+worldspaces and layering presets on top of a default. This doc specs an equivalent
+system built directly into NVR.
 
-- an initial standalone prototype (`NVRManager` + `NVRMenu`) sent for evaluation —
-  its data model and application mechanism don't fit this codebase and are not being
-  ported (see "Rejected approach" below), but its shape informed the resolution order
-- Cartographer's own user documentation (precedence order, default-preset-as-schema
-  rule, keyword aliasing)
-- a real Cartographer keyword file (`HonestHearts.ini`) confirming the on-disk format
-  we're adopting directly
+This is v2 of the design, revised after further discussion diverged from
+Cartographer's own model in a few deliberate ways — see "Deliberate departures from
+Cartographer" below for what changed and why.
+
+### Rejected approach
+
+An initial standalone prototype (`NVRManager` + `NVRMenu`) was evaluated and
+rejected as a porting target — not adapted, replaced:
+- Its apply path (`sprintf` a console command string, run it via
+  `g_ConsoleInterface->RunScriptLine2`) has no counterpart in this codebase; the
+  right primitive is `TheSettingManager->SetSettingF()`/`SetSettingS()`, called
+  directly.
+- Its data model is a single flat `EditorID → preset name` map — one tier, no
+  precedence, and structurally incapable of targeting an individual exterior cell
+  (the lookup key collapses to the worldspace's EditorID whenever `cell->worldSpace`
+  is non-null).
+- Its settings storage is a hand-rolled INI parser reinventing a subset of
+  `toml11`, already a project dependency.
+- Its UI is hand-rolled hit-testing (`AddRectFilled` + `IsMouseHoveringRect` pairs)
+  duplicated three times, where plain ImGui widgets do the same job in less code.
 
 ## Scope
 
@@ -22,200 +35,181 @@ equivalent system built directly into NVR, informed by:
 `SetSettingF`/`SetSettingS`). Explicitly **not** in scope: image space swapping,
 lighting template swapping, or dynamic ambient lighting — Cartographer's second
 domain. That territory dovetails into the separate planned **WeatherMode
-restoration** work, which needs its own tweaker panel anyway; this system should be
-generic enough that WeatherMode restoration can reuse the same tier/resolution
-shape later, but building that domain now is out of scope.
+restoration** work, which needs its own tweaker panel anyway.
 
-Also explicitly not in scope, and not needed:
-- A general engine-level cell/worldspace enumerator (`DataHandler`, `TES` buffers).
-  The keyword files themselves already enumerate every location anyone's bothered to
-  tag — see "Location picker" below.
-- Any runtime dependency on JIP LN NVSE or the KEYWORDS plugin. We read the same
-  on-disk file format KEYWORDS uses, parsed by our own code, with no plugin-interop
-  at runtime.
+Also not needed: any engine-level cell/worldspace enumerator, or any runtime
+dependency on JIP LN NVSE / the KEYWORDS plugin. Everything location-related is
+driven entirely by our own keyword files, read and cached at boot.
 
-## Rejected approach
+## Deliberate departures from Cartographer
 
-The initial prototype (`NVRManager`) was evaluated in detail and rejected as a
-porting target:
-- Its apply path (`sprintf` a console command string, run it via
-  `g_ConsoleInterface->RunScriptLine2`) has no counterpart in this codebase; we
-  already have the right primitive (`TheSettingManager->SetSettingF()` /
-  `SetSettingS()`, called directly).
-- Its data model is a single flat `EditorID → preset name` map — one tier, no
-  default/keyword/override precedence, and structurally incapable of targeting an
-  individual exterior cell (the lookup key collapses to the worldspace's EditorID
-  whenever `cell->worldSpace` is non-null).
-- Its settings storage is a hand-rolled INI parser reinventing a subset of
-  `toml11`, which is already a project dependency.
-- Its UI is hand-rolled hit-testing (`AddRectFilled` + `IsMouseHoveringRect` pairs)
-  duplicated three times, where plain ImGui widgets do the same job in less code.
+- **No runtime merging between Default / Keyword / Override.** Cartographer
+  composites an arbitrary stack of diff-style presets on every location change.
+  We don't — see "Data model" below.
+- **One keyword per cell, not a stackable list with alias expansion.** Cartographer
+  lets a cell carry many keyword tags simultaneously, each independently resolved
+  and layered, with an alias table that expands one tag into several. We use a
+  single keyword per cell, full stop.
+- **No dependency on the external KEYWORDS plugin's file format.** We read our own
+  format (see below), not Cartographer's own `EditorID=keyword1,keyword2,...`
+  convention.
+- **Exteriors don't use a keyword tier at all** — see "Resolution order."
 
-None of this is a matter of missing headers or small fixes — the precedence model
-Cartographer's users actually rely on doesn't exist in it at all. Building from
-scratch against the design below is less work than adapting it.
+## Data model: presets are complete, standalone snapshots
 
-## Precedence model
+**Default**, **Keyword**, and **Override** presets each contain a full copy of
+every setting they intend to control — not a diff, not something merged with a
+lower tier at runtime. Exactly one of these wins per location. There is no
+"default preset defines the allowed key set" constraint — any preset may define
+any key it wants, independent of what any other preset defines.
 
-Four tiers, resolved in order, each checked only if nothing more specific matched:
+Practical consequence: editing the Default preset does **not** propagate into any
+Keyword or Override preset — they're independent files, not diffs layered on
+Default. The only thing that *can* ripple a change across every preset at once is
+a **Variant** (see below), which is the sole diff-style, stacking mechanism in the
+whole system.
 
-```
-1. TOML defaults               (resource/NewVegasReloaded.dll.defaults.toml — unconditional floor)
-2. Default preset               (DefaultInterior or DefaultExterior, by cell->IsInterior())
-3. Keyword preset               (the cell/worldspace's assigned keyword → its preset)
-4. Cell-specific override       (always wins, even over a keyword-resolved preset)
-```
+## Resolution order
 
-Orthogonal to all four: a **Performance** layer (ported concept from the rejected
-prototype's `performanceSettings`), applied last, unconditionally, regardless of
-which of the four tiers resolved. A "Low" performance tier can clamp a setting even
-if the active default preset didn't happen to enumerate it — **Performance is
-exempt from the schema rule below**, since it's cross-cutting hardware adaptation,
-not location authoring.
+**Interior** (checked in order, first match wins):
+1. Cell-specific **Override**, if this exact cell has one
+2. **Keyword** preset, if the cell has a keyword tag *and* a preset file named
+   identically to that keyword exists
+3. **Default** (`DefaultInterior`)
 
-This is a deliberate simplification from Cartographer's own model, which allows
-arbitrary N-keyword stacking with alias expansion (one tag expands into a list of
-other tags, each independently resolved and stacked). We're dropping that in favor
-of one keyword per cell resolving to one preset — Cartographer's stacking exists
-largely to work around text-file-only authoring; NVR's live ImGui overlay means an
-author can just live-tweak the final look and save it as one flattened preset
-instead of composing it from fragments. See "In-game editor workflow" below for why
-this still covers the same practical need (bulk-first, refine-individually-later).
+**Exterior** (checked in order, first match wins):
+1. Worldspace-specific **Override**, if this worldspace has one
+2. **Default** (`DefaultExterior`)
 
-### Default preset = schema, not just a fallback value
+No keyword tier for exteriors. Reasoning: there are relatively few worldspaces,
+and each one either wants a genuinely distinct full look (→ gets an Override) or
+is fine inheriting Default. This has a useful side effect: a worldspace added by
+some *other* mod, with no NVR-side authoring for it at all, falls straight through
+to `DefaultExterior` automatically rather than matching nothing.
 
-Carried over directly from Cartographer: **only Section:Key pairs present in the
-active default preset (`DefaultInterior`/`DefaultExterior`) are ever eligible to be
-touched by the keyword or cell-override tiers.** If `DefaultExterior` doesn't define
-`Shaders.Bloom.Interiors.Blending`, no keyword or cell-specific preset can modify it
-either, even if their file lists it. This keeps each preset's blast radius fully
-knowable by reading one file, and prevents an obscure per-cell override from
-reaching into a setting nobody expected it to touch. (Performance is the one
-exception — see above.)
+Then, for both interior and exterior alike: any active **Variants** are applied as
+diffs on top of whichever base preset resolved.
 
-## Application mechanism
+## Keyword files
 
-Modeled directly on the existing `RevertToSnapshot()` pattern
-(`ImGuiManager.cpp:660`), which already does almost exactly this for the "revert
-on overlay close" case:
-
-1. Resolve the four-tier chain (+ Performance) into one merged
-   `section → key → value` map, starting from TOML defaults.
-2. Diff the merged map against `currentSettings` (whatever's actually live).
-3. For each changed key, call `TheSettingManager->SetSettingF()` or `SetSettingS()`
-   directly — no console command round-trip, this is native code in the same DLL.
-4. `LoadSettings()` to refresh the cached struct.
-5. Re-sync shader `Enabled` flags the same way `RevertToSnapshot` already does
-   (`FillMenuSections("Shaders")` + `GetMenuShaderEnabled` + `GetEffectByName`/
-   `GetShaderCollectionByName`), since a preset can toggle `Shaders.*.Status.Enabled`.
-
-Because step 1 always starts from TOML defaults rather than layering onto whatever's
-currently live, switching between any two locations (or back to a location with
-nothing assigned) is correct with no separate "revert" step — same property the
-rejected prototype's `UpdatePreset()` got right.
-
-## Keyword files — adopting the existing format directly
-
-Decision: **no new format.** We read the same on-disk convention Cartographer/
-KEYWORDS already use — confirmed against a real file (`HonestHearts.ini`):
+Sections are keywords; cells are bare entries listed underneath:
 
 ```ini
-[0]
-; HonestHeartsHouse
-NVDLC02ZionLodge=HonestHeartsHouse,TextureConfig,Qual,Whine ; Fishing Lodge
-NVDLC02ZionStation=HonestHeartsHouse,TextureConfig,Qual,Whine ; Ranger Station
+[HonestHeartsCave]
+NVDLC02ZionSCaveW
+NVDLC02PrefabCaves
 
-; HonestHeartsCave
-NVDLC02ZionSCaveW=HonestHeartsCave,TextureConfig,Qual,Whine ; Morning Glory Cave
+[HonestHeartsHouse]
+NVDLC02ZionLodge
+NVDLC02ZionStation
 ```
 
-- Every `.ini` in the designated folder is loaded and merged, filename-agnostic —
-  per-worldspace file naming (as in this example) is purely an authoring
-  convention, not something the parser depends on.
-- Line format: `EditorID=keyword1,keyword2,... ; optional trailing comment`. `;`
-  is used both as a full-line comment marker and as a trailing inline comment on
-  data lines — the parser needs to strip trailing `; ...` before splitting on `=`,
-  which the rejected prototype's parser never did.
-- Blank-line/comment-block grouping (`; HonestHeartsHouse`) is purely
-  organizational for the file's author; the authoritative keyword set for each
-  cell is whatever's actually listed after `=`.
-- **Multiple keywords per cell, resolved to our single-keyword-per-tier model**:
-  for each keyword in a cell's comma list, check for a matching preset file; the
-  first one found wins. In practice, most of the extra tags in existing
-  Cartographer data (`TextureConfig`, `Qual`, `Whine` in the example above) won't
-  correspond to any file in our own presets folder unless we create one by that
-  name, so they naturally no-op rather than needing special handling.
-- **Open unknown**: the leading `[0]` section header's exact meaning isn't
-  confirmed — treat as a required-but-otherwise-inert wrapper unless
-  implementation reveals otherwise.
+- Read and cached once at boot.
+- **Interior cells only** — worldspaces never appear here, since exteriors don't
+  use the keyword tier.
+- Reassigning a cell's keyword is an **offline** operation — cut its line, paste
+  it under a different section, in a text editor. No in-game control retags a
+  cell's keyword; the in-game editor only assigns Override/Default/Keyword
+  *presets*, never keyword *membership*.
+- A keyword's preset file is named identically to the keyword (`HonestHeartsCave`
+  → `HonestHeartsCave.ini`), so "does this keyword have a preset" is a plain
+  file-existence check.
 
 ## Preset files
 
-`toml11`-based (already a project dependency), not the rejected prototype's
-hand-rolled INI parser. Section/key naming matches the live TOML directly —
-`[Shaders.ImageAdjust.Main]` / `Brightness = 1.141`, no leading `_` (matching
-Cartographer's own convention, which strips it the same way our `SettingManager`
-does internally). A preset file contains only the keys it overrides — diff-style,
-not a full settings dump.
+`toml11`-based, matching the live TOML's section/key naming
+(`[Shaders.ImageAdjust.Main]` / `Brightness = 1.141`, no leading `_`). Each file is
+a full standalone snapshot, not a diff. Four kinds of preset, stored separately:
 
-## Location resolution (`OnLocation` equivalent)
+| Kind | Count | Filename |
+|---|---|---|
+| Default | 2, fixed | `DefaultInterior.ini`, `DefaultExterior.ini` |
+| Keyword | one per keyword | `<KeywordName>.ini` |
+| Override (interior) | one per tagged cell | `<CellEditorID>.ini` |
+| Override (exterior) | one per tagged worldspace | `<WorldspaceEditorID>.ini` |
+| Variant | up to 5 | `<VariantName>.ini` |
 
-Needs a cell-change hook (not yet identified in this codebase — existing call
-sites that observe `TES::currentCell` transitions should be checked before adding
-a new per-frame poll). On a location change:
+## Variants
 
-1. Look up a cell-specific override for the current cell's own EditorID (checked
-   regardless of whether the cell has a worldspace — this is the fix for the
-   rejected prototype's bug where exterior cells could never be targeted
-   individually).
-2. Else, look up a keyword-resolved preset — using the cell's own EditorID if
-   interior, the worldspace's EditorID if exterior.
-3. Else, fall through to `DefaultInterior`/`DefaultExterior` by `cell->IsInterior()`.
-4. Apply via the mechanism above.
+Up to 5, independently toggleable via checkbox, **end-user facing** — a preset
+pack author can ship several alongside their location presets and document which
+ones a player should enable (e.g. a Performance variant for weaker hardware, a
+color-grade variant for taste). Any combination can be active simultaneously.
+Applied on top of whichever base preset resolved, for both interior and exterior
+locations.
 
-## Location picker (Cell/Worldspace browse UI)
+**Authoring flow:**
+1. Load any base preset — doesn't matter which.
+2. Make only the intended change(s) in the live editor (e.g. reduce
+   `ShadowCascade` and nothing else).
+3. Click **Save Variant** — captures exactly the key(s) changed since step 1
+   began, as absolute values (e.g. `ShadowCascade = <new value>`), nothing else.
+4. That diff is safe to replay on top of any other base preset later, since it's
+   a fixed absolute override rather than something relative to the preset it was
+   authored against.
 
-No engine-level enumeration needed. The union of every left-hand-side EditorID
-across all loaded keyword files already constitutes the full list of
-preset-relevant locations — better UX than a full engine master list, since it
-only surfaces places that actually have (or could have) preset-relevant tagging
-rather than every untagged cell in the game.
+## Application mechanism
 
-## In-game editor workflow
+Modeled on the existing `RevertToSnapshot()` pattern (`ImGuiManager.cpp:660`):
 
-1. **Bulk pass**: tag every interior in a worldspace with one shared keyword
-   (via the keyword files), live-tweak settings once, save to that keyword's
-   preset. Every tagged cell updates at once.
-2. **Refine individually**: for any cell that needs something different, live-tweak
-   and save as a cell-specific override — tier 4 wins over the shared keyword
-   preset for that cell only, without touching the shared file.
+1. Resolve which single base preset wins (per "Resolution order" above) — its
+   full contents become the target map directly. No merging with any other tier.
+2. Layer each currently-enabled Variant's diff on top of the target map.
+3. Diff the target map against `currentSettings` (what's actually live).
+4. For each changed key, call `TheSettingManager->SetSettingF()` or `SetSettingS()`
+   directly — no console command round-trip, this is native code in the same DLL.
+5. `LoadSettings()` to refresh the cached struct.
+6. Re-sync shader `Enabled` flags the same way `RevertToSnapshot` already does
+   (`FillMenuSections("Shaders")` + `GetMenuShaderEnabled` + `GetEffectByName`/
+   `GetShaderCollectionByName`).
 
-This requires the editor to expose things the rejected prototype's single generic
-"Export" button didn't:
+Because step 1 always resolves fresh from the winning preset rather than layering
+onto whatever's currently live, moving between any two locations is correct with
+no separate "revert" step.
 
-- **Two distinct save actions** — "save to this cell's keyword preset" vs. "save
-  as a bespoke override for this cell" — writing to different files, not one
-  ambiguous export.
-- **Keyword assignment inline**: "save to keyword" needs a keyword already
-  assigned to the cell; if none exists, the flow should let the author assign one
-  as part of saving rather than just being disabled with no explanation.
-- **Blast-radius visibility**: saving to a shared keyword preset changes every
-  other cell still resolving through that tier. Surface "this affects N cells" at
-  save time.
-- **Live tier indicator**: persistent (not just a debug-log line) UI showing
-  whether the current cell is resolving via Default / Keyword / Cell-override —
-  otherwise editing a keyword-governed value while standing in a cell that
-  already has its own override silently does nothing visible, which is confusing
-  without an explanation.
+## In-game UI — location assignment
+
+Always operates on wherever the player currently is — assignment is done by
+physically visiting a location and using contextual buttons, not by browsing to
+and targeting a remote location.
+
+**Interior** — three status indicators, distinguishing *shown* (this tier is
+potentially relevant) from *highlighted* (this tier is the one currently active):
+
+| Indicator | Shown when | Highlighted when |
+|---|---|---|
+| Default | always | nothing more specific applies |
+| Keyword | cell has a keyword tag, even with no preset authored yet | a preset file matching that keyword exists and is active |
+| Override | a preset already exists for this exact cell | it's the active tier |
+
+Three matching save buttons, saving the full current live state (all keys the
+editor exposes, not a diff), each with escalating warnings:
+- **Save to Default** — warns it rewrites the floor for *every* interior in the game
+- **Save to Keyword** — warns with a live count pulled from the keyword file
+  ("this affects N cells")
+- **Save to Override** — warns only if one already exists here to overwrite
+
+**Exterior** — two status indicators and two save buttons, same shown/highlighted
+pattern, covering only Default and Override (no Keyword row, per "Resolution
+order" above).
+
+## In-game UI — Variants
+
+Separate from location assignment — a panel of up to 5 checkboxes reflecting
+which Variants are currently enabled (global toggles, not scoped per-location),
+plus the **Save Variant** authoring flow described above.
 
 ## Open items to resolve during implementation
 
-- Exact meaning of the `[0]` keyword-file section header.
-- Cell-change hook call site (does one already exist to observe `TES::currentCell`
-  transitions, or does this need a new one).
-- Folder/file layout for our presets and keyword directories (Cartographer's
-  `Config/Cartographer/{NVR.ini, NVRPresets/, ...}` is a reasonable starting
-  reference, not a requirement).
-- Whether to carry over Cartographer's debug-mode (console log of current/target
-  preset) and hot-reload-key ideas — both cheap, both reuse the existing `NVR*`
-  console command surface.
+- Cell-change hook call site — does something already observe `TES::currentCell`
+  transitions, or does this need a new one.
+- Whether a Cell/Worldspace browse/teleport convenience picker (from the original
+  prototype's Cell/Worldspace tabs) is still wanted at all now that assignment is
+  purely "stand here, click a button" — nothing in the current design requires
+  browsing to a location you aren't at.
+- Exact folder layout for the four preset kinds + keyword files.
+- Whether Variant toggles should ever be scoped narrower than global — current
+  assumption is they're not.
+- Carrying over Cartographer's debug-mode (console log of current preset/tier) and
+  hot-reload-key ideas — both cheap, both reuse the existing `NVR*` console command
+  surface.
