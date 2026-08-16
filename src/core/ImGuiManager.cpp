@@ -1323,8 +1323,16 @@ static const char* kTonemappingModeNames[] = {
 	"6 - ACES Fitted", "7 - Uncharted 2", "8 - Uchimura (GT)",
 	"9 - AGX", "10 - DICE",
 };
-static const char* kDialogModeNames[] = {
-	"0 - Always", "1 - Not during dialog", "2 - Only during dialog",
+// Cinema/DepthOfField Mode also accepts 3 and 4 in the C++ (Cinema.cpp /
+// DepthOfField.cpp), gating on isDialog/isPersuasion -- leftover from the
+// Oblivion codebase this was forked from. FNV has no Persuasion state, so
+// isPersuasion is always false there, which makes the Mode==3 branch's
+// condition always true: the effect is unconditionally disabled. Mode 4 is
+// degenerate for the same reason (redundant with 1/2, or permanently off
+// depending on effect) and isn't worth exposing, so the combo stops at the
+// one genuinely useful extra value: 3, labeled "Disabled".
+static const char* kCinemaDofModeNames[] = {
+	"0 - Always", "1 - Not during dialog", "2 - Only during dialog", "3 - Disabled",
 };
 static const char* kShadowsModeNames[] = {
 	"0 - VSM", "1 - EVSM2", "2 - EVSM4",
@@ -1335,18 +1343,38 @@ static const char* kSleepingModeNames[] = {
 	"0 - Always (Wait, Sit, Sleep)", "1 - Sleeping only",
 	"2 - Sitting only", "3 - Sitting & Sleeping",
 };
+static const char* kShadowQualityNames[] = {
+	"0 - Low", "1 - Medium", "2 - High", "3 - Full", "4 - Custom",
+};
+static const char* kShadowFormatNames[] = {
+	"0 - 16 bit", "1 - 32 bit",
+};
+static const char* kShadowCascadeResolutionNames[] = {
+	"0 - 1024", "1 - 1536", "2 - 2048",
+};
+static const char* kShadowOrthoResolutionNames[] = {
+	"0 - 128", "1 - 256", "2 - 512", "3 - 1024", "4 - 2048",
+};
+static const char* kEdgeDetectionNames[] = {
+	"0 - Luma", "1 - Color", "2 - Depth",
+};
 
 #define ENUM_OPT(names) EnumOptions{ names, (int)(sizeof(names) / sizeof(names[0])) }
 
 static const std::unordered_map<std::string, EnumOptions> kEnumSettings = {
-	{ "Shaders.Tonemapping.Main.TonemappingMode",      ENUM_OPT(kTonemappingModeNames) },
-	{ "Shaders.Tonemapping.Interiors.TonemappingMode", ENUM_OPT(kTonemappingModeNames) },
-	{ "Shaders.Cinema.Main.Mode",                      ENUM_OPT(kDialogModeNames) },
-	{ "Shaders.DepthOfField.FirstPersonView.Mode",     ENUM_OPT(kDialogModeNames) },
-	{ "Shaders.DepthOfField.ThirdPersonView.Mode",     ENUM_OPT(kDialogModeNames) },
-	{ "Shaders.DepthOfField.VanityView.Mode",          ENUM_OPT(kDialogModeNames) },
-	{ "Main.SleepingMode.Main.Mode",                   ENUM_OPT(kSleepingModeNames) },
-	{ "Shaders.ShadowsExteriors.ShadowMaps.Mode",      ENUM_OPT(kShadowsModeNames) },
+	{ "Shaders.Tonemapping.Main.TonemappingMode",              ENUM_OPT(kTonemappingModeNames) },
+	{ "Shaders.Tonemapping.Interiors.TonemappingMode",         ENUM_OPT(kTonemappingModeNames) },
+	{ "Shaders.Cinema.Main.Mode",                              ENUM_OPT(kCinemaDofModeNames) },
+	{ "Shaders.DepthOfField.FirstPersonView.Mode",             ENUM_OPT(kCinemaDofModeNames) },
+	{ "Shaders.DepthOfField.ThirdPersonView.Mode",             ENUM_OPT(kCinemaDofModeNames) },
+	{ "Shaders.DepthOfField.VanityView.Mode",                  ENUM_OPT(kCinemaDofModeNames) },
+	{ "Main.SleepingMode.Main.Mode",                           ENUM_OPT(kSleepingModeNames) },
+	{ "Shaders.ShadowsExteriors.ShadowMaps.Mode",              ENUM_OPT(kShadowsModeNames) },
+	{ "Shaders.ShadowsExteriors.Main.Quality",                 ENUM_OPT(kShadowQualityNames) },
+	{ "Shaders.ShadowsExteriors.ShadowMaps.Format",            ENUM_OPT(kShadowFormatNames) },
+	{ "Shaders.ShadowsExteriors.ShadowMaps.CascadeResolution", ENUM_OPT(kShadowCascadeResolutionNames) },
+	{ "Shaders.ShadowsExteriors.Ortho.Resolution",             ENUM_OPT(kShadowOrthoResolutionNames) },
+	{ "Shaders.SMAA.Main.EdgeDetection",                       ENUM_OPT(kEdgeDetectionNames) },
 };
 
 #undef ENUM_OPT
