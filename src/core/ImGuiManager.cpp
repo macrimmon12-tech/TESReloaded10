@@ -1310,6 +1310,47 @@ static void RenderColorTriple(
 	ImGui::PopID();
 }
 
+// Integer settings that are actually fixed enums render as labeled combos
+// instead of a bare DragInt. Keyed by "Section.Key" (the Key alone isn't
+// unique -- e.g. "Mode" means something different under Cinema, DepthOfField,
+// SleepingMode, and Shadows), so adding a new enum is one line here rather
+// than a new strcmp branch.
+struct EnumOptions { const char* const* Names; int Count; };
+
+static const char* kTonemappingModeNames[] = {
+	"0 - None (vanilla)", "1 - VTLottes", "2 - NVRLottes",
+	"3 - Reinhard", "4 - Reinhard Jodie", "5 - ACES Filmic",
+	"6 - ACES Fitted", "7 - Uncharted 2", "8 - Uchimura (GT)",
+	"9 - AGX", "10 - DICE",
+};
+static const char* kDialogModeNames[] = {
+	"0 - Always", "1 - Not during dialog", "2 - Only during dialog",
+};
+static const char* kShadowsModeNames[] = {
+	"0 - VSM", "1 - EVSM2", "2 - EVSM4",
+};
+// SleepingMode.Mode has no TOML comment; values derived from
+// src/core/Hooks/SleepingCommon.cpp's ShowSleepWaitMenuHook.
+static const char* kSleepingModeNames[] = {
+	"0 - Always (Wait, Sit, Sleep)", "1 - Sleeping only",
+	"2 - Sitting only", "3 - Sitting & Sleeping",
+};
+
+#define ENUM_OPT(names) EnumOptions{ names, (int)(sizeof(names) / sizeof(names[0])) }
+
+static const std::unordered_map<std::string, EnumOptions> kEnumSettings = {
+	{ "Shaders.Tonemapping.Main.TonemappingMode",      ENUM_OPT(kTonemappingModeNames) },
+	{ "Shaders.Tonemapping.Interiors.TonemappingMode", ENUM_OPT(kTonemappingModeNames) },
+	{ "Shaders.Cinema.Main.Mode",                      ENUM_OPT(kDialogModeNames) },
+	{ "Shaders.DepthOfField.FirstPersonView.Mode",     ENUM_OPT(kDialogModeNames) },
+	{ "Shaders.DepthOfField.ThirdPersonView.Mode",     ENUM_OPT(kDialogModeNames) },
+	{ "Shaders.DepthOfField.VanityView.Mode",          ENUM_OPT(kDialogModeNames) },
+	{ "Main.SleepingMode.Main.Mode",                   ENUM_OPT(kSleepingModeNames) },
+	{ "Shaders.ShadowsExteriors.ShadowMaps.Mode",      ENUM_OPT(kShadowsModeNames) },
+};
+
+#undef ENUM_OPT
+
 static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool isShader = false) {
 	using NodeType = SettingManager::Configuration::NodeType;
 
@@ -1384,25 +1425,22 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 	case NodeType::Integer: {
 		int val = atoi(node.Value);
 		int newVal = val;
-		if (strcmp(node.Key, "TonemappingMode") == 0) {
-			static const char* kNames[] = {
-				"0 - None (vanilla)", "1 - VTLottes", "2 - NVRLottes",
-				"3 - Reinhard", "4 - Reinhard Jodie", "5 - ACES Filmic",
-				"6 - ACES Fitted", "7 - Uncharted 2", "8 - Uchimura (GT)",
-				"9 - AGX", "10 - DICE",
-			};
-			static const int kCount = (int)(sizeof(kNames) / sizeof(kNames[0]));
-			int clamped = ImClamp(val, 0, kCount - 1);
-			if (ImGui::BeginCombo(node.Key, kNames[clamped])) {
-				for (int i = 0; i < kCount; i++) {
+		std::string enumKey = std::string(node.Section) + "." + node.Key;
+		auto enumIt = kEnumSettings.find(enumKey);
+		if (enumIt != kEnumSettings.end()) {
+			const char* const* names = enumIt->second.Names;
+			int count = enumIt->second.Count;
+			int clamped = ImClamp(val, 0, count - 1);
+			if (ImGui::BeginCombo(node.Key, names[clamped])) {
+				for (int i = 0; i < count; i++) {
 					bool sel = (clamped == i);
-					if (ImGui::Selectable(kNames[i], sel)) newVal = i;
+					if (ImGui::Selectable(names[i], sel)) newVal = i;
 					if (sel) ImGui::SetItemDefaultFocus();
 				}
 				ImGui::EndCombo();
 			}
 			if (ImGui::IsItemHovered() && (s_plusPressed || s_minusPressed))
-				newVal = ImClamp(clamped + (s_plusPressed ? 1 : -1), 0, kCount - 1);
+				newVal = ImClamp(clamped + (s_plusPressed ? 1 : -1), 0, count - 1);
 		} else {
 			if (ImGui::DragInt(node.Key, &newVal, 1.0f)) {}
 		}
