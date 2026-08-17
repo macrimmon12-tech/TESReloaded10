@@ -330,9 +330,9 @@ SoftEdges = false                      # Wrap lighting instead of clamped diffus
 
 [_Shaders.Flashlight.MaterialLight]
 Enabled = false                        # Re-light nearby static geometry with its own normals, normal map and specular settings, instead of relying on normals reconstructed from depth
-Intensity = 0.3                        # Strength of the re-lit contribution
-Specular = 8.0                         # Scales the specular highlight. Multiplies the material own specular strength
-NormalStrength = 2.5                   # Scales the sideways component of the normal map
+Intensity = 0.015                      # Strength of the re-lit contribution
+Specular = 0.5                         # Scales the specular highlight. Multiplies the material own specular strength
+NormalStrength = 1.0                   # Scales the sideways component of the normal map. 1.0 uses the map as authored
 MaxGeometry = 2048                     # Cap on the number of objects re-lit in one frame
 DebugMode = 0                          # 0 renders normally, 1 to 7 visualise the pass, 8 draws everything it captured through walls
 
