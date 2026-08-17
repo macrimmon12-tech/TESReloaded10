@@ -493,7 +493,17 @@ toolchain, `toml11` submodule not checked out here) — written against
 confirmed precedent pulled directly from `SettingManager.cpp`'s own `toml11`
 usage, not guessed.
 
-**Session 2 — Resolution + apply, wired in isolation, minimal debug window.**
+**Session 2 — Resolution + apply, wired in isolation, minimal debug window.** ✅
+Done. Confirmed the `SettingsMain`-ordering concern was a non-issue — the only
+pre-existing read before the insertion point is a blacklisted setting, so
+there's no staleness risk. Two real bugs caught in review before push:
+`GetEditorID()` doesn't exist in this codebase (fixed to `GetEditorName()`,
+carried over from the rejected prototype without checking `Game.h` first),
+and `Config.DefaultConfig`'s top-level keys needed their leading `_` stripped
+to match `SetSettingF`'s calling convention for the raw-defaults fallback path
+— every raw-defaults apply would have silently no-op'd otherwise. Not
+build-verified in this environment (no MSVC toolchain here).
+
 Implement the resolution function (§ "Resolution order") and apply mechanism
 (§ "Application mechanism"). Wire the trigger into
 `ShaderManager::UpdateConstants()` gated on `GameState.isCellChanged` —
