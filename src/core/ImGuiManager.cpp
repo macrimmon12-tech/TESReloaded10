@@ -110,6 +110,12 @@ static bool  s_devFreecamOn   = false;
 static bool  s_devMenusHidden = false;
 static bool  s_screenshotMode = false;
 
+// ---- Preset Manager debug window (Session 2) --------------------------
+// Minimal read-only skeleton -- Session 5 promotes this into the real
+// status-indicator/save-button UI (docs/preset-manager-design.md
+// § "Implementation session plan").
+static bool  s_presetDebugOpen = false;
+
 static void CfabSaveBaselines() {
 	if (!TheSettingManager || s_cfabBase.loaded) return;
 	s_cfabBase.saturation   = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "Saturation");
@@ -436,6 +442,42 @@ static void RenderConfabulator() {
 		}
 		ImGui::EndTable();
 	}
+
+	ImGui::End();
+}
+
+// ---- Preset Manager debug window (Session 2) --------------------------
+
+static const char* PresetTierName(PresetManager::ResolvedTier tier) {
+	switch (tier) {
+	case PresetManager::ResolvedTier::Keyword:  return "Keyword";
+	case PresetManager::ResolvedTier::Override: return "Override";
+	default:                                    return "Default";
+	}
+}
+
+static void RenderPresetDebugPanel() {
+	if (!s_presetDebugOpen) return;
+
+	ImGui::SetNextWindowSize(ImVec2(360.0f, 200.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(540.0f, 380.0f), ImGuiCond_FirstUseEver);
+
+	if (!ImGui::Begin("NVR Preset Manager [debug]", &s_presetDebugOpen)) {
+		ImGui::End();
+		return;
+	}
+
+	const auto& r = PresetManager::GetLastResolveResult();
+
+	ImGui::Text("Cell EditorID:       %s", r.CellEditorID.empty() ? "(none)" : r.CellEditorID.c_str());
+	ImGui::Text("Worldspace EditorID: %s", r.WorldspaceEditorID.empty() ? "(none)" : r.WorldspaceEditorID.c_str());
+	ImGui::Text("IsInterior:          %s", r.IsInterior ? "true" : "false");
+	ImGui::Text("Keyword:             %s", r.Keyword.empty() ? "(none)" : r.Keyword.c_str());
+	ImGui::Separator();
+	ImGui::Text("Resolved tier:       %s", PresetTierName(r.Tier));
+	ImGui::Text("Resolved file:       %s",
+		r.UsedRawDefaults ? "(raw TOML defaults -- no Default preset authored yet)"
+		: (r.PresetName.empty() ? "(none)" : r.PresetName.c_str()));
 
 	ImGui::End();
 }
@@ -2077,6 +2119,8 @@ void ImGuiManager::BuildUI() {
 			s_devOpen = !s_devOpen;
 			if (!s_devOpen) DevPanelCleanup();
 		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Presets [debug]")) s_presetDebugOpen = !s_presetDebugOpen;
 		if (s_devFreecamOn) {
 			ImGui::SameLine();
 			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[freecam]");
@@ -2102,4 +2146,5 @@ void ImGuiManager::BuildUI() {
 	ImGui::End();
 	RenderConfabulator();
 	RenderDevPanel();
+	RenderPresetDebugPanel();
 }

@@ -8,6 +8,7 @@
 
 std::unordered_map<std::string, std::string>	PresetManager::s_cellToKeyword;
 std::unordered_map<std::string, UInt32>		PresetManager::s_keywordCellCount;
+PresetManager::ResolveResult					PresetManager::s_lastResolveResult;
 
 // ---- setting-scope blacklist ---------------------------------------------
 // docs/preset-manager-design.md § "Setting scope -- a blacklist, still needed"
@@ -149,7 +150,17 @@ static void WalkPresetTable(const tomlValue& Node, const std::string& SectionPat
 
 	for (const auto& [key, child] : Node.as_table()) {
 		if (child.is_table()) {
-			std::string childPath = SectionPath.empty() ? key : SectionPath + "." + key;
+			// Top-level table keys in TheSettingManager->Config.DefaultConfig
+			// carry a leading '_' (matching the raw TOML's [_Main...] section
+			// headers) that SettingManager::Configuration::FillNode always
+			// re-adds itself before every lookup -- strip it here so Section
+			// strings we produce match the no-underscore convention
+			// SetSettingF/GetSettingF's public API expects. Only matters when
+			// walking DefaultConfig directly (see ReadRawDefaults); harmless
+			// no-op for ordinary preset files, which never have this prefix.
+			std::string segment = (SectionPath.empty() && !key.empty() && key.front() == '_')
+				? key.substr(1) : key;
+			std::string childPath = SectionPath.empty() ? segment : SectionPath + "." + segment;
 			WalkPresetTable(child, childPath, Out);
 			continue;
 		}
@@ -236,4 +247,135 @@ bool PresetManager::WritePreset(const std::string& Name, const PresetData& Data)
 	file << root << std::endl;
 	file.close();
 	return true;
+}
+
+// ---- Session 2: resolution + apply ---------------------------------------
+// docs § "Resolution order", § "Application mechanism"
+
+bool PresetManager::ReadRawDefaults(PresetData& OutData) {
+	OutData.clear();
+	if (!TheSettingManager) return false;
+	WalkPresetTable(TheSettingManager->Config.DefaultConfig, "", OutData);
+	return true;
+}
+
+bool PresetManager::ResolveCurrentLocation(TESObjectCELL* Cell, PresetData& OutTarget, ResolveResult& OutResult) {
+	OutTarget.clear();
+	OutResult = ResolveResult{};
+
+	if (!Cell) return false;
+
+	const char* cellEdID = Cell->GetEditorName();
+	OutResult.CellEditorID = cellEdID ? cellEdID : "";
+	OutResult.IsInterior = Cell->IsInterior();
+
+	if (OutResult.IsInterior) {
+		// 1. cell-specific Override always wins, checked regardless of keyword.
+		if (!OutResult.CellEditorID.empty() && PresetExists(OutResult.CellEditorID)) {
+			OutResult.Tier = ResolvedTier::Override;
+			OutResult.PresetName = OutResult.CellEditorID;
+			return ReadPreset(OutResult.PresetName, OutTarget);
+		}
+
+		// 2. Keyword preset, if the cell has a tag AND a matching preset exists.
+		if (!OutResult.CellEditorID.empty()) {
+			const std::string* keyword = GetKeywordForCell(OutResult.CellEditorID);
+			if (keyword) {
+				OutResult.Keyword = *keyword;
+				if (PresetExists(*keyword)) {
+					OutResult.Tier = ResolvedTier::Keyword;
+					OutResult.PresetName = *keyword;
+					return ReadPreset(OutResult.PresetName, OutTarget);
+				}
+			}
+		}
+
+		// 3. DefaultInterior, or raw TOML defaults if it hasn't been authored yet.
+		OutResult.Tier = ResolvedTier::Default;
+		if (PresetExists(kDefaultInteriorName)) {
+			OutResult.PresetName = kDefaultInteriorName;
+			return ReadPreset(OutResult.PresetName, OutTarget);
+		}
+		OutResult.UsedRawDefaults = true;
+		return ReadRawDefaults(OutTarget);
+	}
+	else {
+		TESWorldSpace* worldSpace = Cell->worldSpace;
+		const char* wsEdID = worldSpace ? worldSpace->GetEditorName() : nullptr;
+		OutResult.WorldspaceEditorID = wsEdID ? wsEdID : "";
+
+		// 1. worldspace-specific Override always wins.
+		if (!OutResult.WorldspaceEditorID.empty() && PresetExists(OutResult.WorldspaceEditorID)) {
+			OutResult.Tier = ResolvedTier::Override;
+			OutResult.PresetName = OutResult.WorldspaceEditorID;
+			return ReadPreset(OutResult.PresetName, OutTarget);
+		}
+
+		// 2. DefaultExterior, or raw TOML defaults. No keyword tier for
+		// exteriors (docs § "Resolution order").
+		OutResult.Tier = ResolvedTier::Default;
+		if (PresetExists(kDefaultExteriorName)) {
+			OutResult.PresetName = kDefaultExteriorName;
+			return ReadPreset(OutResult.PresetName, OutTarget);
+		}
+		OutResult.UsedRawDefaults = true;
+		return ReadRawDefaults(OutTarget);
+	}
+}
+
+void PresetManager::ApplyPreset(const PresetData& Target) {
+	if (!TheSettingManager) return;
+
+	// Diff against the live value before writing -- SetSettingF/SetSettingS
+	// each trigger a full SettingManager::LoadSettings() internally, so
+	// skipping no-op writes matters here in a way it doesn't for the rare,
+	// user-triggered RevertToSnapshot() this is modeled on.
+	for (const auto& [section, keys] : Target) {
+		for (const auto& [key, value] : keys) {
+			if (value.Type == PresetValue::ValueType::String) {
+				char buf[256] = {};
+				TheSettingManager->GetSettingS(section.c_str(), key.c_str(), buf);
+				if (value.StringValue != buf)
+					TheSettingManager->SetSettingS(section.c_str(), key.c_str(), value.StringValue.c_str());
+			}
+			else {
+				float current = TheSettingManager->GetSettingF(section.c_str(), key.c_str());
+				if (current != value.FloatValue)
+					TheSettingManager->SetSettingF(section.c_str(), key.c_str(), value.FloatValue);
+			}
+		}
+	}
+
+	// Re-sync shader Enabled flags -- same pattern as ImGuiManager.cpp's
+	// RevertToSnapshot(), since a preset can toggle Shaders.*.Status.Enabled.
+	StringList shaders;
+	TheSettingManager->FillMenuSections(&shaders, "Shaders");
+	for (const auto& name : shaders) {
+		bool want = TheSettingManager->GetMenuShaderEnabled(name.c_str());
+		EffectRecord* effect = TheShaderManager->GetEffectByName(name.c_str());
+		if (effect) { effect->Enabled = want; continue; }
+		ShaderCollection* shader = TheShaderManager->GetShaderCollectionByName(name.c_str());
+		if (shader) shader->Enabled = want;
+	}
+
+	TheSettingManager->LoadSettings(); // final refresh, matching RevertToSnapshot's own pattern
+}
+
+void PresetManager::ResolveAndApply(TESObjectCELL* Cell) {
+	PresetData target;
+	ResolveResult result;
+
+	if (!ResolveCurrentLocation(Cell, target, result))
+		return;
+
+	ApplyPreset(target);
+	s_lastResolveResult = result;
+
+	Logger::Log("PresetManager: [Preset] Resolved %s -> tier=%d name='%s' rawDefaults=%d keyword='%s'",
+		result.IsInterior ? result.CellEditorID.c_str() : result.WorldspaceEditorID.c_str(),
+		(int)result.Tier, result.PresetName.c_str(), result.UsedRawDefaults, result.Keyword.c_str());
+}
+
+const PresetManager::ResolveResult& PresetManager::GetLastResolveResult() {
+	return s_lastResolveResult;
 }

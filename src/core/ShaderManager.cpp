@@ -274,7 +274,13 @@ void ShaderManager::UpdateConstants() {
 	GameState.isExterior = !currentCell->IsInterior();// || Player->parentCell->flags0 & TESObjectCELL::kFlags0_BehaveLikeExterior; // < use exterior flag, broken for now
 	GameState.isCellChanged = currentCell != PreviousCell;
 	PreviousCell = currentCell;
-	if (GameState.isCellChanged) TheSettingManager->SettingsChanged = true; // force update constants during cell transition
+	if (GameState.isCellChanged) {
+		TheSettingManager->SettingsChanged = true; // force update constants during cell transition
+		// Preset resolve+apply as early in this function as possible -- before
+		// anything below reads SettingsMain, so nothing this frame observes a
+		// stale value (docs/preset-manager-design.md § "Application mechanism").
+		PresetManager::ResolveAndApply(currentCell);
+	}
 
 	GameState.isUnderwater = Tes->sky->GetIsUnderWater();
 	GameState.isRainy = currentWeather?currentWeather->GetWeatherType() == TESWeather::WeatherType::kType_Rainy : false;
