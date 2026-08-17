@@ -476,3 +476,56 @@ plus the **Save Variant** authoring flow described above.
 None currently outstanding — the last one (global hot-reload wiring) was
 resolved by dropping that feature entirely; see "Debug/authoring tooling"
 above.
+
+## Implementation session plan
+
+Sequential, each depending on the last — every prompt below is self-contained
+enough to hand to a fresh session if split into separate sessions/PRs, since
+each references this doc directly.
+
+**Session 1 — Scaffolding + file I/O, no game-loop or UI.** ✅ Done
+(`src/core/PresetManager.h/.cpp`). Keyword-file parser (§ "Keyword files"),
+preset-file read/write via `toml11` (§ "Preset files," § "Folder layout"),
+setting-scope blacklist (§ "Setting scope — a blacklist"). Wired
+`PresetManager::Initialize()` into `NVSEPlugin_Load` so the keyword cache
+populates at real startup. Not build-verified in this environment (no MSVC
+toolchain, `toml11` submodule not checked out here) — written against
+confirmed precedent pulled directly from `SettingManager.cpp`'s own `toml11`
+usage, not guessed.
+
+**Session 2 — Resolution + apply, wired in isolation, minimal debug window.**
+Implement the resolution function (§ "Resolution order") and apply mechanism
+(§ "Application mechanism"). Wire the trigger into
+`ShaderManager::UpdateConstants()` gated on `GameState.isCellChanged` —
+validate/resolve any ordering conflict with code earlier in that function
+reading `SettingsMain` before this write lands. Add a minimal read-only ImGui
+window: current cell/worldspace EditorID, `IsInterior`, assigned keyword if
+any, resolved tier, resolved filename. No Save/Load/Reload buttons yet.
+
+**Session 3 — Minimal log window in Dev Tools.** Mirror `Logger::Log()` into
+a capped ring buffer (§ "Debug/authoring tooling"), basic scrolling window in
+the existing NVR Dev Tools panel (`ImGuiManager.cpp:472`). No filter yet.
+
+**Session 4 — Variants persistence + diff-stacking.** `EnabledVariants.ini`
+read/write (§ "Persisting which Variants are enabled"), extend the apply
+mechanism to layer active Variants' diffs on top of the resolved base preset
+using file line-order for conflicts (§ "Variants").
+
+**Session 5 — Core authoring UI: location assignment.** Promote Session 2's
+debug window into the real tool: shown/highlighted status indicators and Save
+buttons for interior (Default/Keyword/Override) and exterior
+(Default/Override), escalating OK/Cancel warnings, "Reload current preset"
+(§ "In-game UI — location assignment"). Follow the `CLAUDE.md` DXVK-safe input
+patterns throughout.
+
+**Session 6 — Preset browser / Load.** Persistent preset list, Keyword-
+grouped-first, kind-tagged by name lookup, Load + OK/Cancel, the
+Unsaved/previewing status state (§ "In-game UI — Preset browser / Load").
+
+**Session 7 — Variants UI, Refresh All Presets, remaining Dev Tools items.**
+Variants checkbox panel + Save Variant flow (§ "In-game UI — Variants");
+Refresh All Presets batch action in Dev Tools (§ "Refresh all presets" —
+backfill only, no pruning, confirmation, logged summary); Cell/Worldspace
+`coc`/`cow` picker in Dev Tools (§ Scope); log window's free-text filter +
+"Preset only" checkbox, needing a `[Preset]` tag on every preset-manager log
+call made in prior sessions.
