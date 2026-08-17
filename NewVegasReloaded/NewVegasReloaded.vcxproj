@@ -125,6 +125,7 @@
     <ClCompile Include="..\src\core\ImGuiManager.cpp" />
     <ClCompile Include="..\src\core\Hooks\FormsCommon.cpp" />
     <ClCompile Include="..\src\core\Hooks\GameCommon.cpp" />
+    <ClCompile Include="..\src\core\PresetManager.cpp" />
     <ClCompile Include="..\src\core\RenderManager.cpp" />
     <ClCompile Include="..\src\core\RenderPass.cpp" />
     <ClCompile Include="..\src\core\SettingManager.cpp" />
@@ -228,6 +229,7 @@
     <ClInclude Include="..\src\core\ImGuiManager.h" />
     <ClInclude Include="..\src\core\Hooks\FormsCommon.h" />
     <ClInclude Include="..\src\core\Hooks\GameCommon.h" />
+    <ClInclude Include="..\src\core\PresetManager.h" />
     <ClInclude Include="..\src\core\RenderManager.h" />
     <ClInclude Include="..\src\core\RenderPass.h" />
     <ClInclude Include="..\src\core\SettingManager.h" />
