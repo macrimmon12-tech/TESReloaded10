@@ -336,23 +336,19 @@ namespace MaterialPass {
 		return apObject && CdeclCall<bool>(0x43B300, kRTTI_NiSwitchNode, apObject);
 	}
 
+	// Shade types this pass will re-light. Doubles as the guard for the BSShaderProperty cast in
+	// CaptureGeometry: every type listed here derives from it, so passing this test makes the
+	// cast safe as well.
+	//
+	// The wider set of BSShaderProperty types also takes in kProp_NoLighting, kProp_DistantLOD
+	// and kProp_TallGrass, and those are excluded deliberately - a mesh marked unlit should stay
+	// unlit, a distant LOD stand-in is meant to be hidden behind the real thing rather than lit
+	// alongside it, and grass proxies are lit by their own shader.
 	static bool IsLightingShadeType(NiShadeProperty::ShaderPropType aeType) {
 		return aeType == NiShadeProperty::kProp_Lighting ||
 			aeType == NiShadeProperty::kProp_PPLighting ||
 			aeType == NiShadeProperty::kProp_Lighting30 ||
 			aeType == NiShadeProperty::kProp_Hair ||
-			aeType == NiShadeProperty::kProp_SpeedTreeBranch ||
-			aeType == NiShadeProperty::kProp_SpeedTreeLeaf;
-	}
-
-	static bool HasBSShaderFlags(NiShadeProperty::ShaderPropType aeType) {
-		return aeType == NiShadeProperty::kProp_Lighting ||
-			aeType == NiShadeProperty::kProp_PPLighting ||
-			aeType == NiShadeProperty::kProp_Lighting30 ||
-			aeType == NiShadeProperty::kProp_Hair ||
-			aeType == NiShadeProperty::kProp_NoLighting ||
-			aeType == NiShadeProperty::kProp_DistantLOD ||
-			aeType == NiShadeProperty::kProp_TallGrass ||
 			aeType == NiShadeProperty::kProp_SpeedTreeBranch ||
 			aeType == NiShadeProperty::kProp_SpeedTreeLeaf;
 	}
@@ -505,7 +501,7 @@ namespace MaterialPass {
 		const auto shadeType = shade->m_eShaderType;
 		const bool skinned = apGeometry->skinInstance != nullptr;
 
-		if (!HasBSShaderFlags(shadeType))
+		if (!IsLightingShadeType(shadeType))
 			return;
 
 		auto* property = static_cast<BSShaderProperty*>(shade);
@@ -661,10 +657,17 @@ namespace MaterialPass {
 		// a depth value that ought to compare equal, and only an inclusive comparison lets an
 		// equal depth redraw through. It used to set no ZFUNC at all and inherit whatever the
 		// engine last left, which is not stable frame to frame - the sky and particles leave
-		// compares of their own behind. Set it explicitly. Do not try to infer the direction
-		// from whatever happens to be set either - ask the renderer, exactly as ShadowManager
-		// does, because this game runs an inverted depth buffer on some setups and the wrong
-		// direction turns the test inside out and draws precisely what is occluded.
+		// compares of their own behind. So it is set explicitly.
+		//
+		// LESSEQUAL is chosen from measurement, and it contradicts what the surrounding code
+		// would predict. On the setup this was developed on RenderManager::IsReversedDepth() is
+		// true, the Z clear is 0, the projection carries the reversed formula, and the engine's
+		// own world render leaves ZFUNC on GREATEREQUAL - so deriving the direction the way
+		// ShadowManager::RenderShadowMaps does yields GREATEREQUAL. Setting GREATEREQUAL here
+		// draws the geometry that is occluded, straight through walls; LESSEQUAL respects
+		// occlusion correctly. Why the two disagree is not understood, so the measured value
+		// stands rather than the derived one. Untested on a non-inverted buffer: if this pass
+		// draws nothing there, this line is the first thing to try flipping.
 		//
 		// DebugMode 8 deliberately drops the depth test entirely, so every object the pass
 		// queued is drawn through whatever is in front of it. That answers "did this object
@@ -791,10 +794,48 @@ namespace MaterialPass {
 		// the depth buffer runs. Only the projected position moves; worldRel keeps the true
 		// position so the lighting is unaffected.
 		//
-		// The magnitude matters more than it looks. 0.001 was enough to reach through real
-		// geometry on an inverted depth buffer, which reads as a wallhack; 0.00001 still
-		// clears the float error in the rebuilt projection by a wide margin while staying far
-		// below the separation between any two real surfaces.
+		// 0.999 is measured, not derived, and the arithmetic argument for a smaller pull does not
+		// survive contact with the game. On paper 0.00001 looks ample - it clears the float error
+		// in the rebuilt projection a hundred times over, where 0.001 clears it ten thousand
+		// times over and reaches several units at long range. Tried it: it made the decal
+		// artifact below strictly worse, spreading it from third person only to both cameras.
+		//
+		// The artifact: with MaterialLight on, a wall poster in one interior is hidden, and
+		// whether it is hidden depends on whether a weapon is drawn. What is measured about it,
+		// and no more than this - the mechanism is not established:
+		//
+		//   - This pass does identical work in both weapon states. Instrumented, with the light
+		//     pinned to the camera so its position cannot vary: same light position, direction,
+		//     cone, colour and intensity, same 130 items queued, same 130 drawn. Identical input
+		//     and identical work cannot produce a different picture, so whatever differs is
+		//     outside this pass.
+		//   - The pass is still a participant: turning MaterialLight off removes the artifact,
+		//     and changing this offset changes how widely it appears.
+		//   - Alpha blended geometry is skipped by ShouldQueueGeometry and does not write depth
+		//     in Gamebryo, so at a decal the depth buffer holds the wall behind it. That makes
+		//     the depth buffer the leading suspect for what differs, but it is not confirmed:
+		//     DebugMode 8 does not isolate it, because x-ray swaps the shading to a flat colour
+		//     at the same time as it drops the depth test.
+		//
+		//   - The offset is NOT the cause. Removing it outright was tried, together with matching
+		//     the engine's arithmetic exactly - one concatenated world-view-projection applied to
+		//     the local position, the way Better Flashlight NVSE does it and the way the engine
+		//     itself transforms, rather than splitting the multiply across the shader. The
+		//     poster was unchanged and the flicker this offset exists to fix came straight back.
+		//     So the split multiply is not the whole source of the depth mismatch either; the
+		//     camera relative form used here is equivalent to the engine's absolute one but not
+		//     bit identical to it.
+		//
+		// So this offset is not purely a tie-break - its magnitude also decides how much hidden
+		// geometry survives. It is not the artifact's cause, but it is entangled with it.
+		// Leave it where it was measured.
+		//
+		// Where to look next: RenderFirstPersonHook clears the Z buffer before drawing the
+		// viewmodel, and the matching clear in RenderWorldSceneGraphHook is skipped when
+		// IsFirstPerson is set, so in first person that clear is delegated to a hook that only
+		// runs when there is a viewmodel to draw. That is a depth buffer difference that tracks
+		// weapon state and sits outside this pass, which is the shape the measurements call for.
+		// Establishing it means logging the order of those two hooks against this draw.
 		device->SetVertexShaderConstantF(0, (float*)&TheRenderManager->ViewProjMatrix, 4);
 
 		device->SetPixelShaderConstantF(0, (float*)&lightColor, 1);
