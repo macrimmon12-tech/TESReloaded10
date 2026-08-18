@@ -80,10 +80,12 @@ VS_OUTPUT main(VS_INPUT IN) {
     float3 lighting = GetLighting(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[1]).rgb);
     float spec = GetSpecular(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[1]).rgb);
 
+    // Outside the guard: the skylight needs this normal whether or not forward shadows
+    // are compiled in, and ForwardShadows is a live setting that can switch them off.
+    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
 #if FORWARD_SHADOWS
     // Forward sun shadow. Scales the SUN terms only; the point light and ambient are untouched.
     // ddx/ddy must stay at top level, outside dynamic flow control.
-    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
     float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
                     ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
                     : 1.0f;

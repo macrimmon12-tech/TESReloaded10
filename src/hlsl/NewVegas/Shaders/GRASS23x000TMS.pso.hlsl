@@ -26,9 +26,11 @@ PS_OUTPUT main(PS_INPUT IN) {
 
     float3 sun = IN.sun.xyz;
 
+    // Outside the guard: the skylight needs this normal whether or not forward shadows
+    // are compiled in, and ForwardShadows is a live setting that can switch them off.
+    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
 #if FORWARD_SHADOWS
     // ddx/ddy must stay at top level, outside dynamic flow control.
-    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
     sun *= SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
          ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
          : 1.0f;
