@@ -151,33 +151,86 @@ dedicated sessions per task. Check items off as they land.
   - Constraint: DX9 `ps_3_0` only — no compute shaders, no history/velocity
     buffer today, so this stays screen-space-only (no off-screen bounce,
     no temporal accumulation) unless a history buffer is added separately.
-- [ ] **Normals: Boris' NMS technique** — implement Boris' normal map
-  sampling (NMS) technique for improved normals.
-  - **Concept.** Light-direction-dependent self-shadowing computed from the
-    actual per-material tangent-space normal map at full texel resolution
-    (brick mortar, cobblestone, cloth weave). Compares the bump's implied
-    slope against the real light direction and attenuates lighting where
-    the bump would self-shadow — a cheap stand-in for real
-    parallax-occlusion self-shadowing, no ray marching. Shadows visibly
-    shift/lengthen as the sun moves.
-  - **Where it has to live.** Per-object material shaders (`PBR.hlsl` and
-    whichever `SLS*/PAR*` family shaders route through it) — **not** the
-    post-process `Effects/` pipeline. `TESR_NormalsBuffer` is derived
-    purely from the depth buffer (`Normals.fx.hlsl`'s `ComputeNormals()`,
-    the bgolus depth-derivative technique) and then heavily blurred
-    (`BlurNormals()`, 24-tap, `dropTreshold = 0.82`), so by the time
-    normals reach that buffer the material-level bump detail NMS needs is
-    already gone. Cannot be built as a post-process pass.
-  - **Scope/risk.** The biggest, riskiest item in this batch — touches
-    lighting correctness across most in-game object shaders, not a single
-    self-contained file. Needs its own design pass before implementation
-    (where exactly the light vector and tangent-space normal are already
-    in scope per shader family, how to expose strength as a setting, etc).
-  - **Sequencing recommendation.** Implement after the AO fixes and the
-    curvature/cavity task below are in and tuned — NMS will lower the
-    baseline lit brightness of bumpy surfaces before AO/curvature/specular
-    occlusion ever run on them, so those effects' clamp floors should be
-    tuned against NMS's output, not the other way around.
+- [ ] **Material-level cavity shading + normal strength** — two small,
+  cheap levers to make per-material normal-mapped bump detail read more
+  strongly, without self-shadowing or ray marching.
+
+  <details>
+  <summary>Design plan</summary>
+
+  **Origin.** Evaluated (and shelved) Boris Vorontsov's Normal Mapping
+  Shadows (NMS) technique first — light-direction-dependent self-shadowing
+  by marching along the light's tangent-plane projection and accumulating
+  slope from the normal map (`enbdev.com` NMS paper + reference ShaderToy
+  implementation). Shelved for two reasons: (1) its natural hook point is
+  `ObjectTemplate.hlsl`'s `shadowMultiplier`/`PROJ_SHADOW` handling, which
+  is actively being reworked by a separate forward-shadows effort — real
+  file/line-level collision risk, not just a "same repo" concern; (2) real
+  perf risk — unlike the existing opt-in parallax self-shadow
+  (`getParallaxShadowMultipler`, which only materials with a height map pay
+  for), NMS would run its multi-sample march on *every* SLS-lit pixel with
+  a normal map, i.e. nearly all world geometry, with no cheap way to scope
+  it down short of a full distance-LOD system. The two techniques below get
+  most of the "punchier bump" win at a fraction of the cost and risk, and
+  don't touch the shadow-receiving code path at all.
+
+  **1. Normal strength.** Scale the tangent-space normal's X/Y before
+  renormalizing, right where it's decoded in `ObjectTemplate.hlsl`:
+  ```hlsl
+  float4 normal = tex2D(NormalMap, IN.uv.xy);
+  normal.xyz = normalize(expand(normal.xyz));
+  normal.xy *= NormalStrength;        // new
+  normal.xyz = normalize(normal.xyz); // re-normalize after scaling
+  ```
+  One multiply and one extra `normalize` — negligible next to the PBR math
+  already running per pixel. `TESR_PBRExtraData.y` is a free channel
+  (`PBR.cpp` already registers this struct; `.x` holds `Saturation`), so
+  this needs no new registered constant — just a new `NormalStrength`
+  setting under `[Shaders.PBR.*]` following the existing
+  Saturation/Metallicness/Roughness pattern already in `PBR.cpp`'s
+  `UpdateSettings()`/`UpdateConstants()`. Values >1 exaggerate slope
+  (punchier, but can blow out at grazing angles and make normal-map tiling
+  more visible); <1 flattens it.
+
+  **2. Material micro-cavity.** Reuses the screen-space-derivative trick
+  already in this codebase (`PBR.hlsl`'s `SpecularAA()`, which calls
+  `ddx(normal)`/`ddy(normal)` to widen the specular lobe where the normal
+  changes fast) — repurposed to darken instead of blur. Where the
+  *material* normal changes rapidly between neighboring pixels, that's a
+  crease or pore in the bump map; darken slightly to fake contact shadow in
+  the cracks, with no extra texture fetch and no marching:
+  ```hlsl
+  float3 dndu = ddx(normal.xyz);
+  float3 dndv = ddy(normal.xyz);
+  float cavity = saturate(1.0 - (dot(dndu, dndu) + dot(dndv, dndv)) * CavityStrength);
+  baseColor.rgb *= cavity; // or fold into the ambient/diffuse term
+  ```
+  Screen-space-derivative-driven, so it's resolution/mip dependent — can get
+  noisy at glancing angles or on minified distant textures, the same
+  caveat `SpecularAA` already lives with. Not light-direction dependent
+  (static), unlike NMS would have been.
+
+  **Where these live.** Both need only the already-sampled tangent normal —
+  no `NormalMap` sampler/UV lookup beyond the one already in
+  `ObjectTemplate.hlsl` — so the actual per-pixel math can live in
+  `Includes/PBR.hlsl` or `Includes/Object.hlsl` rather than needing new call
+  sites deep in `ObjectTemplate.hlsl`'s `main()`. Neither touches
+  `shadowMultiplier`/`PROJ_SHADOW`, so both stay clear of the concurrent
+  forward-shadows work.
+
+  **Relationship to the curvature/cavity task below.** Same "darken
+  crevices" idea, different frequency band: this operates on the per-object
+  `NormalMap` at full material-texel resolution (mortar lines, cobblestone
+  dips, cloth weave); the curvature/cavity task operates on
+  `TESR_NormalsBuffer`, which is depth-derived and heavily blurred and so
+  only ever sees geometric silhouette-scale detail (a doorframe corner, a
+  rock's profile). Not redundant — complementary, different pipeline
+  stages, worth doing both.
+
+  **Status.** Discussed/planned only — not yet implemented or tested
+  in-game.
+
+  </details>
 - [ ] **Skin shader** — new shader for skin rendering (subsurface-style
   response, etc.).
 - [ ] **Grass shader (maybe)** — exploratory; may not be pursued.
@@ -190,18 +243,19 @@ dedicated sessions per task. Check items off as they land.
     new render target; can likely fold directly into
     `AmbientOcclusion.fx.hlsl`'s `Combine()` pass since that buffer is
     already bound there.
-  - **Important caveat.** As noted under the NMS task, `TESR_NormalsBuffer`
-    is depth-derived and then heavily blurred — it carries no material bump
-    detail (mortar lines, cobblestone dips), only coarse geometric
-    silhouette edges (a doorframe corner, a rock's profile). This will read
-    as "geometric edge shading," not a cavity/material-detail map — set
-    expectations accordingly. It's not a substitute for NMS above; the two
-    sit on different frequency bands (silhouette-scale vs.
-    material-bump-scale) and don't redundantly process the same geometry,
-    which is exactly why both are worth doing.
+  - **Important caveat.** As noted under the material-level cavity task
+    above, `TESR_NormalsBuffer` is depth-derived and then heavily blurred —
+    it carries no material bump detail (mortar lines, cobblestone dips),
+    only coarse geometric silhouette edges (a doorframe corner, a rock's
+    profile). This will read as "geometric edge shading," not a
+    cavity/material-detail map — set expectations accordingly. It's not a
+    substitute for the material-level cavity task; the two sit on different
+    frequency bands (silhouette-scale vs. material-bump-scale) and don't
+    redundantly process the same geometry, which is exactly why both are
+    worth doing.
   - **Properties.** Near-zero cost; not light-direction dependent (static
-    darken/lighten regardless of sun angle) — this is the key difference
-    from NMS, which is dynamic and shifts with the sun.
+    darken/lighten regardless of sun angle), same as the material-level
+    cavity task above — neither effect shifts with the sun.
 - [ ] **Animating volumetric fog** — add slow ambient drift motion to
   volumetric fog; not reactive to player movement, just passive atmosphere.
 
@@ -365,20 +419,21 @@ Add design notes, references, and implementation details under each task
 as they're worked on.
 
 **Composability / stacking risk (relevant to the two AO tasks, curvature,
-and NMS above):** all four are, in different ways, "darken small-scale
-detail" effects. They don't conflict technically — different pipeline
-stages, different source buffers, no shared render targets or shader-slot
-collisions — but they *do* overlap visually: crevices, corners, and bump
-detail tend to coincide, so an uncoordinated stack of independent
-multiplies in the same spots compounds toward a crushed/muddy image (the
-classic over-AO'd look from stacking too many occlusion effects without
-coordination). Mitigation: give each effect its own strength/clamp floor
-following the precedent already in the codebase (`AOclamp` in
-`AmbientOcclusion.fx.hlsl:150`, `ClampStrength` in the TOML) so no
-combination can multiply a surface all the way to black. Suggested
+and the material-level cavity task above):** all four are, in different
+ways, "darken small-scale detail" effects. They don't conflict technically
+— different pipeline stages, different source buffers, no shared render
+targets or shader-slot collisions — but they *do* overlap visually:
+crevices, corners, and bump detail tend to coincide, so an uncoordinated
+stack of independent multiplies in the same spots compounds toward a
+crushed/muddy image (the classic over-AO'd look from stacking too many
+occlusion effects without coordination). Mitigation: give each effect its
+own strength/clamp floor following the precedent already in the codebase
+(`AOclamp` in `AmbientOcclusion.fx.hlsl:150`, `ClampStrength` in the TOML)
+so no combination can multiply a surface all the way to black. Suggested
 implementation order, tuning each against the previous: AO fixes/bounce →
-curvature/cavity → specular occlusion → NMS last (since NMS changes the
-baseline everything else tunes against).
+curvature/cavity → specular occlusion → material-level cavity + normal
+strength last (it changes the baseline lit brightness of bumpy surfaces
+that the earlier three get tuned against).
 
 **Other cheap ideas surfaced during AO/GI research, not yet tracked as
 their own tasks:**
@@ -388,5 +443,6 @@ their own tasks:**
   scene luminance drops is one extra lerp for a real day/night realism win.
 - Sky-tinted ambient specular — Fresnel-weighted `GetSkyColor()` (already
   used in `WetWorld.fx.hlsl`) applied to general PBR surfaces, not just
-  puddles. Same track as NMS (lives in `PBR.hlsl`), not the post-process
-  pipeline — bigger lift, not "cheapest tier."
+  puddles. Same track as the material-level cavity task (lives in
+  `PBR.hlsl`), not the post-process pipeline — bigger lift, not "cheapest
+  tier."
