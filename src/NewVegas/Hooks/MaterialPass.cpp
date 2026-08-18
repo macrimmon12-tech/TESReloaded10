@@ -18,6 +18,22 @@ namespace MaterialPass {
 	static constexpr UInt32 kSavedStreamCount = 8;
 	static constexpr UInt32 kSavedTextureCount = 2;
 	static constexpr UInt32 kSavedSamplerStateCount = 5;
+	static constexpr UInt32 kSavedVertexConstants = 8;	// c0-c3 view projection, c4-c7 world
+	static constexpr UInt32 kSavedPixelConstants = 7;	// c0-c4 and c6
+
+	// Every render state this pass overwrites. SavedDeviceState records two values for each
+	// of them, because NiDX9RenderState's cache and the device are not guaranteed to hold
+	// the same one, and putting back only one of the two is what made this pass destructive.
+	// See the comments in Save and Restore for the measurement and the ordering.
+	static const D3DRENDERSTATETYPE kSavedRenderStates[] = {
+		D3DRS_ZENABLE, D3DRS_ZWRITEENABLE, D3DRS_ALPHABLENDENABLE, D3DRS_SRCBLEND,
+		D3DRS_DESTBLEND, D3DRS_ALPHATESTENABLE, D3DRS_STENCILENABLE, D3DRS_CULLMODE,
+		D3DRS_COLORWRITEENABLE, D3DRS_FOGENABLE, D3DRS_ZFUNC, D3DRS_DEPTHBIAS,
+		D3DRS_SCISSORTESTENABLE, D3DRS_CLIPPLANEENABLE, D3DRS_BLENDOP, D3DRS_SEPARATEALPHABLENDENABLE,
+		D3DRS_MULTISAMPLEMASK, D3DRS_SLOPESCALEDEPTHBIAS, D3DRS_MULTISAMPLEANTIALIAS, D3DRS_SRGBWRITEENABLE,
+	};
+	static constexpr UInt32 kSavedRenderStateCount = 20;
+	static constexpr UInt32 kCullModeIndex = 7;	// SetCullMode needs the engine's stencil mapping
 
 	static const char* kVertexShaderSource =
 		"row_major float4x4 gViewProj : register(c0);\n"
@@ -204,10 +220,15 @@ namespace MaterialPass {
 		IDirect3DIndexBuffer9* indexBuffer;
 		StreamState streams[kSavedStreamCount];
 		DWORD fvf;
-		DWORD renderStates[12];
+		DWORD renderStates[kSavedRenderStateCount];		// as NiDX9RenderState believes them
+		DWORD deviceRenderStates[kSavedRenderStateCount];	// as the device actually has them
 		DWORD samplerStates[kSavedTextureCount][kSavedSamplerStateCount];
+		float vertexConstants[kSavedVertexConstants][4];
+		float pixelConstants[kSavedPixelConstants][4];
+		bool constantsSaved;
 
 		void Save(IDirect3DDevice9* apDevice) {
+			NiDX9RenderState* renderState = TheRenderManager ? TheRenderManager->renderState : nullptr;
 			vertexShader = nullptr;
 			pixelShader = nullptr;
 			vertexDeclaration = nullptr;
@@ -216,7 +237,11 @@ namespace MaterialPass {
 			ZeroMemory(textures, sizeof(textures));
 			ZeroMemory(streams, sizeof(streams));
 			ZeroMemory(renderStates, sizeof(renderStates));
+			ZeroMemory(deviceRenderStates, sizeof(deviceRenderStates));
 			ZeroMemory(samplerStates, sizeof(samplerStates));
+			ZeroMemory(vertexConstants, sizeof(vertexConstants));
+			ZeroMemory(pixelConstants, sizeof(pixelConstants));
+			constantsSaved = false;
 
 			apDevice->GetVertexShader(&vertexShader);
 			apDevice->GetPixelShader(&pixelShader);
@@ -228,18 +253,26 @@ namespace MaterialPass {
 			for (UInt32 i = 0; i < kSavedStreamCount; ++i)
 				apDevice->GetStreamSource(i, &streams[i].buffer, &streams[i].offset, &streams[i].stride);
 
-			apDevice->GetRenderState(D3DRS_ZENABLE, &renderStates[0]);
-			apDevice->GetRenderState(D3DRS_ZWRITEENABLE, &renderStates[1]);
-			apDevice->GetRenderState(D3DRS_ALPHABLENDENABLE, &renderStates[2]);
-			apDevice->GetRenderState(D3DRS_SRCBLEND, &renderStates[3]);
-			apDevice->GetRenderState(D3DRS_DESTBLEND, &renderStates[4]);
-			apDevice->GetRenderState(D3DRS_ALPHATESTENABLE, &renderStates[5]);
-			apDevice->GetRenderState(D3DRS_STENCILENABLE, &renderStates[6]);
-			apDevice->GetRenderState(D3DRS_CULLMODE, &renderStates[7]);
-			apDevice->GetRenderState(D3DRS_COLORWRITEENABLE, &renderStates[8]);
-			apDevice->GetRenderState(D3DRS_FOGENABLE, &renderStates[9]);
-			apDevice->GetRenderState(D3DRS_ZFUNC, &renderStates[10]);
-			apDevice->GetRenderState(D3DRS_DEPTHBIAS, &renderStates[11]);
+			// Both halves of every state, because they are NOT guaranteed to agree. Measured:
+			// STENCILENABLE reads 0 on the device and 1 in NiDX9RenderState's cache, and that
+			// disagreement is load bearing. The engine skips a write it believes is redundant,
+			// so for as long as its cache says stencil is on it will never actually switch it
+			// on. A pass that saves one half and restores the other quietly repairs that, and
+			// decals which were never really being stencil tested suddenly are, and vanish.
+			// Put back what was there, disagreement included.
+			for (UInt32 i = 0; i < kSavedRenderStateCount; ++i) {
+				renderStates[i] = renderState ? renderState->GetRenderState(kSavedRenderStates[i]) : 0;
+				apDevice->GetRenderState(kSavedRenderStates[i], &deviceRenderStates[i]);
+			}
+
+			// The shader constant registers this pass writes. Gamebryo splits its constants into
+			// per object ones, which it uploads for every draw, and global ones, which it uploads
+			// only when it believes they have gone stale. Overwriting a global and walking away
+			// leaves the engine convinced its value is still resident, so the next geometry to
+			// use that register silently gets this pass's matrix instead.
+			constantsSaved =
+				SUCCEEDED(apDevice->GetVertexShaderConstantF(0, &vertexConstants[0][0], kSavedVertexConstants)) &&
+				SUCCEEDED(apDevice->GetPixelShaderConstantF(0, &pixelConstants[0][0], kSavedPixelConstants));
 
 			for (UInt32 i = 0; i < kSavedTextureCount; ++i) {
 				apDevice->GetSamplerState(i, D3DSAMP_ADDRESSU, &samplerStates[i][0]);
@@ -252,6 +285,7 @@ namespace MaterialPass {
 
 		void Restore(IDirect3DDevice9* apDevice) {
 			NiDX9RenderState* renderState = TheRenderManager ? TheRenderManager->renderState : nullptr;
+
 			if (renderState) {
 				renderState->SetVertexShader(vertexShader, false);
 				renderState->SetPixelShader(pixelShader, false);
@@ -259,27 +293,6 @@ namespace MaterialPass {
 					renderState->SetVertexDeclaration(vertexDeclaration, false);
 				else
 					renderState->SetFVF(fvf, false);
-				for (UInt32 i = 0; i < kSavedTextureCount; ++i)
-					renderState->SetTexture(i, textures[i]);
-				renderState->SetRenderState(D3DRS_ZENABLE, renderStates[0], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_ZWRITEENABLE, renderStates[1], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_ALPHABLENDENABLE, renderStates[2], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_SRCBLEND, renderStates[3], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_DESTBLEND, renderStates[4], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_ALPHATESTENABLE, renderStates[5], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_STENCILENABLE, renderStates[6], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_CULLMODE, renderStates[7], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_COLORWRITEENABLE, renderStates[8], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_FOGENABLE, renderStates[9], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_ZFUNC, renderStates[10], RenderStateArgs);
-				renderState->SetRenderState(D3DRS_DEPTHBIAS, renderStates[11], RenderStateArgs);
-				for (UInt32 i = 0; i < kSavedTextureCount; ++i) {
-					renderState->SetSamplerState(i, D3DSAMP_ADDRESSU, samplerStates[i][0], false);
-					renderState->SetSamplerState(i, D3DSAMP_ADDRESSV, samplerStates[i][1], false);
-					renderState->SetSamplerState(i, D3DSAMP_MAGFILTER, samplerStates[i][2], false);
-					renderState->SetSamplerState(i, D3DSAMP_MINFILTER, samplerStates[i][3], false);
-					renderState->SetSamplerState(i, D3DSAMP_MIPFILTER, samplerStates[i][4], false);
-				}
 			} else {
 				apDevice->SetVertexShader(vertexShader);
 				apDevice->SetPixelShader(pixelShader);
@@ -287,7 +300,17 @@ namespace MaterialPass {
 					apDevice->SetVertexDeclaration(vertexDeclaration);
 				else
 					apDevice->SetFVF(fvf);
-				for (UInt32 i = 0; i < kSavedTextureCount; ++i) {
+			}
+
+			for (UInt32 i = 0; i < kSavedTextureCount; ++i) {
+				if (renderState) {
+					renderState->SetTexture(i, textures[i]);
+					renderState->SetSamplerState(i, D3DSAMP_ADDRESSU, samplerStates[i][0], false);
+					renderState->SetSamplerState(i, D3DSAMP_ADDRESSV, samplerStates[i][1], false);
+					renderState->SetSamplerState(i, D3DSAMP_MAGFILTER, samplerStates[i][2], false);
+					renderState->SetSamplerState(i, D3DSAMP_MINFILTER, samplerStates[i][3], false);
+					renderState->SetSamplerState(i, D3DSAMP_MIPFILTER, samplerStates[i][4], false);
+				} else {
 					apDevice->SetTexture(i, textures[i]);
 					apDevice->SetSamplerState(i, D3DSAMP_ADDRESSU, samplerStates[i][0]);
 					apDevice->SetSamplerState(i, D3DSAMP_ADDRESSV, samplerStates[i][1]);
@@ -295,6 +318,23 @@ namespace MaterialPass {
 					apDevice->SetSamplerState(i, D3DSAMP_MINFILTER, samplerStates[i][3]);
 					apDevice->SetSamplerState(i, D3DSAMP_MIPFILTER, samplerStates[i][4]);
 				}
+			}
+
+			// Two writes per state, in this order. The first puts NiDX9RenderState's cache back,
+			// which writes the device as a side effect. The second puts the device back on top,
+			// so a state the engine and the device disagreed about goes on disagreeing exactly
+			// as it did. Cull mode is excluded from the second write because it is the one state
+			// this pass sets through the engine, so the engine's value is the right one for both.
+			for (UInt32 i = 0; i < kSavedRenderStateCount; ++i) {
+				if (renderState)
+					renderState->SetRenderState(kSavedRenderStates[i], renderStates[i], RenderStateArgs);
+				if (i != kCullModeIndex)
+					apDevice->SetRenderState(kSavedRenderStates[i], deviceRenderStates[i]);
+			}
+
+			if (constantsSaved) {
+				apDevice->SetVertexShaderConstantF(0, &vertexConstants[0][0], kSavedVertexConstants);
+				apDevice->SetPixelShaderConstantF(0, &pixelConstants[0][0], kSavedPixelConstants);
 			}
 
 			apDevice->SetIndices(indexBuffer);
@@ -651,6 +691,11 @@ namespace MaterialPass {
 	}
 
 	static void ApplyRenderState() {
+		// Through NiDX9RenderState rather than the device, because the engine's own draw path
+		// re-applies its cache: values written only to the device get overwritten part way
+		// through this pass. Measured, by trying it - the depth compare reverted to the
+		// engine's and the pass drew through walls, and the stage 1 normal map was dropped so
+		// the highlights went flat. SavedDeviceState is what makes that safe again.
 		NiDX9RenderState* renderState = TheRenderManager->renderState;
 
 		// This pass re-draws geometry the engine has already drawn, so every fragment lands on
@@ -687,8 +732,27 @@ namespace MaterialPass {
 		renderState->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE, RenderStateArgs);
 		renderState->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE, RenderStateArgs);
 		renderState->SetRenderState(D3DRS_STENCILENABLE, FALSE, RenderStateArgs);
-		renderState->SetRenderState(D3DRS_COLORWRITEENABLE, 15, RenderStateArgs);
+		// The engine renders the world with alpha writes masked off, so the render target's alpha
+		// channel means whatever it meant before this pass ran. Forcing all four channels on made
+		// this pass write alpha 1.0 additively at every pixel it touched, ~126 draws deep, into a
+		// float target that does not clamp. Add light to the colour and leave alpha alone.
+		renderState->SetRenderState(D3DRS_COLORWRITEENABLE,
+			D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE, RenderStateArgs);
 		renderState->SetRenderState(D3DRS_FOGENABLE, FALSE, RenderStateArgs);
+		// A pass that draws its own geometry has to own every state that can reject a fragment,
+		// not just the ones it happens to care about. These two are the last that were left
+		// inherited: whatever the engine had set when the world render finished decided whether
+		// this pass's pixels survived.
+		renderState->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE, RenderStateArgs);
+		renderState->SetRenderState(D3DRS_CLIPPLANEENABLE, 0, RenderStateArgs);
+		// Same reasoning for the rest of the blend equation. Setting SRCBLEND and DESTBLEND only
+		// describes an additive blend if the operator is ADD and no separate alpha path is armed;
+		// both were inherited. MULTISAMPLEMASK likewise decides which samples of the 8x target
+		// this pass is allowed to touch.
+		renderState->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD, RenderStateArgs);
+		renderState->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE, RenderStateArgs);
+		renderState->SetRenderState(D3DRS_MULTISAMPLEMASK, 0xFFFFFFFF, RenderStateArgs);
+		renderState->SetRenderState(D3DRS_SLOPESCALEDEPTHBIAS, 0, RenderStateArgs);
 		renderState->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP, false);
 		renderState->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP, false);
 		renderState->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR, false);
