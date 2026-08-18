@@ -6,6 +6,7 @@ public:
 	FlashlightEffect() : EffectRecord("Flashlight") {
 		spotLightActive = false;
 		SpotLight = nullptr;
+		aimingHoldUntil = 0.0;
 	};
 
 	struct FlashlightSettingsStruct {
@@ -46,6 +47,7 @@ public:
 
 	NiSpotLight* SpotLight;
 	bool	spotLightActive;
+	double	aimingHoldUntil;	// real time the aiming latch holds until, see UpdateConstants
 	int		selectedPass;
 
 	void	UpdateConstants();

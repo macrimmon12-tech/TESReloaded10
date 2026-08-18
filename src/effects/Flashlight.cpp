@@ -88,12 +88,27 @@ void FlashlightEffect::UpdateConstants() {
 			Player->ActorSkinInfo->WeaponForm->weaponType == TESObjectWEAP::WeaponType::kWeapType_OneHandThrown;
 	}
 
-	// The bone the light rides must be chosen from what is equipped, never from the weapon
-	// animation state. IsAiming() is false during the attack and follow-through states, so
-	// testing it here made the light switch between two bones with different positions and
-	// different forward axes on alternating frames while firing - that is the snapping.
+	// Down the sights the light belongs on the gun, whatever AttachToWeapon says: the weapon
+	// is lined up with the view there, so riding the head instead puts the beam behind the
+	// thing the player is looking past.
+	//
+	// IsAiming() cannot be used raw for that. It is false during the attack and follow-through
+	// states, so testing it directly made the light alternate between two bones with different
+	// positions and different forward axes while firing - the snapping the third person path
+	// was fixed for. So it is latched: aiming takes hold immediately, and releasing waits for
+	// the signal to stay false for long enough to bridge the gaps inside a burst. The hold is
+	// in seconds of real time rather than frames so it does not shorten as the framerate rises.
+	//
+	// Melee stays excluded, as it is for AttachToWeapon: there is no sight to look down and no
+	// sensible place on the weapon for the light to sit.
+	static const double kAimingHoldSeconds = 0.35;
+	const double now = TheFrameRateManager->Time;
+	if (Player->IsAiming()) aimingHoldUntil = now + kAimingHoldSeconds;
+	const bool aiming = now < aimingHoldUntil;
+	const bool rideWeapon = (Settings.attachToWeapon || aiming) && !melee && Player->process->IsWeaponOut();
+
 	if (Player->isThirdPerson) {
-		if (Settings.attachToWeapon && !melee && Player->process->IsWeaponOut() && Player->ActorSkinInfo && Player->ActorSkinInfo->WeaponNode) {
+		if (rideWeapon && Player->ActorSkinInfo && Player->ActorSkinInfo->WeaponNode) {
 			WeaponPos = Player->ActorSkinInfo->WeaponNode->m_worldTransform.pos;
 			WeaponRot = Player->ActorSkinInfo->WeaponNode->m_worldTransform.rot;
 		}
@@ -121,7 +136,7 @@ void FlashlightEffect::UpdateConstants() {
 		}
 	}
 	else {
-		if (Settings.attachToWeapon && !melee && Player->process->IsWeaponOut() && Player->firstPersonSkinInfo && Player->firstPersonSkinInfo->WeaponNode) {
+		if (rideWeapon && Player->firstPersonSkinInfo && Player->firstPersonSkinInfo->WeaponNode) {
 			WeaponPos = Player->firstPersonSkinInfo->WeaponNode->m_worldTransform.pos;
 			WeaponRot = Player->firstPersonSkinInfo->WeaponNode->m_worldTransform.rot;
 		}
