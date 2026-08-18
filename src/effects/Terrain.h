@@ -49,6 +49,8 @@ public:
 		float Roughness;
 		float Metallicness;
 		float Saturation;
+		float SkylightingScale;
+		float SkylightingDirectionality;
 	};
 	struct ParallaxSettingsStruct {
 		bool Enabled;
@@ -76,6 +78,8 @@ public:
 	struct TerrainStruct {
 		D3DXVECTOR4		Data;
 		D3DXVECTOR4		ExtraData;
+		// TerrainExtraData is full: x usePBR, y saturation, z NoiseScale, w NoiseTile.
+		D3DXVECTOR4		SkyData;      // x: skylight strength, y: sample directionality
 	};
 	TerrainStruct	Constants;
 

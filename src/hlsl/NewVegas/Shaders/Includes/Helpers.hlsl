@@ -1,3 +1,8 @@
+// Include-guarded: SkyAmbient.hlsl pulls this in so Sky.hlsl's linearize() resolves
+// regardless of the including shader's own include order.
+#ifndef HELPERS_INCLUDED
+#define HELPERS_INCLUDED
+
 #define	expand(v)	        (((v) - 0.5) / 0.5)  // from 0/1 to -1/1
 #define	compress(v)         (((v) * 0.5) + 0.5)  // from -1/1 to 0/1 
 #define	shade(n, l)         max(dot(n, l), 0)
@@ -79,3 +84,5 @@ float3 selectColor(float selector, float3 color0, float3 color1, float3 color2, 
     if (selector >= 0.9 && selector < 1.0) return color9;
     return black.rgb;
 }
+
+#endif

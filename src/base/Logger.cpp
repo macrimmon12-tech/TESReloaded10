@@ -8,8 +8,10 @@ FILE*	Logger::LogFile;
 //#define logperf
 
 TimeLogger::TimeLogger() {
+	// One clock read, not two. system_clock::now() is a real cost on Windows and these are
+	// constructed in hot paths; end is only a scratch value until LogTime overwrites it.
 	start = std::chrono::system_clock::now();
-	end = std::chrono::system_clock::now();
+	end = start;
 };
 
 
@@ -24,7 +26,7 @@ float TimeLogger::LogTime(const char* Name) {
 	end = std::chrono::system_clock::now();
 	std::chrono::duration<double> elapsed_seconds = (end - start) * 1000;
 #ifdef logperf
-	Logger::Log("%s ran in %f ms", Name, elapsed_seconds);
+	Logger::Log("%s ran in %f ms", Name, elapsed_seconds.count());
 #endif
 	start = end; // reset counter
 	return (float)elapsed_seconds.count();

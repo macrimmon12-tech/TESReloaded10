@@ -50,6 +50,13 @@ public:
 		D3DXVECTOR4		ShadowLightPosition[ShadowCubeMapsMax];
 		D3DXVECTOR4		ShadowMapRadius;
 		D3DXVECTOR4		ShadowBlur;
+		// Forward sun shadows, runtime side. x: 1 when the forward path is SUPPRESSED.
+		//
+		// The polarity is deliberate. A constant that fails to reach a shader reads as zero,
+		// and zero here means "not suppressed" -- i.e. the current, working behaviour. The
+		// opposite polarity would turn a dropped constant into silently missing shadows,
+		// which is exactly the failure that made this a compile-time macro in the first place.
+		D3DXVECTOR4		ForwardData;
 	};
 
 	// Settings
@@ -109,6 +116,7 @@ public:
 
 	struct ExteriorsStruct {
 		bool				Enabled;
+		bool				ForwardShadows;
 		bool				UsePointShadowsDay;
 		bool				UsePointShadowsNight;
 		int					Quality;
@@ -174,6 +182,14 @@ public:
 	IDirect3DSurface9* ShadowAtlasSurface;
 	IDirect3DSurface9* ShadowAtlasSurfaceMSAA;
 	IDirect3DSurface9* ShadowAtlasDepthSurface;
+
+	// Ping-pong target for the separable prefilter blur, so that neither pass samples the atlas
+	// while the atlas is bound as the render target -- undefined in D3D9, and a read/write
+	// feedback loop on Vulkan under DXVK.
+	// Initialised here because they are only allocated when Prefilter is on -- unlike the
+	// members above, which RegisterTextures always assigns before anything tests them.
+	IDirect3DTexture9* ShadowAtlasBlurTexture = nullptr;
+	IDirect3DSurface9* ShadowAtlasBlurSurface = nullptr;
 
 	IDirect3DVertexBuffer9* ShadowAtlasVertexBuffer;
 

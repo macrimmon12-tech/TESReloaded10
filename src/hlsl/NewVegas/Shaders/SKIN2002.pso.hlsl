@@ -36,12 +36,16 @@ float4 TESR_DebugVar;
 #include "Includes/helpers.hlsl"
 
 // Structures:
+#include "Includes/PBRScale.hlsl"
+#include "Includes/Shadow.hlsl"
+
 struct VS_INPUT {
     float2 BaseUV : TEXCOORD0;                      // uv
     float3 color_0 : COLOR0;                        // vertex color?
     float4 color_1 : COLOR1;                        // fog color
     float3 texcoord_1 : TEXCOORD1_centroid;         // light direction from the sun
     float3 texcoord_2 : TEXCOORD2_centroid;         // light direction from pointlight
+    float4 shadowWorldPos : TEXCOORD3;              // from SKIN2005.vso, .w = sentinel
     float4 texcoord_4 : TEXCOORD4;                  // attenuation map UV
     float3 texcoord_6 : TEXCOORD6_centroid;         // eye direction
 };
@@ -70,14 +74,26 @@ VS_OUTPUT main(VS_INPUT IN) {
     float3 pointLightDirection = normalize(IN.texcoord_2);
     float atten1 = tex2D(AttenuationMap, IN.texcoord_4.xy).x;
     float atten2 = tex2D(AttenuationMap, IN.texcoord_4.zw).x;
-    float3 pointLightLighting = getPointLight(pointLightDirection, eyeDirection, PSLightColor[2].rgb, glowTexture, normal, atten1, atten2);
+    float3 pointLightLighting = getPointLight(pointLightDirection, eyeDirection, PBRLight(PSLightColor[2]).rgb, glowTexture, normal, atten1, atten2);
 
     // calculate lighting components
-    float3 lighting = GetLighting(lightDirection, eyeDirection, normal, PSLightColor[1].rgb);
-    float spec = GetSpecular(lightDirection, eyeDirection, normal, PSLightColor[1].rgb);
-    float3 sss = GetSSS(lightDirection, normal) * float3(0.5, 0.2, 0.3) * AmbientColor.rgb;
+    float3 lighting = GetLighting(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[1]).rgb);
+    float spec = GetSpecular(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[1]).rgb);
 
-    lighting += sss + spec + pointLightLighting + AmbientColor.rgb;
+    // Outside the guard: the skylight needs this normal whether or not forward shadows
+    // are compiled in, and ForwardShadows is a live setting that can switch them off.
+    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+#if FORWARD_SHADOWS
+    // Forward sun shadow. Scales the SUN terms only; the point light and ambient are untouched.
+    // ddx/ddy must stay at top level, outside dynamic flow control.
+    float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
+                    ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
+                    : 1.0f;
+    lighting *= sunShadow;
+    spec     *= sunShadow;
+#endif
+
+    lighting += spec + pointLightLighting + PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
     float4 finalColor = float4(lighting * baseColor.rgb, baseColor.a * AmbientColor.a);
     finalColor.rgb = ApplyFog(finalColor.rgb, IN.color_1, Toggles);
 

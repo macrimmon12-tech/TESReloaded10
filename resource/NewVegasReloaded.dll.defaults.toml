@@ -1,4 +1,4 @@
-# This file is for the default values of settings. Do not modify
+﻿# This file is for the default values of settings. Do not modify
 
 [_Main.CameraMode.Main]
 ChasingFirst = false    # Use Chasing camera in first person.
@@ -329,17 +329,12 @@ Enabled = false                         # Replace the pipboy light with a post p
 
 
 [_Shaders.Grass.Main]
-WindEnabled = false
-GrassDensity = 1
-WindCoefficient = 0.0
 ScaleX = 1.0
 ScaleY = 1.0
 ScaleZ = 1.0
-MinDistance = 0
-MaxDistance = 0
 
 [_Shaders.Grass.Status]
-Enabled = false                       # Not currently used. Replaces grass shaders and game options.  
+Enabled = false                       # Replaces the grass shaders.
 
 [_Shaders.GodRays.Main]
 DayMultiplier = 1.0                   # Strength of godrays during the day.
@@ -528,6 +523,9 @@ Enabled = false                      # Blur in direction of the camera when turn
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
 AmbientScale = 1.0                   # Ambient lighting scale.
+SkylightingScale = 1.0               # Sky-colour ambient boost. 0 disables it.
+SkylightingMode = 0                  # 0 spherical harmonics, 1 directional sample. Recompiles shaders.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -535,6 +533,8 @@ Saturation = 1.0                     # Color saturation.
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
 AmbientScale = 1.0                   # Ambient lighting scale.
+SkylightingScale = 1.0               # Sky-colour ambient boost. 0 disables it.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -542,6 +542,8 @@ Saturation = 1.0                     # Color saturation.
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
 AmbientScale = 1.0                   # Ambient lighting scale.
+SkylightingScale = 1.0               # Sky-colour ambient boost. 0 disables it.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -549,6 +551,8 @@ Saturation = 1.0                     # Color saturation.
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
 AmbientScale = 1.0                   # Ambient lighting scale.
+SkylightingScale = 1.0               # Sky-colour ambient boost. 0 disables it.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -556,6 +560,8 @@ Saturation = 1.0                     # Color saturation.
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
 AmbientScale = 1.0                   # Ambient lighting scale.
+SkylightingScale = 0.0               # Sky-colour ambient boost. Off indoors: the coefficients describe the exterior sky.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -582,6 +588,13 @@ Enabled = true                       # Rain effect that is blocked by objects ab
 [_Shaders.ShadowsExteriors.Main]
 Quality = 4                          # Quality preset - 0: Low, 1: Medium, 2: High, 3: Full, 4: Custom
 Enabled = true                       # Enable sun shadows using rendered shadow maps.
+ForwardShadows = true                # Evaluate sun shadows per-object in the lighting shaders
+                                     # instead of as a screen-space composite. Scales only the
+                                     # sun term, so shadowed surfaces keep correct ambient/sky
+                                     # light. Takes effect immediately: turning it off hands the
+                                     # cascades back to the deferred pass in the same frame.
+                                     # Starting the game with it false compiles the forward path
+                                     # out entirely, so turning it on then needs a restart.
 Darkness = 0.75                      # Darkness of shadows.
 NightMinDarkness = 0.35              # Darkness of shadows during dark moon phase. Set to 0 to disable shadows completely when there is no moon.
 OrthoMapResolution = 256             # Resolution of the texture used to store the ortho map.
@@ -686,7 +699,11 @@ Intensity = 2.0                      # Rescale the intensity of screenspace shad
 [_Shaders.ShadowsExteriors.ShadowMaps]
 Mode = 2							 # Shadow mode, higher means higher quality, but higher computational cost. 0: VSM, 1: EVSM2, 2: EVSM4
 Format = 0							 # Texture format, higher means higher quality, but higher bandwidth cost. 0: 16 bit, 1: 32 bit
-CascadeResolution = 2				 # Resolution used for shadow cascades. 0: 1024, 1: 1536, 2: 2048
+CascadeResolution = 2				 # Resolution used for shadow cascades. 0: 1024, 1: 1536, 2: 2048,
+                                     # 3: 2560, 4: 3072, 5: 3584. The atlas holds 2x2 cascades, so
+                                     # VRAM and shadow-pass bandwidth scale with the square of this:
+                                     # 3 is ~2.6x the cost of 2, and 5 is ~5x. Clamped down if it
+                                     # exceeds the device's maximum texture size.
 Prefilter = true					 # Enable prefiltering the shadow maps. Prefiltering is a blur.
 MSAA = true							 # Enable multisample antialiasing for shadow maps.
 Mipmaps = false						 # DISABLED. Enable mipmaps for the shadow maps.
@@ -820,6 +837,8 @@ UsePBR = true                       # Use PBR lighting, disable to use vanilla.
 Roughness = 1.0                     # Scale texture roughness, higher roughness decreases specular.
 Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
+SkylightingScale = 1.0              # Sky-colour ambient boost. 0 disables it.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -827,6 +846,8 @@ TerrainSaturation = 1.0             # Control terrain saturation.
 Roughness = 0.7                     # Scale texture roughness, higher roughness decreases specular.
 Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
+SkylightingScale = 1.0              # Sky-colour ambient boost. 0 disables it.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -834,6 +855,8 @@ TerrainSaturation = 1.0             # Control terrain saturation.
 Roughness = 1.0                     # Scale texture roughness, higher roughness decreases specular.
 Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
+SkylightingScale = 1.0              # Sky-colour ambient boost. 0 disables it.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -841,6 +864,8 @@ TerrainSaturation = 1.0             # Control terrain saturation.
 Roughness = 0.6                     # Scale texture roughness, higher roughness decreases specular.
 Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
+SkylightingScale = 1.0              # Sky-colour ambient boost. 0 disables it.
+SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 

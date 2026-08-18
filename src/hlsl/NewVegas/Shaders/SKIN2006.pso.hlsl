@@ -29,11 +29,15 @@ float4 TESR_DebugVar;
 //
 
 #include "Includes/helpers.hlsl"
+#include "Includes/Shadow.hlsl"
 
 // Structures:
 
+#include "Includes/PBRScale.hlsl"
+
 struct VS_INPUT {
     float2 BaseUV : TEXCOORD0;
+    float4 shadowWorldPos : TEXCOORD6;              // from SKIN2013.vso, .w = sentinel
     float3 texcoord_1 : TEXCOORD1_centroid;			// eyeDirection for pointlight1
     float3 texcoord_2 : TEXCOORD2_centroid;			// light direction from pointlight
     float3 texcoord_3 : TEXCOORD3_centroid;			// light direction from pointlight2
@@ -78,9 +82,9 @@ VS_OUTPUT main(VS_INPUT IN) {
     float3 r6;
     float4 texel0;
 
-    const float4 SunLightColor = PSLightColor[1];
-    const float4 PointLight1Color = PSLightColor[2];
-    const float4 PointLight2Color = PSLightColor[3];
+    const float4 SunLightColor = PBRLight(PSLightColor[1]);
+    const float4 PointLight1Color = PBRLight(PSLightColor[2]);
+    const float4 PointLight2Color = PBRLight(PSLightColor[3]);
 
     noxel2.xyz = tex2D(NormalMap, IN.BaseUV.xy);			// partial precision
     r4.xyzw = tex2D(GlowMap, IN.BaseUV.xy);			// partial precision
@@ -107,10 +111,26 @@ VS_OUTPUT main(VS_INPUT IN) {
     q40.xyz = (q11.x * r4.xyzw) + ((PointLight1Color.xyzw * q9.x) + (r4.w * lerp(PointLight1Color.xyzw, r4.wzyx, 0.5)));			// partial precision
     r0.yzw = (PointLight2Color.xyzw * q18.x) + r2.xyzw;			// partial precision
     r5.yzw = ((q13.x * shades(q5.xyz, -IN.texcoord_1)) * SunLightColor.xyzw) * 0.5;			// partial precision
-    r1.yzw = (saturate((1 - att3.x) - att4.x) * q40.xyz) + ((SunLightColor.xyzw * shades(q6.xyz, IN.texcoord_1.xyz)) + r5.yzw);			// partial precision
-    r6.xyz = ((r2.w * ((q19.x * r4.yzw) + r0.yzw)) + r1.yzw) + AmbientColor.rgb;			// partial precision
+    // Sun contribution, kept separate so the shadow scales it alone.
+    float3 sunTerm = (SunLightColor.xyz * shades(q6.xyz, IN.texcoord_1.xyz)) + r5.yzw;
 
-    OUT.color_0.rgba = selectColor(TESR_DebugVar.x, float4(r6, 1), PSLightColor[0], PSLightColor[1], PSLightColor[2], PSLightColor[3], PSLightColor[4], PSLightColor[5], PSLightColor[6], PSLightColor[7], PSLightColor[8]);
+    // Outside the guard: the skylight needs this normal whether or not forward shadows
+    // are compiled in, and ForwardShadows is a live setting that can switch them off.
+    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+#if FORWARD_SHADOWS
+    // ddx/ddy must stay at top level, outside dynamic flow control.
+    float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
+                    ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
+                    : 1.0f;
+    sunTerm *= sunShadow;
+#endif
+
+    r1.yzw = (saturate((1 - att3.x) - att4.x) * q40.xyz) + sunTerm;			// partial precision
+    r6.xyz = ((r2.w * ((q19.x * r4.yzw) + r0.yzw)) + r1.yzw) + PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);			// partial precision
+
+    // Was a debug override: selectColor(TESR_DebugVar.x, ...) emitted a flat light colour
+    // unless the dev var was zero. Kept only the real result.
+    OUT.color_0.rgba = float4(r6, 1);
     return OUT;
 };
 

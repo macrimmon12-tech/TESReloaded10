@@ -150,6 +150,10 @@
 
 #include "includes/Helpers.hlsl"
 #include "includes/Object.hlsl"
+#include "includes/Shadow.hlsl"
+
+// Forward sun shadows. Enabled at COMPILE TIME via FORWARD_SHADOWS in Includes/Shadow.hlsl,
+// deliberately not via a runtime constant -- see the note there.
 
 #ifdef SKIN
     #include "includes/SkinHelpers.hlsl"
@@ -198,7 +202,10 @@ struct VS_OUTPUT {
 #endif
     
     float3 viewDir : TEXCOORD6;
-    
+
+    // TEXCOORD4/5 are free at LIGHTS < 4. .w carries SHADOW_VS_SENTINEL.
+    float4 shadowWorldPos : TEXCOORD4;
+
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
@@ -226,7 +233,6 @@ float4 EyePosition : register(c16);
     float4 ShadowProjTransform : register(c23);
 #endif
 
-float4 TESR_DebugVar : register(c40);
 
 VS_OUTPUT main(VS_INPUT IN) {
     VS_OUTPUT OUT;
@@ -300,6 +306,10 @@ VS_OUTPUT main(VS_INPUT IN) {
         OUT.shadowUVs.zw = ((shadowUV.xy - ShadowProjData.xy) / ShadowProjData.w) * float2(1, -1) + float2(0, 1);
     #endif
 
+    // Model-space shaders: recover a camera-relative world position from the clip position.
+    // Written unconditionally, or the interpolator is left undefined.
+    OUT.shadowWorldPos = float4(GetShadowWorldPos(OUT.sPosition), SHADOW_VS_SENTINEL);
+
     return OUT;
 };
 
@@ -311,6 +321,22 @@ VS_OUTPUT main(VS_INPUT IN) {
     #define MAX_LIGHTS 4
 #else
     #define MAX_LIGHTS 3
+#endif
+
+// Camera-relative world position carrier. At MAX_LIGHTS 6 every TEXCOORD is taken, so it
+// rides in light4/5/6's .w -- a light radius the PS never reads, since attenuation uses
+// PSLightPosition[i].w. Below that, a free interpolator.
+#if MAX_LIGHTS > 4
+    // No fourth channel spare here, so the sentinel rides in lPosition.w. The vertex shader
+    // normally puts LightData[0].w there and this pixel shader never reads it.
+    #define SHADOW_WP_STORE(O, v) O.light4.w = (v).x; O.light5.w = (v).y; O.light6.w = (v).z; O.lPosition.w = SHADOW_VS_SENTINEL
+    #define SHADOW_WP_LOAD(I)     float3((I).light4.w, (I).light5.w, (I).light6.w)
+    #define SHADOW_WP_VALID(I)    SHADOW_VS_PRESENT((I).lPosition.w)
+#else
+    #define SHADOW_WP_DEDICATED
+    #define SHADOW_WP_STORE(O, v) O.shadowWorldPos = float4((v), SHADOW_VS_SENTINEL)
+    #define SHADOW_WP_LOAD(I)     (I).shadowWorldPos.xyz
+    #define SHADOW_WP_VALID(I)    SHADOW_VS_PRESENT((I).shadowWorldPos.w)
 #endif
 
 struct VS_OUTPUT {
@@ -328,6 +354,13 @@ struct VS_OUTPUT {
 #if MAX_LIGHTS > 4
     float4 light5 : TEXCOORD6;
     float4 light6 : TEXCOORD7;
+#endif
+#ifdef SHADOW_WP_DEDICATED
+    #if MAX_LIGHTS > 3
+        float4 shadowWorldPos : TEXCOORD6;
+    #else
+        float4 shadowWorldPos : TEXCOORD5;
+    #endif
 #endif
 };
 
@@ -431,6 +464,11 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.fogColor.a = exp2(fogStrength * FogParam.z);
     OUT.fogColor.rgb = FogColor.rgb;
 
+    // Through SHADOW_WP_STORE: at MAX_LIGHTS 6 this overwrites light4/5/6's .w, which the PS
+    // ignores.
+    float3 shadowWorldPos = GetShadowWorldPos(OUT.sPosition);
+    SHADOW_WP_STORE(OUT, shadowWorldPos);
+
     return OUT;
 };
 #endif // Vertex shaders.
@@ -453,6 +491,7 @@ struct PS_INPUT {
     float4 light3Dir : TEXCOORD3_centroid;
 #endif
     float3 viewDir : TEXCOORD6_centroid;
+    float4 shadowWorldPos : TEXCOORD4;
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
@@ -501,7 +540,6 @@ float4 PSLightColor[10] : register(c3);
     float4 Toggles : register(c27);
 #endif
 
-float4 TESR_DebugVar : register(c40);
 
 PS_OUTPUT main(PS_INPUT IN) {
     PS_OUTPUT OUT;
@@ -526,7 +564,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float roughness = getRoughness(normal.a);
     
     //if (TESR_DebugVar.x > 0.0)
-    //    roughness = SpecularAA(normal.xyz, roughness, TESR_DebugVar.z, TESR_DebugVar.w);
+    //    roughness = SpecularAA(normal.xyz, roughness, TESR_DebugVar.z);
     
     //if (TESR_DebugVar.y > 0.0) {
     //    OUT.color.a = 1;
@@ -558,6 +596,20 @@ PS_OUTPUT main(PS_INPUT IN) {
         shadowMultiplier = lerp(1, shadow, shadowMask);
     #endif
     
+    // Applied to PSLightColor[0], the sun, only: ambient, emittance and point lights are
+    // untouched. ddx/ddy must stay at top level, outside any dynamic branch.
+    #if !defined(DIFFUSE) && !defined(POINT)
+        float3 sunShadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+        // Decline to shadow if a vanilla vertex shader ran: the interpolator is undefined.
+        float sunShadow = 1.0f;
+        #if FORWARD_SHADOWS
+        sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
+                  ? GetSunShadow(IN.shadowWorldPos.xyz, sunShadowNormal)
+                  : 1.0f;
+        #endif
+        shadowMultiplier *= sunShadow;
+    #endif
+
     #if !defined(DIFFUSE) && !defined(POINT)
         float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #else
@@ -572,9 +624,13 @@ PS_OUTPUT main(PS_INPUT IN) {
     #endif
     
     #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
-        lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb);
+        // ddx/ddy must stay at pixel-shader top level, so derive the world normal here rather
+        // than inside getAmbientLighting.
+        float3 ambNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+        lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
+                                       SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
     #endif
-    
+
     // Other light sources.
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
         lighting += getPointLightLighting(IN.light2Dir.xyz, IN.light2Dir.w, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
@@ -595,6 +651,11 @@ PS_OUTPUT main(PS_INPUT IN) {
         #endif
     #endif
     
+
+#if SHADOW_FORCE_MARKER
+    finalColor.rgb = float3(1.0f, 0.0f, 1.0f);   // unconditional: proves this shader ran
+#endif
+
     OUT.color.rgb = finalColor.rgb;
     
     #if defined(DIFFUSE)
@@ -620,6 +681,22 @@ PS_OUTPUT main(PS_INPUT IN) {
     #define MAX_LIGHTS 3
 #endif
 
+// Camera-relative world position carrier. At MAX_LIGHTS 6 every TEXCOORD is taken, so it
+// rides in light4/5/6's .w -- a light radius the PS never reads, since attenuation uses
+// PSLightPosition[i].w. Below that, a free interpolator.
+#if MAX_LIGHTS > 4
+    // No fourth channel spare here, so the sentinel rides in lPosition.w. The vertex shader
+    // normally puts LightData[0].w there and this pixel shader never reads it.
+    #define SHADOW_WP_STORE(O, v) O.light4.w = (v).x; O.light5.w = (v).y; O.light6.w = (v).z; O.lPosition.w = SHADOW_VS_SENTINEL
+    #define SHADOW_WP_LOAD(I)     float3((I).light4.w, (I).light5.w, (I).light6.w)
+    #define SHADOW_WP_VALID(I)    SHADOW_VS_PRESENT((I).lPosition.w)
+#else
+    #define SHADOW_WP_DEDICATED
+    #define SHADOW_WP_STORE(O, v) O.shadowWorldPos = float4((v), SHADOW_VS_SENTINEL)
+    #define SHADOW_WP_LOAD(I)     (I).shadowWorldPos.xyz
+    #define SHADOW_WP_VALID(I)    SHADOW_VS_PRESENT((I).shadowWorldPos.w)
+#endif
+
 struct PS_INPUT {
     float4 vertexColor : COLOR0;
     float4 fogColor : COLOR1;
@@ -636,6 +713,13 @@ struct PS_INPUT {
     float4 light5 : TEXCOORD6_centroid;
     float4 light6 : TEXCOORD7_centroid;
 #endif
+#ifdef SHADOW_WP_DEDICATED
+    #if MAX_LIGHTS > 3
+        float4 shadowWorldPos : TEXCOORD6;
+    #else
+        float4 shadowWorldPos : TEXCOORD5;
+    #endif
+#endif
 };
 
 struct PS_OUTPUT {
@@ -649,6 +733,7 @@ float4 AmbientColor : register(c1);
 
 float4 PSLightColor[10] : register(c3);
 float4 PSLightPosition[8] : register(c19);
+
 
 #ifndef OPT
     float4 EmittanceColor : register(c2);
@@ -689,8 +774,19 @@ PS_OUTPUT main(PS_INPUT IN) {
     
     float att;
     
+    // Forward sun shadows -- see the LIGHTS < 4 variant. Only the OPT-off path has a sun
+    // term; with OPT the first slot is a point light and must not be shadowed by the sun.
     #ifndef OPT
-        float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        float3 sunShadowWorldPos = SHADOW_WP_LOAD(IN);
+        float3 sunShadowNormal = GetShadowGeometricNormal(sunShadowWorldPos);
+        // Decline to shadow if a vanilla vertex shader ran: the interpolator is undefined.
+        float sunShadow = 1.0f;
+        #if FORWARD_SHADOWS
+        sunShadow = SHADOW_WP_VALID(IN)
+                  ? GetSunShadow(sunShadowWorldPos, sunShadowNormal)
+                  : 1.0f;
+        #endif
+        float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb * sunShadow, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #else
         att = vanillaAtt(PSLightPosition[0].xyz - IN.lPosition.xyz, PSLightPosition[0].w);
         float3 lighting = getPointLightLightingAtt(IN.lightDir.xyz, att, PSLightColor[0].rgb, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
@@ -715,8 +811,11 @@ PS_OUTPUT main(PS_INPUT IN) {
         lighting += (5 > lightsUsed ? 0.0 : 1.0) * getPointLightLightingAtt(IN.light6.xyz, att, PSLightColor[5].rgb, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
-    lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb);
-    
+    // ddx/ddy must stay at pixel-shader top level.
+    float3 ambNormal = GetShadowGeometricNormal(SHADOW_WP_LOAD(IN));
+    lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
+                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f);
+
     // TODO: Vanilla attenuates the full specular term by IN.lPosition.w for some reason. Is this a problem?
     float3 finalColor = lighting;
     
@@ -726,6 +825,11 @@ PS_OUTPUT main(PS_INPUT IN) {
         finalColor.rgb = lerp(finalColor.rgb, IN.fogColor.rgb, IN.fogColor.a);
     #endif
     
+
+#if SHADOW_FORCE_MARKER
+    finalColor.rgb = float3(1.0f, 0.0f, 1.0f);   // unconditional: proves this shader ran
+#endif
+
     OUT.color.rgb = finalColor.rgb;
     OUT.color.a = baseColor.a * AmbientColor.a;
 
