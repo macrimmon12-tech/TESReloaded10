@@ -196,12 +196,9 @@ struct VS_OUTPUT {
 #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
     float4 light3Dir : TEXCOORD3;
 #endif
-
-    float4 dist1 : TEXCOORD4;
-    float4 dist2 : TEXCOORD5;
-
-    float4 viewDir : TEXCOORD6;
-
+    
+    float3 viewDir : TEXCOORD6;
+    
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
@@ -254,40 +251,29 @@ VS_OUTPUT main(VS_INPUT IN) {
         OUT.sPosition.xyzw = mul(SkinModelViewProj, position.xyzw);
     #endif
     
-    OUT.viewDir.w = 0;
-    OUT.dist1 = float4(0, 0, 0, 0);
-    OUT.dist2 = float4(0, 0, 0, 0);
-
     #if defined(DIFFUSE) || defined(POINT)
         float3 light = LightData[0].xyz - position.xyz;
-        OUT.dist1.xyz = light;
     #else
         float3 light = LightData[0].xyz;
     #endif
-
+    
     OUT.lightDir.w = LightData[0].w;
     OUT.lightDir.xyz = mul(tbn, light);
-
+    
     OUT.viewDir.xyz = mul(tbn, EyePosition.xyz - position.xyz);
-
+    
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
         light = LightData[1].xyz - position.xyz;
         OUT.light2Dir.w = LightData[1].w;
         OUT.light2Dir.xyz = mul(tbn, light);
-        OUT.dist1.w = light.x;
-        OUT.dist2.x = light.y;
-        OUT.dist2.y = light.z;
     #endif
-
+    
     #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
         light = LightData[2].xyz - position.xyz;
         OUT.light3Dir.w = LightData[2].w;
         OUT.light3Dir.xyz = mul(tbn, light);
-        OUT.dist2.z = light.x;
-        OUT.dist2.w = light.y;
-        OUT.viewDir.w = light.z;
     #endif
-
+    
     #ifndef NO_VERTEX_COLOR
         OUT.vertexColor = clamp(IN.vertexColor, 0.0f, 1.0f);
     #endif
@@ -466,12 +452,10 @@ struct PS_INPUT {
 #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
     float4 light3Dir : TEXCOORD3_centroid;
 #endif
-    float4 viewDir : TEXCOORD6_centroid;
+    float3 viewDir : TEXCOORD6_centroid;
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
-    float4 dist1 : TEXCOORD4;
-    float4 dist2 : TEXCOORD5;
 };
 
 struct PS_OUTPUT {
@@ -577,12 +561,8 @@ PS_OUTPUT main(PS_INPUT IN) {
     #if !defined(DIFFUSE) && !defined(POINT)
         float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #else
-        // Pointlights only. Attenuation uses the un-rotated (object-space) light
-        // vector rather than IN.lightDir.xyz, since the TBN basis isn't guaranteed
-        // to be orthonormal (mirrored UVs, skinning) and mul(tbn, light) can then
-        // distort the vector length that vanillaAtt relies on.
-        float att1 = vanillaAtt(IN.dist1.xyz, IN.lightDir.w);
-        float3 lighting = getPointLightLightingAtt(IN.lightDir.xyz, att1, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        // Pointlights only.
+        float3 lighting = getPointLightLighting(IN.lightDir.xyz, IN.lightDir.w, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
     // Self emmitance.
@@ -597,15 +577,11 @@ PS_OUTPUT main(PS_INPUT IN) {
     
     // Other light sources.
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
-        float3 light2 = float3(IN.dist1.w, IN.dist2.x, IN.dist2.y);
-        float att2 = vanillaAtt(light2, IN.light2Dir.w);
-        lighting += getPointLightLightingAtt(IN.light2Dir.xyz, att2, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        lighting += getPointLightLighting(IN.light2Dir.xyz, IN.light2Dir.w, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
-
+    
     #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
-        float3 light3 = float3(IN.dist2.z, IN.dist2.w, IN.viewDir.w);
-        float att3 = vanillaAtt(light3, IN.light3Dir.w);
-        lighting += getPointLightLightingAtt(IN.light3Dir.xyz, att3, PSLightColor[2].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        lighting += getPointLightLighting(IN.light3Dir.xyz, IN.light3Dir.w, PSLightColor[2].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
     float3 finalColor = lighting.rgb;
