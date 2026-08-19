@@ -52,7 +52,7 @@ public:
 		D3DXVECTOR4		ShadowBlur;
 		D3DXVECTOR4		BiasData;
 		D3DXVECTOR4		FilterData;
-		D3DXVECTOR4		TemporalData;	// x: enabled, y: history weight, z: near fade distance, w: normal agreement floor
+		D3DXVECTOR4		TemporalData;	// x: enabled, y: history weight
 		D3DXVECTOR4		CameraDelta;	// xyz: current camera position minus the one the history was rendered from
 		D3DXMATRIX		PreviousViewProj;
 		D3DXMATRIX		PreviousViewTransform;
@@ -112,8 +112,6 @@ public:
 		float				EVSMExponent;
 		bool				TemporalFilter;
 		float				TemporalWeight;
-		float				TemporalNearFade;
-		float				TemporalNormalThreshold;
 	};
 
 	struct OrthoStruct {

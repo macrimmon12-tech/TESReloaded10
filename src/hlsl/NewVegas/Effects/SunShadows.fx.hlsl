@@ -15,7 +15,7 @@ float4 TESR_SunAmbient;
 float4 TESR_ShadowFade; // x: sunset attenuation, y: shadows maps active, z: point lights shadows active
 float4 TESR_ShadowBiasData; // x: normal bias (texels), y: slope bias (texels), z: 1 / cascade resolution
 float4 TESR_ShadowFilterData; // x: filter radius (texels), y: light bleed reduction scale
-float4 TESR_ShadowTemporalData; // x: enabled, y: history weight, z: near fade distance, w: normal agreement floor
+float4 TESR_ShadowTemporalData; // x: enabled, y: history weight
 float4 TESR_ShadowCameraDelta; // xyz: current camera position minus the history's
 float4x4 TESR_ShadowPreviousViewProj;
 float4x4 TESR_ShadowPreviousViewTransform;
@@ -377,8 +377,14 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
     float3 currentNormalWS = mul(TESR_ViewTransform, float4(tex2D(TESR_NormalsBuffer, IN.UVCoord).xyz * 2.0f - 1.0f, 1.0f)).xyz;
     float3 historyNormalWS = mul(TESR_ShadowPreviousViewTransform, float4(tex2D(TESR_ShadowNormalsHistoryBuffer, previousUV).xyz * 2.0f - 1.0f, 1.0f)).xyz;
 
+	// Not a tunable. This is the rejection test that makes the filter safe on moving geometry,
+	// not a preference, and there is no picture worth having on either side of it: loosen it and
+	// shadows trail across whatever moved, tighten it and the reuse stops happening at all.
+	// 0.999 is about two and a half degrees of drift.
+    static const float kSameSurfaceDot = 0.999f;
+
 	[branch]
-    if (dot(normalize(currentNormalWS), normalize(historyNormalWS)) < TESR_ShadowTemporalData.w)
+    if (dot(normalize(currentNormalWS), normalize(historyNormalWS)) < kSameSurfaceDot)
         return current; // a different surface was here, whatever its depth said
 
     float history = tex2D(TESR_ShadowHistoryBuffer, previousUV).x;
@@ -389,24 +395,13 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
 	// while sliding across the screen. The history accepted then belongs to a different part of the
 	// object, which smears shadows across the weapon and across the player while moving.
 	//
-	// Distance separates the two problems cleanly, so there is no need to detect the motion at all.
-	// The shimmer this filter exists for is a far field effect - re-quantising a shadow edge is
-	// invisible close up and worst out at the Lod cascade - while everything that moves fast enough
-	// to ghost is near: the viewmodel sits a few tens of units away and the third person camera
-	// holds the player at a couple of hundred. Fading the history in with distance therefore costs
-	// the shimmer fix nothing, because the two regions do not overlap.
-	//
 	// What does NOT work here is neighbourhood clamping, the usual TAA answer to ghosting. TAA
 	// trusts the current frame and treats history as suspect; this filter is the other way round -
 	// the current frame is the re-quantised noisy one and the history is the average being kept. So
 	// clamping history into the current frame's local range re-injects precisely the noise this
 	// filter removes. Measured: it cleared the ghosting and brought the shimmer back with it.
-	//
-	// z of 0 puts the ramp below a single unit, which is the same as switching the fade off.
-    float fadeEnd = max(TESR_ShadowTemporalData.z, 1.0f);
-    float weight = TESR_ShadowTemporalData.y * smoothstep(fadeEnd * 0.5f, fadeEnd, viewDepth);
 
-    current.r = lerp(current.r, history, weight);
+    current.r = lerp(current.r, history, TESR_ShadowTemporalData.y);
     return current;
 }
 
