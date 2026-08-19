@@ -52,9 +52,10 @@ public:
 		D3DXVECTOR4		ShadowBlur;
 		D3DXVECTOR4		BiasData;
 		D3DXVECTOR4		FilterData;
-		D3DXVECTOR4		TemporalData;	// x: enabled, y: history weight, z: near fade distance
+		D3DXVECTOR4		TemporalData;	// x: enabled, y: history weight, z: near fade distance, w: normal agreement floor
 		D3DXVECTOR4		CameraDelta;	// xyz: current camera position minus the one the history was rendered from
 		D3DXMATRIX		PreviousViewProj;
+		D3DXMATRIX		PreviousViewTransform;
 	};
 
 	// Settings
@@ -112,6 +113,7 @@ public:
 		bool				TemporalFilter;
 		float				TemporalWeight;
 		float				TemporalNearFade;
+		float				TemporalNormalThreshold;
 	};
 
 	struct OrthoStruct {
@@ -183,6 +185,8 @@ public:
 		// tell whether the pixel it lands on is the same surface.
 		IDirect3DTexture9* ShadowHistoryTexture;
 		IDirect3DSurface9* ShadowHistorySurface;
+		IDirect3DTexture9* NormalsHistoryTexture;
+		IDirect3DSurface9* NormalsHistorySurface;
 		IDirect3DTexture9* DepthHistoryTexture;
 		IDirect3DSurface9* DepthHistorySurface;
 	};

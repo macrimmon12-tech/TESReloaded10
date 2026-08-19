@@ -15,9 +15,10 @@ float4 TESR_SunAmbient;
 float4 TESR_ShadowFade; // x: sunset attenuation, y: shadows maps active, z: point lights shadows active
 float4 TESR_ShadowBiasData; // x: normal bias (texels), y: slope bias (texels), z: 1 / cascade resolution
 float4 TESR_ShadowFilterData; // x: filter radius (texels), y: light bleed reduction scale
-float4 TESR_ShadowTemporalData; // x: enabled, y: history weight, z: near fade distance
+float4 TESR_ShadowTemporalData; // x: enabled, y: history weight, z: near fade distance, w: normal agreement floor
 float4 TESR_ShadowCameraDelta; // xyz: current camera position minus the history's
 float4x4 TESR_ShadowPreviousViewProj;
+float4x4 TESR_ShadowPreviousViewTransform;
 float4 TESR_ShadowNearCenter; // x,y,z: center (world space), w: radius
 float4 TESR_ShadowMiddleCenter; // x,y,z: center (world space), w: radius
 float4 TESR_ShadowFarCenter; // x,y,z: center (world space), w: radius
@@ -34,6 +35,7 @@ sampler2D TESR_NoiseSampler : register(s4)< string ResourceName = "Effects\bluen
 // everything below it.
 sampler2D TESR_ShadowHistoryBuffer : register(s5) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 sampler2D TESR_ShadowDepthHistoryBuffer : register(s6) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
+sampler2D TESR_ShadowNormalsHistoryBuffer : register(s7) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 
 #define SSS_STEPNUM 5
 
@@ -363,6 +365,21 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
 
 	[branch]
     if (abs(previousClip.w - previousDepth) > tolerance) return current;
+
+	// Depth says the reprojected pixel is the right DISTANCE away, not that it is the same
+	// surface. An object moving across the view while holding its distance passes that test with
+	// history belonging to something else, which is what smears shadows over the weapon and over
+	// the player. Surface orientation is the missing half: reproject a static surface correctly
+	// and it presents the same world normal, because that is what being the same surface means.
+	//
+	// Both normals are view space, so each has to be lifted into world space with the view matrix
+	// of the frame it came from, or simply turning the camera would look like the surface changing.
+    float3 currentNormalWS = mul(TESR_ViewTransform, float4(tex2D(TESR_NormalsBuffer, IN.UVCoord).xyz * 2.0f - 1.0f, 1.0f)).xyz;
+    float3 historyNormalWS = mul(TESR_ShadowPreviousViewTransform, float4(tex2D(TESR_ShadowNormalsHistoryBuffer, previousUV).xyz * 2.0f - 1.0f, 1.0f)).xyz;
+
+	[branch]
+    if (dot(normalize(currentNormalWS), normalize(historyNormalWS)) < TESR_ShadowTemporalData.w)
+        return current; // a different surface was here, whatever its depth said
 
     float history = tex2D(TESR_ShadowHistoryBuffer, previousUV).x;
 

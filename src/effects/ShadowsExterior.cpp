@@ -70,6 +70,7 @@ void ShadowsExteriorEffect::UpdateConstants() {
 		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut;
 		Constants.TemporalData.y = Settings.ShadowMaps.TemporalWeight;
 		Constants.TemporalData.z = Settings.ShadowMaps.TemporalNearFade;
+		Constants.TemporalData.w = Settings.ShadowMaps.TemporalNormalThreshold;
 	}
 	else {
 		// pass the enabled/disabled property of the shadow maps to the shadowfade constant
@@ -305,6 +306,7 @@ void ShadowsExteriorEffect::UpdateSettings() {
 	Settings.ShadowMaps.TemporalFilter = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.ShadowMaps", "TemporalFilter");
 	Settings.ShadowMaps.TemporalWeight = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ShadowMaps", "TemporalWeight"), 0.0f, 0.95f);
 	Settings.ShadowMaps.TemporalNearFade = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ShadowMaps", "TemporalNearFade"), 0.0f, 10000.0f);
+	Settings.ShadowMaps.TemporalNormalThreshold = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ShadowMaps", "TemporalNormalThreshold"), 0.0f, 1.0f);
 
 	// Generic exterior shadows settings
 	Settings.Exteriors.Enabled = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Enabled");
@@ -402,16 +404,23 @@ void ShadowsExteriorEffect::UpdateTemporalHistory() {
 
 	IDirect3DDevice9* Device = TheRenderManager->device;
 	IDirect3DSurface9* depthSurface = TheShaderManager->Effects.CombineDepth->Textures.CombinedDepthSurface;
+	IDirect3DSurface9* normalsSurface = TheShaderManager->Effects.Normals->Textures.NormalsSurface;
 
-	if (!Textures.ShadowHistorySurface || !Textures.DepthHistorySurface || !depthSurface) {
+	if (!Textures.ShadowHistorySurface || !Textures.DepthHistorySurface || !Textures.NormalsHistorySurface ||
+		!depthSurface || !normalsSurface) {
 		historyValid = false;
 		return;
 	}
 
 	Device->StretchRect(Textures.ShadowPassSurface, NULL, Textures.ShadowHistorySurface, NULL, D3DTEXF_NONE);
 	Device->StretchRect(depthSurface, NULL, Textures.DepthHistorySurface, NULL, D3DTEXF_NONE);
+	// Normals are stored in VIEW space, so a raw copy rotates with the camera and would read as
+	// a different surface every time the player turns. Keep the view matrix that produced them
+	// so the shader can put them back into world space before comparing.
+	Device->StretchRect(normalsSurface, NULL, Textures.NormalsHistorySurface, NULL, D3DTEXF_NONE);
 
 	Constants.PreviousViewProj = TheRenderManager->ViewProjMatrix;
+	Constants.PreviousViewTransform = TheRenderManager->viewMatrix;
 	historyCameraPosition = TheRenderManager->CameraPosition;
 	historyValid = true;
 }
@@ -425,6 +434,7 @@ void ShadowsExteriorEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_ShadowBiasData", &Constants.BiasData);
 	TheShaderManager->RegisterConstant("TESR_ShadowFilterData", &Constants.FilterData);
 	TheShaderManager->RegisterConstant("TESR_ShadowTemporalData", &Constants.TemporalData);
+	TheShaderManager->RegisterConstant("TESR_ShadowPreviousViewTransform", (D3DXVECTOR4*)&Constants.PreviousViewTransform);
 	TheShaderManager->RegisterConstant("TESR_ShadowCameraDelta", &Constants.CameraDelta);
 	TheShaderManager->RegisterConstant("TESR_ShadowPreviousViewProj", (D3DXVECTOR4*)&Constants.PreviousViewProj);
 	TheShaderManager->RegisterConstant("TESR_ShadowScreenSpaceData", &Constants.ScreenSpaceData);
@@ -516,6 +526,9 @@ void ShadowsExteriorEffect::RegisterTextures() {
 	// Formats must match their copy sources - these are filled with StretchRect, not rendered to.
 	TheTextureManager->InitTexture("TESR_ShadowHistoryBuffer", &Textures.ShadowHistoryTexture, &Textures.ShadowHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G16R16);
 	TheTextureManager->InitTexture("TESR_ShadowDepthHistoryBuffer", &Textures.DepthHistoryTexture, &Textures.DepthHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G32R32F);
+	// Same format as TESR_NormalsBuffer: StretchRect between differing formats is driver and
+	// DXVK dependent, and this copy runs every frame.
+	TheTextureManager->InitTexture("TESR_ShadowNormalsHistoryBuffer", &Textures.NormalsHistoryTexture, &Textures.NormalsHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_A16B16G16R16F);
 
 	texturesInitialized = true;
 }
