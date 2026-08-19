@@ -206,6 +206,14 @@ struct VS_OUTPUT {
     // TEXCOORD4/5 are free at LIGHTS < 4. .w carries SHADOW_VS_SENTINEL.
     float4 shadowWorldPos : TEXCOORD4;
 
+    // Object-space position, for point-light attenuation in the pixel shader. Same
+    // purpose and naming as the LIGHTS >= 4 branch's lPosition below, just a different
+    // free slot here since TEXCOORD1 is taken by lightDir at LIGHTS < 4. Needed because
+    // vanillaAtt() must run on an un-rotated vector: mul(tbn, light) only preserves
+    // distance when the TBN basis is orthonormal, which skinning and mirrored UVs don't
+    // guarantee.
+    float4 lPosition : TEXCOORD5;
+
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
@@ -267,7 +275,9 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.lightDir.xyz = mul(tbn, light);
     
     OUT.viewDir.xyz = mul(tbn, EyePosition.xyz - position.xyz);
-    
+
+    OUT.lPosition = float4(position.xyz, 0);
+
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
         light = LightData[1].xyz - position.xyz;
         OUT.light2Dir.w = LightData[1].w;
@@ -492,6 +502,7 @@ struct PS_INPUT {
 #endif
     float3 viewDir : TEXCOORD6_centroid;
     float4 shadowWorldPos : TEXCOORD4;
+    float4 lPosition : TEXCOORD5;
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
@@ -513,6 +524,9 @@ struct PS_OUTPUT {
 #endif
 
 float4 PSLightColor[10] : register(c3);
+// Same per-object light data the vanilla engine already binds to the LIGHTS >= 4
+// permutation's PSLightPosition (c19), just sized for this permutation's 3-light cap.
+float4 PSLightPosition[3] : register(c19);
 
 #if (defined(SI) || defined(HAIR)) && !defined(ONLY_SPECULAR)
     #ifdef ONLY_LIGHT
@@ -613,8 +627,12 @@ PS_OUTPUT main(PS_INPUT IN) {
     #if !defined(DIFFUSE) && !defined(POINT)
         float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #else
-        // Pointlights only.
-        float3 lighting = getPointLightLighting(IN.lightDir.xyz, IN.lightDir.w, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        // Pointlights only. Attenuation uses the un-rotated (object-space) light
+        // vector rather than IN.lightDir.xyz, since the TBN basis isn't guaranteed
+        // to be orthonormal (mirrored UVs, skinning) and mul(tbn, light) can then
+        // distort the vector length that vanillaAtt relies on.
+        float att1 = vanillaAtt(PSLightPosition[0].xyz - IN.lPosition.xyz, PSLightPosition[0].w);
+        float3 lighting = getPointLightLightingAtt(IN.lightDir.xyz, att1, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
     // Self emmitance.
@@ -631,13 +649,15 @@ PS_OUTPUT main(PS_INPUT IN) {
                                        SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
     #endif
 
-    // Other light sources.
+    // Other light sources. Same object-space attenuation fix as light 0 above.
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
-        lighting += getPointLightLighting(IN.light2Dir.xyz, IN.light2Dir.w, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        float att2 = vanillaAtt(PSLightPosition[1].xyz - IN.lPosition.xyz, PSLightPosition[1].w);
+        lighting += getPointLightLightingAtt(IN.light2Dir.xyz, att2, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
-    
+
     #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
-        lighting += getPointLightLighting(IN.light3Dir.xyz, IN.light3Dir.w, PSLightColor[2].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        float att3 = vanillaAtt(PSLightPosition[2].xyz - IN.lPosition.xyz, PSLightPosition[2].w);
+        lighting += getPointLightLightingAtt(IN.light3Dir.xyz, att3, PSLightColor[2].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
     float3 finalColor = lighting.rgb;
