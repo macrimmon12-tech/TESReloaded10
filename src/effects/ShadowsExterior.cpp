@@ -69,6 +69,7 @@ void ShadowsExteriorEffect::UpdateConstants() {
 
 		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut;
 		Constants.TemporalData.y = Settings.ShadowMaps.TemporalWeight;
+		Constants.TemporalData.z = Settings.ShadowMaps.TemporalNearFade;
 	}
 	else {
 		// pass the enabled/disabled property of the shadow maps to the shadowfade constant
@@ -303,6 +304,7 @@ void ShadowsExteriorEffect::UpdateSettings() {
 	Settings.ShadowMaps.LightBleedScale = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ShadowMaps", "LightBleedScale"), 0.0f, 1.0f);
 	Settings.ShadowMaps.TemporalFilter = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.ShadowMaps", "TemporalFilter");
 	Settings.ShadowMaps.TemporalWeight = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ShadowMaps", "TemporalWeight"), 0.0f, 0.95f);
+	Settings.ShadowMaps.TemporalNearFade = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ShadowMaps", "TemporalNearFade"), 0.0f, 10000.0f);
 
 	// Generic exterior shadows settings
 	Settings.Exteriors.Enabled = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Enabled");
