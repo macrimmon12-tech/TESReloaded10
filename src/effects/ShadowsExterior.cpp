@@ -39,12 +39,22 @@ void ShadowsExteriorEffect::UpdateConstants() {
 		// Mode and format data. x=mode, y=bits per pixel
 		Constants.FormatData.x = Settings.ShadowMaps.Mode;
 		Constants.FormatData.y = Settings.ShadowMaps.FormatBits;
+
+		// z: are we in an exterior cell right now. GetSunShadow reads this on its own --
+		// ShadowFade.y means something different indoors (interior point-shadows enabled,
+		// not sun shadows enabled), so the sun-shadow path can't share it. See the interior
+		// branch below.
+		Constants.FormatData.z = 1.0f;
 	}
 	else {
 		// pass the enabled/disabled property of the shadow maps to the shadowfade constant
 		Constants.ShadowFade.y = TheShaderManager->Effects.ShadowsInteriors->Enabled;
 		Constants.ShadowFade.z = 1; // z enables point lights
 		Constants.ShadowFade.w = Settings.Interiors.DrawDistance; //furthest distance for point lights shadows
+
+		// Sun shadows never apply indoors -- unlike ShadowFade.y, this one exists solely for
+		// GetSunShadow, so it's safe to just say "no" here rather than borrow another flag.
+		Constants.FormatData.z = 0.0f;
 
 		// Update constants used by shadow shaders: x=quality, y=darkness
 		Constants.Data.x = Settings.Interiors.Quality;

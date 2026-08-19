@@ -237,6 +237,13 @@ float GetSunShadow(float3 worldPos, float3 worldNormal) {
     // over deferred. A missing constant reads zero and leaves forward running.
     if (TESR_ShadowForwardData.x) return 1.0f;
 
+    // Sun shadows never apply indoors. Dedicated flag, not ShadowFade.y below -- that one is
+    // shared with ShadowsInteriors.fx's own darkness calc and means something else indoors
+    // (interior point-shadows enabled), so it can't double as this gate. Without this check,
+    // an interior object shader would fall through to stale exterior cascade data left over
+    // from the last time the player was outside.
+    if (!TESR_ShadowFormatData.z) return 1.0f;
+
     // Shadow maps switched off entirely (setting), or sun below horizon.
     if (!TESR_ShadowFade.y) return 1.0f;
 
