@@ -377,10 +377,28 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
     float3 currentNormalWS = mul(TESR_ViewTransform, float4(tex2D(TESR_NormalsBuffer, IN.UVCoord).xyz * 2.0f - 1.0f, 1.0f)).xyz;
     float3 historyNormalWS = mul(TESR_ShadowPreviousViewTransform, float4(tex2D(TESR_ShadowNormalsHistoryBuffer, previousUV).xyz * 2.0f - 1.0f, 1.0f)).xyz;
 
-	// Not a tunable. This is the rejection test that makes the filter safe on moving geometry,
-	// not a preference, and there is no picture worth having on either side of it: loosen it and
-	// shadows trail across whatever moved, tighten it and the reuse stops happening at all.
-	// 0.999 is about two and a half degrees of drift.
+	// Not a tunable, and not an arbitrary constant either. Both directions were measured, and it
+	// sits where it does for margin rather than for being optimal here.
+	//
+	// Too loose and moving surfaces are accepted: 0.9, which is 26 degrees, still let a great deal
+	// of trailing through, and 0.999 was a large improvement over it. So there is no room below.
+	// The reason 26 degrees is not enough is that TESR_NormalsBuffer is not raw normals - the
+	// Normals effect runs an edge aware blur over it in place. That smoothing is what keeps this
+	// test from firing on valid history when reprojection lands a fraction of a texel off, but it
+	// also smooths away the variation that would fire it on something that really did move, so a
+	// large gently curved area sliding across the view keeps a similar normal.
+	//
+	// Too tight and valid history is rejected instead. At exactly 1.0 it rejects everything - two
+	// independently computed unit vectors do not dot to exactly 1.0 after fp16 storage, a blur,
+	// two matrix transforms and a normalize - so the filter silently stops running and the shimmer
+	// it exists for comes back. Confirmed: 1.0 shimmers. Approaching 1.0 gets there gradually,
+	// rejecting more and more of anything that is not perfectly flat, so the trailing keeps
+	// improving right up to the point the filter has effectively been switched off.
+	//
+	// Hence margin. Legitimate frame to frame normal drift scales with texel size, so a value
+	// parked next to that cliff would behave differently at 1080p than at the 1440p this was tuned
+	// on, and the failure there is a filter that does nothing while looking installed. 0.999 is
+	// about two and a half degrees, roughly three times the angle of 0.9999 and far from 1.0.
     static const float kSameSurfaceDot = 0.999f;
 
 	[branch]
