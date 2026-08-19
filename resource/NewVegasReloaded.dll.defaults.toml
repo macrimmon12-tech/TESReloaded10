@@ -617,10 +617,10 @@ UsePointShadowsNight = false         # Whether to cast shadows from point lights
 
 [_Shaders.ShadowsExteriors.SunSmoothing]
 SmoothSun = 1						 # Smooth the sun rotation by interpolating between positions.
-QuantizeSun = 1						 # Quantize the sun rotation by making sure the sun moves in constant size increments, instead of constantly.
+QuantizeSun = 0						 # Move the sun in fixed steps instead of continuously. This exists to stop the shadow maps being re-quantised every frame, which is what made distant shadows crawl, and the temporal filter under ShadowMaps now deals with that directly - so this is off, and the sun moves as it should. Turning it back on is a fallback, not an upgrade: the step has to be visible for it to help, and the temporal filter cross fades between the two positions rather than sliding, which makes the stepping worse rather than better.
 SmoothingFactor = 0.1				 # [0.0-1.0] Lower number means slower smoothing between positions, higher means more instantenous.
 YawStepSize = 1.0					 # [0.0-15.0] Step size for changes in the horizontal rotation of the sun, angle in degrees.
-PitchStepSize = 0.25				 # [0.0-15.0] Step size for changes in the vertical rotation of the sun, angle in degrees.
+PitchStepSize = 0.25				 # [0.0-15.0] Step size for changes in the vertical rotation of the sun, angle in degrees. Only used when QuantizeSun is on. Anything above about 0.03 makes the steps visible as shadows jumping.
 MaxJumpAngle = 5.0					 # [5.0-30.0] A maximum angle difference for which smoothing works, if higher the jump is instaneous. Required for time jumps / waiting.
 
 [_Shaders.ShadowsExteriors.FormsNear]
@@ -713,7 +713,7 @@ Intensity = 2.0                      # Rescale the intensity of screenspace shad
 Mode = 2							 # Shadow mode, higher means higher quality, but higher computational cost. 0: VSM, 1: EVSM2, 2: EVSM4
 Format = 0							 # Storage format for the shadow maps. 0: 16 bit, 1: 32 bit. Only worth raising on Mode 0, where the moments are stored unwarped and 16 bit UNORM cannot resolve the variance. On the EVSM modes the exponential warp already compresses the range, so 32 bit buys precision the maths cannot use - it only matters there if EVSMExponent is raised as well. Doubles the atlas, and quadruples that again with MSAA on.
 CascadeResolution = 2				 # Resolution used for shadow cascades. 0: 1024, 1: 1536, 2: 2048
-Prefilter = true					 # Enable prefiltering the shadow maps. Prefiltering is a blur.
+Prefilter = false					 # Blur the shadow maps before they are read. This was a way of hiding the crawl in distant shadows, and it hid it by throwing away the detail that was crawling. The temporal filter removes the crawl without that cost, so this now buys softer shadows and nothing else.
 MSAA = true							 # Enable multisample antialiasing for shadow maps.
 Mipmaps = false						 # DISABLED. Enable mipmaps for the shadow maps.
 Anisotropy = 0						 # DISABLED. Anisotropic filteric for mipmaps, 0: disabled, 1: 8x, 2: 16x
