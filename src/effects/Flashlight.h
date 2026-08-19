@@ -6,6 +6,7 @@ public:
 	FlashlightEffect() : EffectRecord("Flashlight") {
 		spotLightActive = false;
 		SpotLight = nullptr;
+		aimingHoldUntil = 0.0;
 	};
 
 	struct FlashlightSettingsStruct {
@@ -16,6 +17,21 @@ public:
 		bool		renderShadows;
 		NiPoint3	Offset;
 		bool		attachToWeapon;
+		float		NearFade;
+		float		HotspotLimit;
+		float		CookieStrength;
+		bool		softEdges;
+
+		// Forward re-light of nearby static geometry, drawn by MaterialPass
+		struct MaterialLightStruct {
+			bool	Enabled;
+			float	Intensity;
+			float	Specular;
+			float	NormalStrength;
+			int		MaxGeometry;
+			int		DebugMode;
+		};
+		MaterialLightStruct	MaterialLight;
 	};
 	FlashlightSettingsStruct	Settings;
 
@@ -24,11 +40,14 @@ public:
 		D3DXVECTOR4	Position;
 		D3DXVECTOR4	Direction;
 		D3DXVECTOR4	Color;
+		D3DXVECTOR4	Tuning;		// x near fade, y soft edges, z hotspot limit, w cookie strength
+		D3DXVECTOR4	Composite;	// x source buffer is already linear
 	};
 	FlashlightStruct	Constants;
 
 	NiSpotLight* SpotLight;
 	bool	spotLightActive;
+	double	aimingHoldUntil;	// real time the aiming latch holds until, see UpdateConstants
 	int		selectedPass;
 
 	void	UpdateConstants();
@@ -37,4 +56,5 @@ public:
 	bool	ShouldRender();
 
 	void	GetFlashlightViewProj();
+	void	PublishLightConstants(bool abActive);
 };

@@ -56,6 +56,7 @@ void ShaderManager::Initialize() {
 	TheShaderManager->RegisterEffect<DebugEffect>(&TheShaderManager->Effects.Debug);
 	TheShaderManager->RegisterEffect<ExposureEffect>(&TheShaderManager->Effects.Exposure);
 	TheShaderManager->RegisterEffect<FlashlightEffect>(&TheShaderManager->Effects.Flashlight);
+	TheShaderManager->RegisterEffect<FlashlightBeamEffect>(&TheShaderManager->Effects.FlashlightBeam);
 	TheShaderManager->RegisterEffect<GodRaysEffect>(&TheShaderManager->Effects.GodRays);
 	TheShaderManager->RegisterEffect<ImageAdjustEffect>(&TheShaderManager->Effects.ImageAdjust);
 	TheShaderManager->RegisterEffect<LensEffect>(&TheShaderManager->Effects.Lens);
@@ -104,6 +105,7 @@ void ShaderManager::Initialize() {
 	TheShaderManager->RegisterConstant("TESR_SpotLightColor", (D3DXVECTOR4*) &TheShaderManager->SpotLightColor);
 	TheShaderManager->RegisterConstant("TESR_SpotLightDirection", (D3DXVECTOR4*) &TheShaderManager->SpotLightDirection);
 	TheShaderManager->RegisterConstant("TESR_SpotLightToWorldTransform", (D3DXVECTOR4*) &TheShaderManager->SpotLightWorldToLightMatrix[0]);
+	TheShaderManager->RegisterConstant("TESR_VolumetricData", &TheShaderManager->VolumetricData);
 	TheShaderManager->RegisterConstant("TESR_ViewSpaceLightDir", &TheShaderManager->ShaderConst.ViewSpaceLightDir);
 	TheShaderManager->RegisterConstant("TESR_ScreenSpaceLightDir", &TheShaderManager->ShaderConst.ScreenSpaceLightDir);
 	TheShaderManager->RegisterConstant("TESR_ReciprocalResolution", &TheShaderManager->ShaderConst.ReciprocalResolution);
@@ -582,29 +584,14 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 	D3DXVECTOR4 Empty = D3DXVECTOR4(0, 0, 0, 0);
 
 	// TEMP : get data for spotlights. Right now, is done manually since spotlights aren't implemented in the engine
+	// FlashlightEffect::UpdateConstants publishes SpotLightPosition/Direction/Color itself,
+	// so the cone constants and the cookie matrix always come from one read of the bone.
 	TheShaderManager->Effects.Flashlight->UpdateConstants();
 	if (TheShaderManager->Effects.Flashlight->Enabled && TheShaderManager->Effects.Flashlight->spotLightActive) {
 		SpotLightList[0] = TheShaderManager->Effects.Flashlight->SpotLight;
 	}
 	else {
 		SpotLightList[0] = nullptr;
-	}
-
-	//Setting constants
-	if (SpotLightList[0] != nullptr) {
-		TheShaderManager->SpotLightPosition[0] = SpotLightList[0]->m_worldTransform.pos.toD3DXVEC4();
-		TheShaderManager->SpotLightPosition[0].w = SpotLightList[0]->Spec.r; // radius
-		TheShaderManager->SpotLightDirection[0] = D3DXVECTOR4(
-			SpotLightList[0]->m_worldTransform.rot.data[0][0],
-			SpotLightList[0]->m_worldTransform.rot.data[1][0], 
-			SpotLightList[0]->m_worldTransform.rot.data[2][0], 
-			SpotLightList[0]->OuterSpotAngle); // outside angle of the light cone
-		TheShaderManager->SpotLightColor[0] = D3DXVECTOR4(SpotLightList[0]->Diff.r, SpotLightList[0]->Diff.g, SpotLightList[0]->Diff.b, SpotLightList[0]->Dimmer);
-	}
-	else {
-		TheShaderManager->SpotLightPosition[0] = Empty;
-		TheShaderManager->SpotLightDirection[0] = Empty;
-		TheShaderManager->SpotLightColor[0] = Empty;
 	}
 
 	std::map<int, ShadowSceneLight*>::iterator v = SceneLights.begin();
@@ -737,6 +724,13 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	Effects.SnowAccumulation->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.AmbientOcclusion->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.WetWorld->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
+	// Beam march first, into its own half res buffer, so the Flashlight Combine pass can
+	// read it. Control.x already folds the effect toggle, the per view toggle and the
+	// strength together, so this one test gates the whole thing.
+	if (Effects.FlashlightBeam->Constants.Control.x > 0.0f) {
+		RenderEffectToRT(Effects.FlashlightBeam->Textures.VolumetricSurface, Effects.FlashlightBeam, true);
+		Device->SetRenderTarget(0, RenderTarget);
+	}
 	Effects.Flashlight->Render(Device, RenderTarget, RenderedSurface, Effects.Flashlight->selectedPass, true, SourceSurface);
 	Effects.Specular->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.Underwater->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);

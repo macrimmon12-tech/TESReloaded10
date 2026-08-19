@@ -322,10 +322,36 @@ OffsetX = 0.0                          # X coordinate offset for the position of
 OffsetY = 0.0                          # Y coordinate offset for the position of the light relative to the weapon position
 OffsetZ = 0.0                          # Z coordinate offset for the position of the light relative to the weapon position
 RenderShadows = false                  # Wether to use rendered shadows in the flashlight cone
-AttachToWeapon = true                  # The flashlight will move with the weapon instead of being fixed to the camera
+AttachToWeapon = true                  # The flashlight will move with the weapon instead of being fixed to the camera. It rides the weapon while aiming either way
+NearFade = 0.0                         # Fades the light out on surfaces closer than this many units, so point blank walls don't clip to white. 0 disables
+HotspotLimit = 0.0                     # Rolls off the brightest part of the lit pool without dimming the falloff around it. 0 disables
+CookieStrength = 0.0                   # Procedural rings and mottling in the beam, for structure on flat surfaces. 0 disables
+SoftEdges = false                      # Wrap lighting instead of clamped diffuse. Removes the speckle the reconstructed normals produce on grass and foliage, at the cost of a flatter beam. Does not change overall brightness
+
+[_Shaders.Flashlight.MaterialLight]
+Enabled = false                        # Re-light nearby static geometry with its own normals, normal map and specular settings, instead of relying on normals reconstructed from depth
+Intensity = 0.015                      # Strength of the re-lit contribution
+Specular = 0.5                         # Scales the specular highlight. Multiplies the material own specular strength
+NormalStrength = 1.0                   # Scales the sideways component of the normal map. 1.0 uses the map as authored
+MaxGeometry = 2048                     # Cap on the number of objects re-lit in one frame
+DebugMode = 0                          # 0 renders normally, 1 to 7 visualise the pass, 8 draws everything it captured through walls
 
 [_Shaders.Flashlight.Status]
 Enabled = false                         # Replace the pipboy light with a post process flashlight attached to the weapon
+
+[_Shaders.FlashlightBeam.Main]
+FirstPerson = true                     # Show the shaft in first person
+ThirdPerson = true                     # Show the shaft in third person
+Strength = 1.0                         # Amount of light scattered by the air in the beam
+Anisotropy = 0.45                      # Forward scattering. Higher makes the shaft brighter when looking along the beam
+HeightFalloff = 1.0                    # How quickly the airborne dust thins out with height
+MaxDistance = 1500.0                   # Distance in units past which the march stops
+FirstPersonStrength = 0.15             # Strength floor in first person, where the light sits on the camera and there is no parallax
+FirstPersonOffsetRight = 8.0           # Sideways offset of the virtual light the first person march uses, to create that parallax
+FirstPersonOffsetDown = 4.0            # Downward offset of the same virtual light
+
+[_Shaders.FlashlightBeam.Status]
+Enabled = false                        # Volumetric light shaft in the air along the flashlight cone. Requires the Flashlight shader
 
 
 [_Shaders.Grass.Main]

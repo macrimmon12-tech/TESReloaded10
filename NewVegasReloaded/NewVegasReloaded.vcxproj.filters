@@ -226,6 +226,9 @@
     <ClInclude Include="..\src\NewVegas\Hooks\Hooks.h">
       <Filter>NewVegas\Hooks</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\NewVegas\Hooks\MaterialPass.h">
+      <Filter>NewVegas\Hooks</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\NewVegas\Hooks\Render.h">
       <Filter>NewVegas\Hooks</Filter>
     </ClInclude>
@@ -302,6 +305,9 @@
       <Filter>Effects</Filter>
     </ClInclude>
     <ClInclude Include="..\src\effects\Flashlight.h">
+      <Filter>Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\effects\FlashlightBeam.h">
       <Filter>Effects</Filter>
     </ClInclude>
     <ClInclude Include="..\src\effects\PBR.h">
@@ -459,6 +465,9 @@
     <ClCompile Include="..\src\NewVegas\Hooks\Hooks.cpp">
       <Filter>NewVegas\Hooks</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\NewVegas\Hooks\MaterialPass.cpp">
+      <Filter>NewVegas\Hooks</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\NewVegas\Hooks\Render.cpp">
       <Filter>NewVegas\Hooks</Filter>
     </ClCompile>
@@ -532,6 +541,9 @@
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\Flashlight.cpp">
+      <Filter>Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\effects\FlashlightBeam.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\PBR.cpp">
