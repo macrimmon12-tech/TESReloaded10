@@ -185,6 +185,42 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	AppendDefine("SKYLIGHTING_MODE",
 		TheSettingManager->GetSettingI("Shaders.PBR.Main", "SkylightingMode") ? "1" : "0");
 
+	// Shadow atlas encoding: 0 = VSM, 1 = EVSM2, 2 = EVSM4. Compile time for the same reason as
+	// above -- Shadow.hlsl's GetSunShadow and ShadowMap.pso both branch on it with #if, not a
+	// runtime read, since ps_3_0 would otherwise flatten all three variants into every shadowed
+	// pixel. Read straight from the setting manager rather than from the ShadowsExteriors
+	// effect, same reasoning as FORWARD_SHADOWS above.
+	//
+	// Must mirror ShadowsExteriorEffect::UpdateSettingsFromQuality's Quality -> Mode mapping:
+	// Quality 0/1 -> VSM, 2 -> EVSM2, 3 -> EVSM4. Quality 4 (Custom) reads Mode directly, same
+	// as UpdateSettingsFromQuality does for that case. Previously this was never defined, so it
+	// silently fell back to Shadow.hlsl's own "#ifndef SHADOW_FIXED_MODE -> 2" default: every
+	// shader was compiled assuming EVSM4 regardless of Quality, so GetSunShadow's
+	// "TESR_ShadowFormatData.x != SHADOW_FIXED_MODE" check only ever matched at Quality 3/Full,
+	// and forward shadows silently no-op'd (return unshadowed) at every other quality level.
+	{
+		int quality = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Quality");
+		int shadowMode;
+		switch (quality) {
+		case 0:
+		case 1:
+			shadowMode = 0; // VSM
+			break;
+		case 2:
+			shadowMode = 1; // EVSM2
+			break;
+		case 3:
+			shadowMode = 2; // EVSM4
+			break;
+		default: // 4 (Custom), or an out-of-range value -- fall back to the raw setting.
+			shadowMode = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.ShadowMaps", "Mode");
+			if (shadowMode < 0) shadowMode = 0;
+			if (shadowMode > 2) shadowMode = 2;
+			break;
+		}
+		AppendDefine("SHADOW_FIXED_MODE", shadowMode == 0 ? "0" : shadowMode == 1 ? "1" : "2");
+	}
+
 	HRESULT prepass = D3DXPreprocessShaderFromFileA(ShaderSourcePath, Macros, NULL, &ShaderSource, &Errors);
 	if (prepass == D3D_OK) {
 		bool Compile = !CheckPreprocessResult(ShaderPreprocessedPath, ShaderSource);
