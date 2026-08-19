@@ -105,6 +105,11 @@
 #include "includes/Helpers.hlsl"
 #include "includes/Parallax.hlsl"
 #include "includes/Object.hlsl"
+#include "includes/Shadow.hlsl"
+
+// Forward sun shadows -- see ObjectTemplate.hlsl. PAR shaders do full sun lighting but had
+// no shadow term at all, so every parallax-material object rendered fully sunlit once the
+// deferred sun was switched off.
 
 struct VS_INPUT
 {
@@ -152,6 +157,9 @@ struct VS_OUTPUT
     float4 shadowUVs : TEXCOORD8;
 #endif
     float4 viewDir : TEXCOORD7;
+
+    // TEXCOORD0-8 are taken by this template; 9 is the first free slot.
+    float4 shadowWorldPos : TEXCOORD9;
 };
 
 #ifdef VS
@@ -250,6 +258,8 @@ VS_OUTPUT main(VS_INPUT IN)
         OUT.shadowUVs.zw = ((shadowUV.xy - ShadowProjData.xy) / ShadowProjData.w) * float2(1, -1) + float2(0, 1);
     #endif
 
+    OUT.shadowWorldPos = float4(GetShadowWorldPos(OUT.sPosition), SHADOW_VS_SENTINEL);
+
     return OUT;
 };
 
@@ -288,6 +298,7 @@ struct PS_INPUT
     float4 shadowUVs : TEXCOORD8;
 #endif
     float4 viewDir : TEXCOORD7_centroid;
+    float4 shadowWorldPos : TEXCOORD9;
 };
 
 struct PS_OUTPUT {
@@ -295,6 +306,7 @@ struct PS_OUTPUT {
 };
 
 #ifdef PS
+
 
 #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
     #if !defined(NO_LIGHT)
@@ -412,6 +424,23 @@ PS_OUTPUT main(PS_INPUT IN)
     #ifndef NO_LIGHT
         shadowMultiplier *= getParallaxShadowMultipler(distance, offsetUV, dx, dy, normalize(IN.lightDir.xyz), HeightMap);
     #endif
+
+    // Forward sun shadows, folded into shadowMultiplier -- which scales PSLightColor[0]
+    // (the sun) only, leaving ambient untouched. Skipped for DIFFUSE/POINT passes, which
+    // carry a point light in slot 0 rather than the sun.
+    // ddx/ddy must stay at top level, outside dynamic flow control.
+    // Hoisted out of the shadow block below: the ambient term also needs it, and that runs for
+    // DIFFUSE/POINT passes which the shadow block skips. ddx/ddy must stay at top level.
+    float3 sunShadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    float shadowWorldPosValid = SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f;
+
+    #if !defined(NO_LIGHT) && !defined(DIFFUSE) && !defined(POINT)
+        #if FORWARD_SHADOWS
+        shadowMultiplier *= shadowWorldPosValid
+                          ? GetSunShadow(IN.shadowWorldPos.xyz, sunShadowNormal)
+                          : 1.0f;
+        #endif
+    #endif
     
     // Lighting.
     float3 lighting;
@@ -453,7 +482,7 @@ PS_OUTPUT main(PS_INPUT IN)
     
         #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
             if (TESR_ParallaxData.y)
-                lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb);
+                lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, sunShadowNormal, shadowWorldPosValid);
             else
                 lighting += baseColor.rgb * AmbientColor.rgb;
         #endif

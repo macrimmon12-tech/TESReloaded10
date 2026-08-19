@@ -117,6 +117,8 @@ public:
 		float Roughness;
 		float Metallicness;
 		float Saturation;
+		float SkylightingScale;
+		float SkylightingDirectionality;
 	};
 	struct PBRSettingsStruct {
 		PBRSettings Default;
