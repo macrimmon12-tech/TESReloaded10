@@ -12,7 +12,7 @@
 //-----------------------------------------//
 
 float4 TESR_ReciprocalResolution;
-float4 TESR_DitherBusterData;   // x: Strength (0-1), y: MaskPower
+float4 TESR_DitherBusterData;   // x: Strength (0-1), y: MaskPower, z: DitherThreshold
 
 //-----------------------------------------//
 // Samplers:
@@ -129,6 +129,23 @@ half4 AFAA(VSOUT IN) : COLOR0
     half lumaS = GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, -1.0f));
     half2 lumaEdge = half2(lumaS - lumaN, lumaE - lumaW) * 0.5f;
 
+    // --- Isolated pixel (dither) detection ---
+    // The central differences above are exactly zero on a one pixel checkerboard: N and S are the
+    // same phase as each other, so lumaS - lumaN cancels, and likewise for E and W. That is the
+    // Nyquist frequency, invisible to any symmetric difference - which means the edge mask below
+    // never fires on alpha test dither, the artifact this effect is named for. DXVK's dithered
+    // grass is precisely that pattern.
+    //
+    // Comparing each neighbour against the CENTRE instead is largest exactly where the central
+    // differences vanish. Subtracting the central gradient separates the two cases without a
+    // second contrast threshold: on a step edge the centre agrees with one side, so spike and
+    // gradient cancel to zero, while an isolated pixel disagrees with every neighbour at once and
+    // survives. Worked through: a step of d gives spike = d and length(lumaEdge) = d/2, so
+    // isolation = 0; a checkerboard of d gives spike = 4d and length(lumaEdge) = 0.
+    half lumaC = tex2D(TESR_RenderedBuffer, IN.UVCoord).x;
+    half spike = abs(lumaC - lumaN) + abs(lumaC - lumaS) + abs(lumaC - lumaE) + abs(lumaC - lumaW);
+    half isolation = max(0.0f, spike - 4.0f * length(lumaEdge));
+
 #if AFAA_DEPTH_DETECTION == 1
     // --- Depth Edge Detection ---
     // Better for interiors and closer objects.
@@ -166,6 +183,23 @@ half4 AFAA(VSOUT IN) : COLOR0
     // Ported from BIAA
     half2 edge = half2(lumaEdge.x, -lumaEdge.y);
     half Mask = length(edge) < pow(0.002f, TESR_DitherBusterData.y);
+
+    // Dither gets an isotropic average rather than the directional pass below. A checkerboard has
+    // no orientation, so smearing along an edge direction is meaningless where the direction is
+    // itself degenerate - averaging the neighbourhood is what cancels it. Gated on isolation so it
+    // stays off ordinary edges and off flat texture.
+    if (isolation > TESR_DitherBusterData.z && TESR_DitherBusterData.z > 0.0f)
+    {
+        half3 centre = tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb;
+        half3 neighbourhood = centre;
+        neighbourhood += GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, 1.0f)).rgb;
+        neighbourhood += GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, -1.0f)).rgb;
+        neighbourhood += GetBufferOffset(TESR_RenderedBuffer, half2(1.0f, 0.0f)).rgb;
+        neighbourhood += GetBufferOffset(TESR_RenderedBuffer, half2(-1.0f, 0.0f)).rgb;
+        neighbourhood *= 0.2f;
+
+        return half4(lerp(centre, neighbourhood, saturate(TESR_DitherBusterData.x)), 1.0f);
+    }
 
     if (Mask)
     {

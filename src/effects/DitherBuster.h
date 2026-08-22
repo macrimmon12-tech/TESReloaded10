@@ -8,6 +8,7 @@ public:
 	struct DitherBusterSettingsStruct {
 		float Strength;
 		float MaskPower;
+		float DitherThreshold;
 	};
 	DitherBusterSettingsStruct Settings;
 
