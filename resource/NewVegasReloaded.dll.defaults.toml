@@ -459,6 +459,10 @@ Enabled = false                       # Reduces dithering artifacts via luma-edg
 
 [_Shaders.SMAA.Main]
 EdgeDetection = 0                     # Edge detection algorithm - 0:Luma (default), 1:Color, 2:Depth
+Threshold = 0.05                       # [0.005-0.5] Luma/colour contrast a pixel pair must differ by to count as an edge. Lower finds more edges and antialiases more of the image; too low starts smoothing texture detail.
+DepthThreshold = 0.005                 # [0.0001-0.5] Depth edge sensitivity, as a fraction of the depth at that pixel rather than an absolute distance, so it behaves the same near and far. Only used by EdgeDetection 2.
+MaxSearchSteps = 32                    # [4-112] How far along an edge the search may travel looking for its end. Longer edges need more steps to be smoothed properly - shallow near horizontal ones most of all - and the cost is only paid where edges actually run that far.
+SubpixelShift = 0.0                    # [-2.0-2.0] Shifts SMAA's sampling relative to the pixel it writes, in texels. Nothing in the effect chain corrects for the D3D9 half texel rule, so if texel and pixel centres are half a texel apart the edge found at one pixel gets blended at its neighbour - weaker antialiasing, skewed one way. Try -0.5 and 0.5; 0 is the original behaviour.
 
 [_Shaders.SMAA.Status]
 Enabled = false						  # Apply SMAA.
