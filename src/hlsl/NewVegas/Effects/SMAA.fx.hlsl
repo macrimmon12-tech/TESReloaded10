@@ -38,6 +38,7 @@
 
 float4 TESR_SMAAResolution;
 float4 TESR_SMAAData; // x edge threshold, y relative depth threshold, z max search steps, w subpixel shift
+float4 TESR_SMAADepthData; // x depth buffer texel offset, y local contrast adaptation factor
 
 #ifndef SMAA_RT_METRICS
 #define SMAA_RT_METRICS TESR_SMAAResolution
@@ -50,10 +51,19 @@ float4 TESR_SMAAData; // x edge threshold, y relative depth threshold, z max sea
 // mad() in the blending weight vertex shader - so they can come from a constant and be tuned
 // without a rebuild. The diagonal count indexes a for loop and has to stay compile time.
 // Values match ULTRA, so the defaults are unchanged.
-#define SMAA_THRESHOLD             (TESR_SMAAData.x)
-#define SMAA_MAX_SEARCH_STEPS      (TESR_SMAAData.z)
+// Each falls back to its SMAA_PRESET_ULTRA value when the constant reads 0. That happens if
+// this shader is dropped into an older build whose plugin does not publish these: NVR logs
+// "Couldn't get value for Constant" and carries on, leaving the constant at D3DX's default of
+// zero. Unguarded that is silently destructive rather than merely wrong - a threshold of 0
+// marks every pixel an edge, and a local contrast factor of 0 then zeroes every edge again, so
+// SMAA would quietly do nothing at all while the log filled up unread.
+#define SMAA_THRESHOLD             (TESR_SMAAData.x > 0.0 ? TESR_SMAAData.x : 0.05)
+#define SMAA_MAX_SEARCH_STEPS      (TESR_SMAAData.z > 0.0 ? TESR_SMAAData.z : 32.0)
 #define SMAA_MAX_SEARCH_STEPS_DIAG 16
 #define SMAA_CORNER_ROUNDING       25
+// Rejects edges sitting in a busy, high contrast neighbourhood. That is what stops luma
+// seeing alpha test dither as edges, so it is worth being able to raise.
+#define SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR (TESR_SMAADepthData.y > 0.0 ? TESR_SMAADepthData.y : 2.0)
 
 #include "includes/SMAA.hlsl"
 
@@ -110,17 +120,80 @@ float4 DX9_SMAAColorEdgeDetectionPS(float4 position : SV_POSITION,
     return float4(SMAAColorEdgeDetectionPS(texcoord, offset, TESR_RenderedBuffer), 0.0, 0.0);
 }
 
+// Depth edges, with two departures from SMAADepthEdgeDetectionPS.
+//
+// The threshold is relative, not absolute. CombineDepth stores viewZ/farZ, so the stock
+// 0.1*SMAA_THRESHOLD works out as that fraction of the FAR PLANE - hundreds of units at New Vegas
+// draw distances - and almost nothing ever registered as an edge. Comparing against the depth at
+// the pixel is scale invariant, so one setting behaves the same on a nearby crate and a far ridge.
+//
+// And the depth lookups carry their own texel offset. CombineDepth is rendered separately from the
+// colour buffer and the two do not line up: luma edges land correctly while depth edges land about
+// half a texel out, which is what made depth mode look subtly distorted. A global SubpixelShift
+// appears to fix it, but only by moving every sample - including the colour fetch - onto texel
+// boundaries, which blurs the whole image and, because blurred input has less contrast, makes SMAA
+// find fewer edges. Offsetting only the depth taps corrects the alignment and costs nothing.
+float2 SMAADepthEdges(float2 texcoord, float4 offset[3]) {
+    float2 o = TESR_SMAADepthData.x * TESR_SMAAResolution.xy;
+    float P     = tex2Dlod(TESR_DepthBuffer, float4(texcoord + o, 0.0, 0.0)).r;
+    float Pleft = tex2Dlod(TESR_DepthBuffer, float4(offset[0].xy + o, 0.0, 0.0)).r;
+    float Ptop  = tex2Dlod(TESR_DepthBuffer, float4(offset[0].zw + o, 0.0, 0.0)).r;
+
+    float2 delta = abs(P.xx - float2(Pleft, Ptop));
+    float depthThreshold = (TESR_SMAAData.y > 0.0) ? TESR_SMAAData.y : 0.005;
+    return step(depthThreshold * max(P, 0.000001), delta);
+}
+
+// The luma test from SMAALumaEdgeDetectionPS, minus its early discard. The stock function throws
+// the pixel away as soon as luma finds nothing, which would drop every pixel that only has a depth
+// edge - so the combined mode below cannot call it and has to carry its own copy.
+float2 SMAALumaEdges(float2 texcoord, float4 offset[3]) {
+    float2 threshold = float2(SMAA_THRESHOLD, SMAA_THRESHOLD);
+    float3 weights = float3(0.2126, 0.7152, 0.0722);
+
+    float L      = dot(SMAASamplePoint(TESR_RenderedBuffer, texcoord).rgb, weights);
+    float Lleft  = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[0].xy).rgb, weights);
+    float Ltop   = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[0].zw).rgb, weights);
+
+    float4 delta;
+    delta.xy = abs(L - float2(Lleft, Ltop));
+    float2 edges = step(threshold, delta.xy);
+
+    float Lright  = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[1].xy).rgb, weights);
+    float Lbottom = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[1].zw).rgb, weights);
+    delta.zw = abs(L - float2(Lright, Lbottom));
+    float2 maxDelta = max(delta.xy, delta.zw);
+
+    float Lleftleft = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[2].xy).rgb, weights);
+    float Ltoptop   = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[2].zw).rgb, weights);
+    delta.zw = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
+
+    maxDelta = max(maxDelta.xy, delta.zw);
+    float finalDelta = max(maxDelta.x, maxDelta.y);
+
+    // Local contrast adaptation, same as the stock path.
+    edges.xy *= step(finalDelta, SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR * delta.xy);
+    return edges;
+}
+
 float4 DX9_SMAADepthEdgeDetectionPS(float4 position : SV_POSITION,
                                     float2 texcoord : TEXCOORD0,
                                     float4 offset[3] : TEXCOORD1) : COLOR {
-    // Not SMAADepthEdgeDetectionPS, because its threshold is absolute and this buffer is not.
-    // CombineDepth stores viewZ/farZ, so the stock 0.1*SMAA_THRESHOLD works out as that fraction
-    // of the FAR PLANE - hundreds of units at New Vegas draw distances - and almost nothing ever
-    // registered as an edge. Comparing the difference against the centre depth instead is scale
-    // invariant, so one setting behaves the same on a nearby crate and a distant ridge.
-    float3 n = SMAAGatherNeighbours(texcoord, offset, TESR_DepthBuffer);
-    float2 delta = abs(n.xx - float2(n.y, n.z));
-    float2 edges = step(TESR_SMAAData.y * max(n.x, 0.000001), delta);
+    float2 edges = SMAADepthEdges(texcoord, offset);
+
+    if (dot(edges, float2(1.0, 1.0)) == 0.0)
+        discard;
+
+    return float4(edges, 0.0, 0.0);
+}
+
+// Luma OR depth. Luma is the better behaved of the two - it is aligned with the buffer that
+// actually gets blended, and it sees shader and material edges that depth cannot - while depth
+// finds the alpha test edges luma misses, which is what suppresses DXVK's grass dithering.
+float4 DX9_SMAALumaDepthEdgeDetectionPS(float4 position : SV_POSITION,
+                                        float2 texcoord : TEXCOORD0,
+                                        float4 offset[3] : TEXCOORD1) : COLOR {
+    float2 edges = max(SMAALumaEdges(texcoord, offset), SMAADepthEdges(texcoord, offset));
 
     if (dot(edges, float2(1.0, 1.0)) == 0.0)
         discard;
@@ -180,6 +253,22 @@ technique DepthEdgeDetection {
     pass DepthEdgeDetection {
         VertexShader = compile vs_3_0 DX9_SMAAEdgeDetectionVS();
         PixelShader = compile ps_3_0 DX9_SMAADepthEdgeDetectionPS();
+        ZEnable = false;
+        SRGBWriteEnable = false;
+        AlphaBlendEnable = false;
+        AlphaTestEnable = false;
+
+        // We will be creating the stencil buffer for later usage.
+        StencilEnable = true;
+        StencilPass = REPLACE;
+        StencilRef = 1;
+    }
+}
+
+technique LumaDepthEdgeDetection {
+    pass LumaDepthEdgeDetection {
+        VertexShader = compile vs_3_0 DX9_SMAAEdgeDetectionVS();
+        PixelShader = compile ps_3_0 DX9_SMAALumaDepthEdgeDetectionPS();
         ZEnable = false;
         SRGBWriteEnable = false;
         AlphaBlendEnable = false;

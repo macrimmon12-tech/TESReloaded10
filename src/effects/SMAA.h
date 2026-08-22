@@ -5,7 +5,7 @@ class SMAAEffect : public EffectRecord
 public:
 	SMAAEffect() : EffectRecord("SMAA") {};
 
-	enum Input { INPUT_LUMA, INPUT_COLOR, INPUT_DEPTH };
+	enum Input { INPUT_LUMA, INPUT_COLOR, INPUT_DEPTH, INPUT_LUMADEPTH };
 
 	struct SMAASettings {
 		Input EdgeDetection;
@@ -13,6 +13,8 @@ public:
 		float DepthThreshold;
 		float MaxSearchSteps;
 		float SubpixelShift;
+		float DepthOffset;
+		float LocalContrast;
 	};
 	struct SMAASettingsStruct {
 		SMAASettings	Main;
@@ -22,6 +24,7 @@ public:
 	struct SMAAStruct {
 		D3DXVECTOR4		Resolution;
 		D3DXVECTOR4		Data;	// x edge threshold, y relative depth threshold, z max search steps, w subpixel shift
+		D3DXVECTOR4		DepthData;	// x depth buffer texel offset
 	};
 	SMAAStruct Constants;
 
