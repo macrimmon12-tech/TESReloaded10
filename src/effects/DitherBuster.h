@@ -9,6 +9,7 @@ public:
 		float Strength;
 		float MaskPower;
 		float DitherThreshold;
+		float Radius;
 	};
 	DitherBusterSettingsStruct Settings;
 
