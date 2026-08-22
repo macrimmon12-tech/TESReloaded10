@@ -12,7 +12,7 @@
 //-----------------------------------------//
 
 float4 TESR_ReciprocalResolution;
-float4 TESR_DitherBusterData;   // x: Strength (0-1), y: MaskPower, z: DitherThreshold
+float4 TESR_DitherBusterData;   // x: Strength (0-1), y: MaskPower, z: DitherThreshold, w: Radius
 
 //-----------------------------------------//
 // Samplers:
@@ -123,10 +123,14 @@ half4 AFAA(VSOUT IN) : COLOR0
     // --- Luma FXAA Edge Detection ---
     // Super simple easy luma edge detection, better for exteriors
     // and general use. More closely related to BIAA edge detection.
-    half lumaW = GetBufferOffset(TESR_RenderedBuffer, half2(-1.0f, 0.0f));
-    half lumaE = GetBufferOffset(TESR_RenderedBuffer, half2(1.0f, 0.0f));
-    half lumaN = GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, 1.0f));
-    half lumaS = GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, -1.0f));
+    // These were assigning a float4 straight into a half, so HLSL took .x and every "luma" was in
+    // fact the red channel alone - green carries about 71% of perceived luminance, so edges that
+    // live mostly in green or blue were being under-weighted or missed. Rec.709 weights instead.
+    static const half3 LumaWeights = half3(0.2126f, 0.7152f, 0.0722f);
+    half lumaW = dot(GetBufferOffset(TESR_RenderedBuffer, half2(-1.0f, 0.0f)).rgb, LumaWeights);
+    half lumaE = dot(GetBufferOffset(TESR_RenderedBuffer, half2(1.0f, 0.0f)).rgb, LumaWeights);
+    half lumaN = dot(GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, 1.0f)).rgb, LumaWeights);
+    half lumaS = dot(GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, -1.0f)).rgb, LumaWeights);
     half2 lumaEdge = half2(lumaS - lumaN, lumaE - lumaW) * 0.5f;
 
     // --- Isolated pixel (dither) detection ---
@@ -142,7 +146,7 @@ half4 AFAA(VSOUT IN) : COLOR0
     // gradient cancel to zero, while an isolated pixel disagrees with every neighbour at once and
     // survives. Worked through: a step of d gives spike = d and length(lumaEdge) = d/2, so
     // isolation = 0; a checkerboard of d gives spike = 4d and length(lumaEdge) = 0.
-    half lumaC = tex2D(TESR_RenderedBuffer, IN.UVCoord).x;
+    half lumaC = dot(tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb, LumaWeights);
     half spike = abs(lumaC - lumaN) + abs(lumaC - lumaS) + abs(lumaC - lumaE) + abs(lumaC - lumaW);
     half isolation = max(0.0f, spike - 4.0f * length(lumaEdge));
 
@@ -207,16 +211,29 @@ half4 AFAA(VSOUT IN) : COLOR0
     }
     else
     {
+        // edge is a luma DIFFERENCE, and below it is used directly as a distance in texels. On an
+        // ordinary edge of delta 0.1 that puts the widest tap 0.1 of a texel from the centre, so
+        // all six samples return essentially the same pixel and the pass does nothing visible;
+        // even at maximum contrast it reaches only half a texel. NFAA and BIAA normalise the
+        // direction and scale it by a radius, which is what actually lets the taps straddle the
+        // edge. Radius restores that. Radius = 0 keeps the raw magnitude, i.e. the old behaviour.
+        half2 dir = edge;
+        if (TESR_DitherBusterData.w > 0.0f)
+        {
+            half len = length(edge);
+            dir = (len > 0.0001f) ? (edge / len) * TESR_DitherBusterData.w : half2(0.0f, 0.0f);
+        }
+
         for (int i = 0; i < AFAA_PASS_COUNT; ++i) // Honestly the loop is useless
         {
 	        // Like NFAA reproject with samples along the edge and adjust againts it self.
             const float NormalizedStength = TESR_DitherBusterData.x / 6.0f;
-            color += GetBufferOffset(TESR_RenderedBuffer, (edge * 0.5f)) * NormalizedStength;
-            color += GetBufferOffset(TESR_RenderedBuffer, -(edge * 0.5f)) * NormalizedStength;
-            color += GetBufferOffset(TESR_RenderedBuffer, (edge * 0.25f)) * NormalizedStength;
-            color += GetBufferOffset(TESR_RenderedBuffer, -(edge * 0.25f)) * NormalizedStength;
-            color += GetBufferOffset(TESR_RenderedBuffer, edge) * NormalizedStength;
-            color += GetBufferOffset(TESR_RenderedBuffer, -edge) * NormalizedStength;
+            color += GetBufferOffset(TESR_RenderedBuffer, (dir * 0.5f)) * NormalizedStength;
+            color += GetBufferOffset(TESR_RenderedBuffer, -(dir * 0.5f)) * NormalizedStength;
+            color += GetBufferOffset(TESR_RenderedBuffer, (dir * 0.25f)) * NormalizedStength;
+            color += GetBufferOffset(TESR_RenderedBuffer, -(dir * 0.25f)) * NormalizedStength;
+            color += GetBufferOffset(TESR_RenderedBuffer, dir) * NormalizedStength;
+            color += GetBufferOffset(TESR_RenderedBuffer, -dir) * NormalizedStength;
         }
         color /= AFAA_PASS_COUNT;
     }
