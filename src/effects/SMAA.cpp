@@ -5,6 +5,7 @@
 void SMAAEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_SMAAResolution", &Constants.Resolution);
 	TheShaderManager->RegisterConstant("TESR_SMAAData", &Constants.Data);
+	TheShaderManager->RegisterConstant("TESR_SMAADepthData", &Constants.DepthData);
 };
 
 void SMAAEffect::RegisterTextures() {
@@ -17,10 +18,23 @@ void SMAAEffect::RegisterTextures() {
 
 void SMAAEffect::UpdateSettings() {
 	Settings.Main.EdgeDetection = static_cast<Input>(std::clamp(TheSettingManager->GetSettingI("Shaders.SMAA.Main", "EdgeDetection"), 0, 3));
-	Settings.Main.Threshold = std::clamp(TheSettingManager->GetSettingF("Shaders.SMAA.Main", "Threshold"), 0.005f, 0.5f);
-	Settings.Main.DepthThreshold = std::clamp(TheSettingManager->GetSettingF("Shaders.SMAA.Main", "DepthThreshold"), 0.0001f, 0.5f);
-	Settings.Main.MaxSearchSteps = (float)std::clamp(TheSettingManager->GetSettingI("Shaders.SMAA.Main", "MaxSearchSteps"), 4, 112);
+	// A key absent from the toml reads as 0, which the clamps below would floor to the bottom of
+	// each range rather than to the documented default - a much more sensitive threshold and a
+	// far shorter search than intended, silently, for anyone who updates the plugin without the
+	// defaults file. Fall back to the SMAA_PRESET_ULTRA values instead, matching what the shader
+	// does when the constants themselves are missing.
+	float threshold = TheSettingManager->GetSettingF("Shaders.SMAA.Main", "Threshold");
+	Settings.Main.Threshold = threshold > 0.0f ? std::clamp(threshold, 0.005f, 0.5f) : 0.05f;
+
+	float depthThreshold = TheSettingManager->GetSettingF("Shaders.SMAA.Main", "DepthThreshold");
+	Settings.Main.DepthThreshold = depthThreshold > 0.0f ? std::clamp(depthThreshold, 0.0001f, 0.5f) : 0.005f;
+
+	int searchSteps = TheSettingManager->GetSettingI("Shaders.SMAA.Main", "MaxSearchSteps");
+	Settings.Main.MaxSearchSteps = searchSteps > 0 ? (float)std::clamp(searchSteps, 4, 112) : 32.0f;
 	Settings.Main.SubpixelShift = std::clamp(TheSettingManager->GetSettingF("Shaders.SMAA.Main", "SubpixelShift"), -2.0f, 2.0f);
+	Settings.Main.DepthOffset = std::clamp(TheSettingManager->GetSettingF("Shaders.SMAA.Main", "DepthOffset"), -2.0f, 2.0f);
+	float localContrast = TheSettingManager->GetSettingF("Shaders.SMAA.Main", "LocalContrast");
+	Settings.Main.LocalContrast = localContrast > 0.0f ? std::clamp(localContrast, 1.0f, 20.0f) : 2.0f;
 };
 
 void SMAAEffect::UpdateConstants() {
@@ -41,6 +55,10 @@ void SMAAEffect::UpdateConstants() {
 	Constants.Data.y = Settings.Main.DepthThreshold;
 	Constants.Data.z = Settings.Main.MaxSearchSteps;
 	Constants.Data.w = Settings.Main.SubpixelShift;
+	Constants.DepthData.x = Settings.Main.DepthOffset;
+	Constants.DepthData.y = Settings.Main.LocalContrast;
+	Constants.DepthData.z = 0.0f;
+	Constants.DepthData.w = 0.0f;
 };
 
 /*
@@ -85,6 +103,9 @@ void SMAAEffect::EdgesDetectionPass(Input input) {
         break;
     case INPUT_DEPTH:
         Effect->SetTechnique(Effect->GetTechniqueByName("DepthEdgeDetection"));
+        break;
+    case INPUT_LUMADEPTH:
+        Effect->SetTechnique(Effect->GetTechniqueByName("LumaDepthEdgeDetection"));
         break;
     default:
 		return;
