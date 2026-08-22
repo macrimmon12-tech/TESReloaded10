@@ -37,6 +37,7 @@
  */
 
 float4 TESR_SMAAResolution;
+float4 TESR_SMAAData; // x edge threshold, y relative depth threshold, z max search steps, w subpixel shift
 
 #ifndef SMAA_RT_METRICS
 #define SMAA_RT_METRICS TESR_SMAAResolution
@@ -44,7 +45,15 @@ float4 TESR_SMAAResolution;
 
 #define SMAA_HLSL_3
 
-#define SMAA_PRESET_ULTRA
+// In place of SMAA_PRESET_ULTRA, which hardcodes these four. The threshold and the search
+// step count are used as plain values at their sites - a step() in the edge detection and a
+// mad() in the blending weight vertex shader - so they can come from a constant and be tuned
+// without a rebuild. The diagonal count indexes a for loop and has to stay compile time.
+// Values match ULTRA, so the defaults are unchanged.
+#define SMAA_THRESHOLD             (TESR_SMAAData.x)
+#define SMAA_MAX_SEARCH_STEPS      (TESR_SMAAData.z)
+#define SMAA_MAX_SEARCH_STEPS_DIAG 16
+#define SMAA_CORNER_ROUNDING       25
 
 #include "includes/SMAA.hlsl"
 
@@ -58,9 +67,18 @@ sampler2D TESR_SMAA_SearchTex : register(s5) < string ResourceName = "Effects\SM
 /**
  * Function wrappers
  */
+// Shifts the texture coordinate relative to the pixel being written, in texels. The quad these
+// passes draw comes from the game and no NVR effect adjusts for the D3D9 half texel rule, so
+// whether texel centres line up with pixel centres depends on the quad and, under DXVK, on the
+// translation layer as well. SMAA is far more sensitive to that than a blur is: half a texel of
+// slip means the edge found at one pixel is blended at its neighbour, which weakens the result
+// and skews it in one direction. 0 leaves sampling exactly as it was.
+#define SMAA_SUBPIXEL_SHIFT (TESR_SMAAData.w * TESR_SMAAResolution.xy)
+
 void DX9_SMAAEdgeDetectionVS(inout float4 position : POSITION,
                              inout float2 texcoord : TEXCOORD0,
                              out float4 offset[3] : TEXCOORD1) {
+    texcoord += SMAA_SUBPIXEL_SHIFT;
     SMAAEdgeDetectionVS(texcoord, offset);
 }
 
@@ -68,12 +86,14 @@ void DX9_SMAABlendingWeightCalculationVS(inout float4 position : POSITION,
                                          inout float2 texcoord : TEXCOORD0,
                                          out float2 pixcoord : TEXCOORD1,
                                          out float4 offset[3] : TEXCOORD2) {
+    texcoord += SMAA_SUBPIXEL_SHIFT;
     SMAABlendingWeightCalculationVS(texcoord, pixcoord, offset);
 }
 
 void DX9_SMAANeighborhoodBlendingVS(inout float4 position : POSITION,
                                     inout float2 texcoord : TEXCOORD0,
                                     out float4 offset : TEXCOORD1) {
+    texcoord += SMAA_SUBPIXEL_SHIFT;
     SMAANeighborhoodBlendingVS(texcoord, offset);
 }
 
@@ -93,7 +113,19 @@ float4 DX9_SMAAColorEdgeDetectionPS(float4 position : SV_POSITION,
 float4 DX9_SMAADepthEdgeDetectionPS(float4 position : SV_POSITION,
                                     float2 texcoord : TEXCOORD0,
                                     float4 offset[3] : TEXCOORD1) : COLOR {
-    return float4(SMAADepthEdgeDetectionPS(texcoord, offset, TESR_DepthBuffer), 0.0, 0.0);
+    // Not SMAADepthEdgeDetectionPS, because its threshold is absolute and this buffer is not.
+    // CombineDepth stores viewZ/farZ, so the stock 0.1*SMAA_THRESHOLD works out as that fraction
+    // of the FAR PLANE - hundreds of units at New Vegas draw distances - and almost nothing ever
+    // registered as an edge. Comparing the difference against the centre depth instead is scale
+    // invariant, so one setting behaves the same on a nearby crate and a distant ridge.
+    float3 n = SMAAGatherNeighbours(texcoord, offset, TESR_DepthBuffer);
+    float2 delta = abs(n.xx - float2(n.y, n.z));
+    float2 edges = step(TESR_SMAAData.y * max(n.x, 0.000001), delta);
+
+    if (dot(edges, float2(1.0, 1.0)) == 0.0)
+        discard;
+
+    return float4(edges, 0.0, 0.0);
 }
 
 float4 DX9_SMAABlendingWeightCalculationPS(float4 position : SV_POSITION,

@@ -9,6 +9,10 @@ public:
 
 	struct SMAASettings {
 		Input EdgeDetection;
+		float Threshold;
+		float DepthThreshold;
+		float MaxSearchSteps;
+		float SubpixelShift;
 	};
 	struct SMAASettingsStruct {
 		SMAASettings	Main;
@@ -17,6 +21,7 @@ public:
 
 	struct SMAAStruct {
 		D3DXVECTOR4		Resolution;
+		D3DXVECTOR4		Data;	// x edge threshold, y relative depth threshold, z max search steps, w subpixel shift
 	};
 	SMAAStruct Constants;
 
