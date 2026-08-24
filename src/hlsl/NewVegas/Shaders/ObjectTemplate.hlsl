@@ -624,11 +624,14 @@ PS_OUTPUT main(PS_INPUT IN) {
     #endif
     
     #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
-        // ddx/ddy must stay at pixel-shader top level, so derive the world normal here rather
-        // than inside getAmbientLighting.
+        // ddx/ddy must stay at pixel-shader top level, so derive the world normal and the
+        // tangent frame here rather than inside getAmbientLighting.
         float3 ambNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+        float3 mappedNormal = WorldNormalFromMap(normal.xyz, ambNormal,
+                                                 IN.shadowWorldPos.xyz, IN.uv.xy);
         lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
-                                       SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
+                                       SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f,
+                                       mappedNormal);
     #endif
 
     // Other light sources.
@@ -813,8 +816,9 @@ PS_OUTPUT main(PS_INPUT IN) {
     
     // ddx/ddy must stay at pixel-shader top level.
     float3 ambNormal = GetShadowGeometricNormal(SHADOW_WP_LOAD(IN));
+    float3 mappedNormal = WorldNormalFromMap(normal.xyz, ambNormal, SHADOW_WP_LOAD(IN), IN.uv.xy);
     lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
-                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f);
+                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f, mappedNormal);
 
     // TODO: Vanilla attenuates the full specular term by IN.lPosition.w for some reason. Is this a problem?
     float3 finalColor = lighting;

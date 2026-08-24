@@ -83,6 +83,9 @@ VS_OUTPUT main(VS_INPUT IN) {
     // Outside the guard: the skylight needs this normal whether or not forward shadows
     // are compiled in, and ForwardShadows is a live setting that can switch them off.
     float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    // World-space shading normal for the sky lookup. Top level: CotangentFrame takes
+    // gradients. Same uv the normal itself came from, parallax offset included.
+    float3 mappedNormal = WorldNormalFromMap(N, shadowNormal, IN.shadowWorldPos.xyz, IN.uv);
 #if FORWARD_SHADOWS
     float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
                     ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
@@ -146,7 +149,7 @@ VS_OUTPUT main(VS_INPUT IN) {
 
     // Vanilla: (diffuseSum + AmbientColor) * (r7 * albedo) + specSum * specScale
     // Ambient joins the sum before the albedo multiply, so unlit hair keeps its tint.
-    float3 ambient = PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
+    float3 ambient = PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f, mappedNormal);
     float3 color = (diffuse + ambient) * tintedAlbedo + specular * specScale;
 
     // Blend mode: fog / premultiplied / additive, by MatAlpha.z and .w.

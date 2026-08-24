@@ -25,6 +25,68 @@
     #define SKYLIGHTING_MODE 0
 #endif
 
+// ---------------------------------------------------------------------------
+// Shading normal from a normal map, without precomputed tangents.
+//
+// The vertex shaders build a TBN only to push light and view INTO tangent space; the pixel
+// shader never receives one, and adding it would cost interpolators the templates do not have
+// -- the LIGHTS >= 4 body already packs the eye vector into three .w channels for want of
+// slots. So the frame is rebuilt per pixel from screen-space derivatives of the world position,
+// which the geometric normal already pays for.
+// ---------------------------------------------------------------------------
+
+// Solves [dp1; dp2] = [du1; du2] . [dPdu; dPdv] for the surface's own tangent directions.
+//
+// Deliberately not Schueler's cross-product form. That leaves the uv Jacobian's determinant in
+// the numerator, so its axes carry sign(det) -- and det's sign depends on which way screen y
+// runs. Simulating the pipeline both ways, his form is exact with ddy pointing down and 87
+// degrees out with it pointing up, while solving directly is exact either way. It therefore
+// does not quietly depend on whether the game runs on native D3D9 or on a translation layer
+// that renders with a flipped viewport.
+float3x3 CotangentFrame(float3 geoNormal, float3 worldPos, float2 uv) {
+    float3 dp1 = ddx(worldPos), dp2 = ddy(worldPos);
+    float2 du1 = ddx(uv),       du2 = ddy(uv);
+
+    // Only the determinant's sign is wanted: each axis is normalised on its own below, so 1/det
+    // cancels apart from that. Dropping the division drops an overflow on a degenerate uv with
+    // it.
+    float det = du1.x * du2.y - du1.y * du2.x;
+    float sgn = det < 0.0f ? -1.0f : 1.0f;
+    float3 T = ( du2.y * dp1 - du1.y * dp2) * sgn;
+    float3 B = (-du2.x * dp1 + du1.x * dp2) * sgn;
+
+    // Normalised separately rather than by one shared maximum. Their lengths are the uv's stride
+    // along each axis, so a single scale preserves that ratio and skews every frame whose uv is
+    // not square: 18 degrees of error at 3.5:1 and 50 at 8:1, measured against a mesh tangent
+    // basis, which is orthonormal. Matching that basis is the point, since the sun lobe uses it.
+    //
+    // A collapsed or untextured triangle leaves a length at zero. Selecting zero there instead
+    // of rsqrt's infinity collapses the row, and the mul below falls back to geoNormal on its
+    // own.
+    float lt = dot(T, T), lb = dot(B, B);
+    T *= lt < 1e-12f ? 0.0f : rsqrt(lt);
+    B *= lb < 1e-12f ? 0.0f : rsqrt(lb);
+
+    return float3x3(T, B, geoNormal);
+}
+
+// float3x3(T, B, N) is row-major and mul(vector, matrix) takes the vector as a row, so this is
+// tn.x*T + tn.y*B + tn.z*N -- the inverse of the mul(tbn, v) the vertex shaders use to push
+// light and view the other way.
+float3 WorldNormalFromMap(float3 tangentNormal, float3 geoNormal, float3 worldPos, float2 uv) {
+    return normalize(mul(tangentNormal, CotangentFrame(geoNormal, worldPos, uv)));
+}
+
+// Blend a mapped normal back toward the geometric one. 1 is the full normal map, 0 the
+// geometric normal. A normal map can oppose the geometry hard enough for the two to cancel, and
+// normalize(0) is NaN, so fall back rather than emit it.
+float3 BlendShadingNormal(float3 geoNormal, float3 mappedNormal, float strength) {
+    float3 n = lerp(geoNormal, mappedNormal, strength);
+    float l = dot(n, n);
+    if (l < 1e-8f) return geoNormal;
+    return n * rsqrt(l);
+}
+
 #if SKYLIGHTING_MODE == 1
 
 // ---------------------------------------------------------------------------

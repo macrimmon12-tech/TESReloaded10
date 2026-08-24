@@ -88,6 +88,9 @@ VS_OUTPUT main(VS_INPUT IN) {
 
     // ddx/ddy must stay at top level, outside dynamic flow control.
     float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    // World-space shading normal for the sky lookup. Top level: CotangentFrame takes
+    // gradients. Same uv the normal itself came from, parallax offset included.
+    float3 mappedNormal = WorldNormalFromMap(N, shadowNormal, IN.shadowWorldPos.xyz, uv);
 #if FORWARD_SHADOWS
     float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
                     ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
@@ -134,7 +137,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     }
 
     // shadowNormal is the geometric WORLD normal; N above is tangent space.
-    float3 ambient = PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
+    float3 ambient = PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f, mappedNormal);
 
     // Vanilla: (diffuseSum + AmbientColor) * albedo + specSum * specScale
     float4 baseTex = tex2D(BaseMap, uv);

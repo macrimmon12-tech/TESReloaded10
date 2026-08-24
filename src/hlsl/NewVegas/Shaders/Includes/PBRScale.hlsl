@@ -44,4 +44,12 @@ float3 SkyAmbient(float3 worldNormal, float valid) {
     return SkyAmbientRadiance(worldNormal, TESR_PBRExtraData.z) * TESR_PBRExtraData.y * valid;
 }
 
+// With a normal map. The sky is an environment light, so its irradiance belongs at the shading
+// normal -- the same normal the direct sun already uses. TESR_PBRExtraData.w blends back toward
+// the geometric normal for assets authored against a renderer that never did this.
+float3 SkyAmbient(float3 worldNormal, float valid, float3 mappedNormal) {
+    float3 n = BlendShadingNormal(worldNormal, mappedNormal, TESR_PBRExtraData.w);
+    return SkyAmbientRadiance(n, TESR_PBRExtraData.z) * TESR_PBRExtraData.y * valid;
+}
+
 #endif

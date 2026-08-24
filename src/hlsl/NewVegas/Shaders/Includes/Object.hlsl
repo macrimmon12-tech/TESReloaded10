@@ -127,18 +127,31 @@ float4 TESR_DebugVar : register(c135);
 // w must stay linear in the dot product: that is the exact cosine-weighted form factor.
 // [Shaders.PBR.*] SkylightingScale. No separate toggle: 0 disables the term.
 #define SKY_AMBIENT_STRENGTH  (TESR_PBRExtraData.y)      // scale on skyUpper at w = 1
+// [Shaders.PBR.*] SkylightingNormalStrength: how far the sky's irradiance follows the
+// normal map. 1 is the shading normal, 0 the flat geometric one.
+#define SKY_AMBIENT_NORMAL    (TESR_PBRExtraData.w)
 
 float3 getAmbientLighting(float3 ambient, float3 albedo) {
     return ambient * TESR_PBRData.w * albedo;
 }
 
-float3 getAmbientLighting(float3 ambient, float3 albedo, float3 worldNormal, float worldNormalValid) {
+float3 getAmbientLighting(float3 ambient, float3 albedo, float3 worldNormal, float worldNormalValid,
+                          float3 mappedNormal) {
     float3 flatAmbient = ambient * TESR_PBRData.w;
 
+    // The sky is an environment light, so its irradiance belongs at the shading normal -- which
+    // is what the direct sun and the point lights already use, through tangent-space N.L. The
+    // geometric normal was the odd term out, and it left surfaces flat in shade, where the sky
+    // ambient is the whole of the lighting. Order-2 SH is a heavy low-pass, but irradiance stays
+    // near-linear in the normal away from the pole, so this is not a subtle change: integrating
+    // a uniform sky against the band factors, a 30 degree normal-map slope moves a vertical
+    // surface by +/-50%. A floor barely moves, which is the cosine being flat at its peak.
+    //
     // AmbientScale (TESR_PBRData.w) scales the weather ambient above but not this: the sky is a
     // second, independent light source, so SkylightingScale is its only strength knob and it
     // survives AmbientScale = 0.
-    float3 skyTerm = SkyAmbientRadiance(worldNormal, TESR_PBRExtraData.z) * SKY_AMBIENT_STRENGTH;
+    float3 diffuseNormal = BlendShadingNormal(worldNormal, mappedNormal, SKY_AMBIENT_NORMAL);
+    float3 skyTerm = SkyAmbientRadiance(diffuseNormal, TESR_PBRExtraData.z) * SKY_AMBIENT_STRENGTH;
 
     // worldNormalValid is 0 under a vanilla VS, where the carried world position is undefined.
     return (flatAmbient + skyTerm * worldNormalValid) * albedo;
