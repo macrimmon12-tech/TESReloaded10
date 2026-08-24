@@ -45,11 +45,25 @@ float3 SkyAmbient(float3 worldNormal, float valid) {
 }
 
 // With a normal map. The sky is an environment light, so its irradiance belongs at the shading
-// normal -- the same normal the direct sun already uses. TESR_PBRExtraData.w blends back toward
-// the geometric normal for assets authored against a renderer that never did this.
+// normal -- the same normal the direct sun already uses. TESR_PBRExtraData.w dials it back for
+// assets authored against a renderer that never did this; the reflection is not scaled by it.
 float3 SkyAmbient(float3 worldNormal, float valid, float3 mappedNormal) {
     float3 n = BlendShadingNormal(worldNormal, mappedNormal, TESR_PBRExtraData.w);
     return SkyAmbientRadiance(n, TESR_PBRExtraData.z) * TESR_PBRExtraData.y * valid;
+}
+
+// The specular half of the same sky, for the hand-ported shaders that render a specular lobe.
+//
+// Additive, and deliberately outside whatever albedo multiply the caller does: reflectance
+// already carries the albedo through f0, so passing this through one applies it twice.
+//
+// worldView points from the surface toward the camera; the carried shadow world position is
+// camera-relative, so normalising its negation gives it with no extra interpolator.
+float3 SkyReflection(float3 albedo, float3 worldNormal, float valid, float3 worldView,
+                     float roughness, float metallicness) {
+    float3 f0 = lerp(float(0.04).rrr, albedo, metallicness);
+    return SkyAmbientSpecular(worldNormal, worldView, roughness, f0, TESR_PBRExtraData.z)
+         * TESR_PBRExtraData.y * valid;
 }
 
 #endif

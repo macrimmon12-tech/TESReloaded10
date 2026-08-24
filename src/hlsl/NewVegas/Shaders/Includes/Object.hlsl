@@ -127,15 +127,59 @@ float4 TESR_DebugVar : register(c135);
 // w must stay linear in the dot product: that is the exact cosine-weighted form factor.
 // [Shaders.PBR.*] SkylightingScale. No separate toggle: 0 disables the term.
 #define SKY_AMBIENT_STRENGTH  (TESR_PBRExtraData.y)      // scale on skyUpper at w = 1
-// [Shaders.PBR.*] SkylightingNormalStrength: how far the sky's irradiance follows the
-// normal map. 1 is the shading normal, 0 the flat geometric one.
+// How far the sky's DIFFUSE irradiance follows the normal map. The reflection is not
+// scaled by it -- a reflection off a surface has to follow that surface's detail to mean
+// anything, while the diffuse term is a contrast knob for assets authored against a
+// renderer that never did it.
 #define SKY_AMBIENT_NORMAL    (TESR_PBRExtraData.w)
 
 float3 getAmbientLighting(float3 ambient, float3 albedo) {
     return ambient * TESR_PBRData.w * albedo;
 }
 
+// Both halves take SkylightingScale, deliberately, and there is no second knob.
+//
+// The BRDF is physically based; the radiance feeding it is not. GetSkyColor interpolates
+// weather-authored display colours and scales them by artistic settings, so it carries no
+// radiometric unit -- there is one unknown constant between "the colour the sky dome is painted"
+// and "the radiance arriving at a surface", and SkylightingScale is it. That constant is a
+// property of the light source, so it is the same number for both halves.
+//
+// Splitting it in two would let the diffuse and specular responses of one light source be dialled
+// against each other, which nothing physical can do: how the sky's energy divides between the two
+// is the BRDF's answer, not a setting.
+
+// What the surface reflects of the sky.
+//
+// This must be added where the TEXTURE_Vc multiply cannot reach it. An ONLY_LIGHT pass lights a
+// white surface and has its whole output multiplied by the texture afterwards, which is right
+// for the diffuse ambient and wrong for a reflection: reflectance already carries the albedo
+// through f0, so passing through that multiply applies it a second time. So the reflection
+// belongs to the passes nothing multiplies -- the self-contained combined ones, and the additive
+// ONLY_SPECULAR ones.
+//
+// metallicness is 0 at every call site on this branch. Nothing supplies a per-material metal
+// value yet, and the global Metallicness setting cannot stand in for one here: a split
+// ONLY_SPECULAR pass has no diffuse texture bound, so f0 would pick up a white albedo there and
+// the real albedo in the combined pass, and the two decompositions would disagree on any
+// surface the engine happened to split. At 0 the term is a flat dielectric 0.04 and the
+// disagreement cannot arise. The parameter is here because that is the only piece missing.
+//
+// worldView points from the surface toward the camera. The carried shadow world position is
+// camera-relative, so normalising its negation gives it with no extra interpolator.
+float3 getSkyReflection(float3 albedo, float3 worldNormal, float worldNormalValid,
+                        float3 worldView, float roughness, float metallicness) {
+    float3 f0 = lerp(float(0.04).rrr, albedo, metallicness);
+    return SkyAmbientSpecular(worldNormal, worldView, roughness, f0, TESR_PBRExtraData.z)
+         * SKY_AMBIENT_STRENGTH * worldNormalValid;
+}
+
+// Ambient for the permutations that carry a view vector.
+//
+// Metallicness splits the ambient rather than the reflection being added on top: a metal has no
+// diffuse response, so its share moves to getSkyReflection instead of being counted twice.
 float3 getAmbientLighting(float3 ambient, float3 albedo, float3 worldNormal, float worldNormalValid,
+                          float3 worldView, float roughness, float metallicness,
                           float3 mappedNormal) {
     float3 flatAmbient = ambient * TESR_PBRData.w;
 
@@ -154,5 +198,21 @@ float3 getAmbientLighting(float3 ambient, float3 albedo, float3 worldNormal, flo
     float3 skyTerm = SkyAmbientRadiance(diffuseNormal, TESR_PBRExtraData.z) * SKY_AMBIENT_STRENGTH;
 
     // worldNormalValid is 0 under a vanilla VS, where the carried world position is undefined.
+    float3 diffuse = (flatAmbient + skyTerm * worldNormalValid) * albedo * (1.0f - metallicness);
+
+#if !defined(SPECULAR)
+    // The material renders no specular lobe -- vanilla draws no highlight for it at all -- so
+    // there is nothing for a reflection to belong to, the same rule the terrain PBR branch
+    // follows. The metallic split is dropped with it: moving a metal's share out of the diffuse
+    // is only right when something adds it back, and here nothing would.
     return (flatAmbient + skyTerm * worldNormalValid) * albedo;
+#elif defined(ONLY_LIGHT)
+    // Has a lobe, but this pass is multiplied by the texture afterwards, so the reflection
+    // cannot ride along. The split decomposition adds it from its ONLY_SPECULAR pass instead,
+    // which is also what makes the metallic split above correct here.
+    return diffuse;
+#else
+    return diffuse + getSkyReflection(albedo, mappedNormal, worldNormalValid,
+                                      worldView, roughness, metallicness);
+#endif
 }

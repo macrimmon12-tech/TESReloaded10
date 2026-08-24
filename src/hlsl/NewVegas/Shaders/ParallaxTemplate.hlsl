@@ -488,9 +488,18 @@ PS_OUTPUT main(PS_INPUT IN)
         #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
             if (TESR_ParallaxData.y)
                 lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, sunShadowNormal,
-                                               shadowWorldPosValid, mappedNormal);
+                                               shadowWorldPosValid, normalize(-IN.shadowWorldPos.xyz),
+                                               roughness, 0.0f, mappedNormal);
             else
                 lighting += baseColor.rgb * AmbientColor.rgb;
+        #endif
+
+        // See ObjectTemplate: the reflection cannot ride the ONLY_LIGHT base pass, whose output
+        // the texture multiply would tint a second time, so the split decomposition adds it from
+        // its ONLY_SPECULAR pass. Non-POINT only, so exactly one pass contributes it.
+        #if defined(ONLY_SPECULAR) && !defined(POINT)
+            lighting += getSkyReflection(baseColor.rgb, mappedNormal, shadowWorldPosValid,
+                                         normalize(-IN.shadowWorldPos.xyz), roughness, 0.0f);
         #endif
     
         // Other light sources.

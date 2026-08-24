@@ -142,7 +142,12 @@ VS_OUTPUT main(VS_INPUT IN) {
     // Vanilla: (diffuseSum + AmbientColor) * albedo + specSum * specScale
     float4 baseTex = tex2D(BaseMap, uv);
     float3 albedo = baseTex.rgb * IN.color;
-    float3 color = (diffuse + ambient) * albedo + specular * specScale;
+    // Blinn-Phong exponent to a GGX roughness: alpha = sqrt(2 / (n + 2)). Added after the
+    // albedo multiply, alongside the highlight it belongs with -- f0 already carries the albedo.
+    float decalRoughness = saturate(sqrt(2.0f / (max(ToggleNumLights.z, 1.0f) + 2.0f)));
+    float3 color = (diffuse + ambient) * albedo + specular * specScale
+                 + SkyReflection(albedo, mappedNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f,
+                                 normalize(-IN.shadowWorldPos.xyz), decalRoughness, 0.0f);
 
     // Decal fog and blend modes, straight from the disassembly. MatAlpha .z and .w select
     // between the fogged, unfogged and whitened variants; .x scales the output alpha.

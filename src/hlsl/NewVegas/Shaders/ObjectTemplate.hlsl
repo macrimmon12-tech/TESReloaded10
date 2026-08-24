@@ -610,11 +610,29 @@ PS_OUTPUT main(PS_INPUT IN) {
         shadowMultiplier *= sunShadow;
     #endif
 
+    // ddx/ddy must stay at pixel-shader top level, so the world normal and the tangent frame
+    // are derived here rather than inside getAmbientLighting. Above the ambient guard because
+    // the split specular pass below reads them too, and that pass is excluded from the guard.
+    float3 ambNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    float3 mappedNormal = WorldNormalFromMap(normal.xyz, ambNormal, IN.shadowWorldPos.xyz, IN.uv.xy);
+    // Camera-relative world position, so the view vector is just its negation.
+    float3 ambView = normalize(-IN.shadowWorldPos.xyz);
+
     #if !defined(DIFFUSE) && !defined(POINT)
         float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #else
         // Pointlights only.
         float3 lighting = getPointLightLighting(IN.lightDir.xyz, IN.lightDir.w, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+    #endif
+
+    // The split decomposition's share of the sky reflection. It cannot come from the ONLY_LIGHT
+    // base pass, whose output the texture multiply would tint a second time, so it rides here
+    // instead -- additive, past that multiply. Non-POINT only, so exactly one pass of the
+    // decomposition contributes it, the same rule the sun above follows.
+    #if defined(ONLY_SPECULAR) && !defined(POINT)
+        lighting += getSkyReflection(baseColor.rgb, mappedNormal,
+                                     SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f,
+                                     ambView, roughness, 0.0f);
     #endif
     
     // Self emmitance.
@@ -624,14 +642,9 @@ PS_OUTPUT main(PS_INPUT IN) {
     #endif
     
     #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
-        // ddx/ddy must stay at pixel-shader top level, so derive the world normal and the
-        // tangent frame here rather than inside getAmbientLighting.
-        float3 ambNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
-        float3 mappedNormal = WorldNormalFromMap(normal.xyz, ambNormal,
-                                                 IN.shadowWorldPos.xyz, IN.uv.xy);
         lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
                                        SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f,
-                                       mappedNormal);
+                                       ambView, roughness, 0.0f, mappedNormal);
     #endif
 
     // Other light sources.
@@ -818,7 +831,8 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 ambNormal = GetShadowGeometricNormal(SHADOW_WP_LOAD(IN));
     float3 mappedNormal = WorldNormalFromMap(normal.xyz, ambNormal, SHADOW_WP_LOAD(IN), IN.uv.xy);
     lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
-                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f, mappedNormal);
+                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f,
+                                   normalize(-SHADOW_WP_LOAD(IN)), roughness, 0.0f, mappedNormal);
 
     // TODO: Vanilla attenuates the full specular term by IN.lPosition.w for some reason. Is this a problem?
     float3 finalColor = lighting;

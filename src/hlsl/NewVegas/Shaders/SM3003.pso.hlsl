@@ -150,7 +150,12 @@ VS_OUTPUT main(VS_INPUT IN) {
     // Vanilla: (diffuseSum + AmbientColor) * (r7 * albedo) + specSum * specScale
     // Ambient joins the sum before the albedo multiply, so unlit hair keeps its tint.
     float3 ambient = PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f, mappedNormal);
-    float3 color = (diffuse + ambient) * tintedAlbedo + specular * specScale;
+    // Added after the albedo multiply, alongside the Marschner lobes it belongs with. Hair is a
+    // dielectric, so metallicness 0 and f0 stays at 0.04; HAIR_ROUGHNESS widens the lobe to match
+    // the diffuse term rather than inventing a second width.
+    float3 color = (diffuse + ambient) * tintedAlbedo + specular * specScale
+                 + SkyReflection(tintedAlbedo, mappedNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f,
+                                 normalize(-IN.shadowWorldPos.xyz), HAIR_ROUGHNESS, 0.0f);
 
     // Blend mode: fog / premultiplied / additive, by MatAlpha.z and .w.
     float3 fogged   = lerp(color, IN.fog.rgb, IN.fog.w);

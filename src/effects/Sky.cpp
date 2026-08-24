@@ -5,6 +5,7 @@ void SkyShaders::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_CloudData", &Constants.CloudData);
 	TheShaderManager->RegisterConstant("TESR_SunsetColor", &Constants.SunsetColor);
 	TheShaderManager->RegisterConstant("TESR_SkyIrradiance", &Constants.Irradiance[0]);
+	TheShaderManager->RegisterConstant("TESR_SkyRadiance", &Constants.Radiance[0]);
 }
 
 // Mirrors GetSunColor / GetSkyColor in Shaders/Includes/Sky.hlsl. Kept in step by hand: the
@@ -128,6 +129,13 @@ void SkyShaders::UpdateConstants() {
 	for (int i = 0; i < 9; i++) {
 		D3DXVECTOR3 c = sh[i] * (band[i] * basis[i]);
 		Constants.Irradiance[i] = D3DXVECTOR4(c.x, c.y, c.z, 0.0f);
+
+		// Radiance is the same projection without the convolution: dividing by band[i] leaves
+		// a weight of 1 on every band. A specular lobe asks what the sky looks like along a
+		// direction, and the cosine kernel that makes the set above right for diffuse is
+		// exactly what has to come back out here.
+		D3DXVECTOR3 r = sh[i] * basis[i];
+		Constants.Radiance[i] = D3DXVECTOR4(r.x, r.y, r.z, 0.0f);
 	}
 }
 
