@@ -39,6 +39,56 @@ float3 blendDiffuseMaps(float3 vertexColor, float2 uv, int texCount, sampler2D t
     return color * vertexColor;
 }
 
+// [Shaders.Terrain.*] SkylightingNormalStrength: how far the sky's DIFFUSE follows the ground's
+// normal maps. The reflection is not scaled by it -- a reflection has to follow the surface it
+// comes off to mean anything.
+#define SKY_AMBIENT_NORMAL  (TESR_TerrainSkyData.z)
+
+// Rotate an object-space normal into world space.
+//
+// Terrain's vertex tangent frame, its LOD normal maps, SunDir (c18) and EyePosition (c16) are
+// all object-space -- the engine transforms light and eye per draw, the Gamebryo convention --
+// while the sky's spherical harmonics are indexed by a world direction with +Z up. The two
+// coincide only if the land block carries no rotation. That is likely and is not worth
+// assuming.
+//
+// Both positions are already interpolated, so screen-space derivatives give two independent
+// vectors in each space, and for a rigid transform that pins the rotation exactly. The
+// world-space pair is already being differentiated by GetShadowGeometricNormal, so the new cost
+// is the object-space pair and a few crosses. On an unrotated block this comes out as the
+// identity by itself.
+//
+// The rotation is constant across the object, so a smooth objN stays smooth. That is the reason
+// for doing it this way rather than building a frame around the geometric normal, which is
+// per-triangle constant and would facet visibly across terrain's large triangles -- the sky
+// terms are faceted today for exactly that reason.
+//
+// Gradients: call from pixel-shader top level only.
+float3 ObjectToWorldNormal(float3 objN, float3 objPos, float3 worldPos, float3 fallback) {
+    float3 do1 = ddx(objPos),   do2 = ddy(objPos);
+    float3 dw1 = ddx(worldPos), dw2 = ddy(worldPos);
+
+    float3 oz = cross(do1, do2);
+    float3 wz = cross(dw1, dw2);
+
+    // A silhouette pixel or a collapsed quad leaves one of these at zero, and normalize() of
+    // zero is NaN. The geometric normal the caller already holds is the right fallback.
+    if (dot(do1, do1) < 1e-12f || dot(oz, oz) < 1e-12f || dot(wz, wz) < 1e-12f) return fallback;
+
+    float3 ox = normalize(do1);
+    oz = normalize(oz);
+    float3 oy = cross(oz, ox);
+
+    float3 wx = normalize(dw1);
+    wz = normalize(wz);
+    float3 wy = cross(wz, wx);
+
+    // R maps object to world, and cross() commutes with a rotation, so the two frames built the
+    // same way from the same screen derivatives differ by exactly R. Applied as W * O^T without
+    // ever forming R.
+    return normalize(wx * dot(ox, objN) + wy * dot(oy, objN) + wz * dot(oz, objN));
+}
+
 float3 blendNormalMaps(float2 uv, int texCount, sampler2D tex[7], float blends[7], float spec[7], out float gloss, out float specExponent) {
     gloss = 0.0f;
     specExponent = 0.0f;
@@ -91,16 +141,18 @@ float3 getPointLightLighting(float3 lightDir, float att, float3 lightColor, floa
     }
 }
 
-float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 normal, float3 AmbientColor, float3 albedo, float gloss = 0.0, float glossPower = 0.0, float metallicness = 1.0, float parallaxMultiplier = 1.0, float3 worldNormal = float3(0.0f, 0.0f, 1.0f), float3 worldView = float3(0.0f, 0.0f, 1.0f)) {
+float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 normal, float3 AmbientColor, float3 albedo, float gloss = 0.0, float glossPower = 0.0, float metallicness = 1.0, float parallaxMultiplier = 1.0, float3 worldNormal = float3(0.0f, 0.0f, 1.0f), float3 worldView = float3(0.0f, 0.0f, 1.0f), float3 worldShadingNormal = float3(0.0f, 0.0f, 1.0f)) {
     float3 lightColor = sunColor * TESR_TerrainData.z * parallaxMultiplier;
     float3 ambientColor = AmbientColor * TESR_TerrainData.w;
 
-    // Hemisphere skylight, matching getAmbientLighting in Object.hlsl. worldNormal is the
-    // geometric world normal, not the tangent-space shading normal used above. AmbientScale
+    // Hemisphere skylight, matching getAmbientLighting in Object.hlsl. Evaluated at the shading
+    // normal, so the ground's blended normal maps steer it the same way they steer the sun --
+    // worldNormal, the geometric one, stays the blend target and the fallback. AmbientScale
     // (TESR_TerrainData.w) scales the weather ambient above but not this: the sky is a second,
     // independent light source, so SkylightingScale is its only strength knob and it survives
     // AmbientScale = 0.
-    ambientColor += SkyAmbientRadiance(worldNormal, TESR_TerrainSkyData.y) * SKY_AMBIENT_STRENGTH;
+    float3 skyDiffuseNormal = BlendShadingNormal(worldNormal, worldShadingNormal, SKY_AMBIENT_NORMAL);
+    ambientColor += SkyAmbientRadiance(skyDiffuseNormal, TESR_TerrainSkyData.y) * SKY_AMBIENT_STRENGTH;
     float3 color = albedo;
     color = lerp(luma(albedo), color, TESR_TerrainExtraData.y);
 
@@ -114,9 +166,10 @@ float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 no
         // What the ground reflects of the sky, the specular half of the same light source whose
         // diffuse half is in ambientColor above. Only this branch gets it: the vanilla branch
         // below renders no specular lobe at all, so there is nothing for a reflection to belong
-        // to. worldNormal is the geometric world normal and worldView points at the camera.
+        // to. The full shading normal, not the blended one -- see SKY_AMBIENT_NORMAL. worldView
+        // points at the camera.
         float3 f0 = lerp(float(0.04).rrr, color, metal);
-        float3 reflection = SkyAmbientSpecular(worldNormal, worldView, roughness, f0,
+        float3 reflection = SkyAmbientSpecular(worldShadingNormal, worldView, roughness, f0,
                                                TESR_TerrainSkyData.y) * SKY_AMBIENT_STRENGTH;
 
         return max(0, lighting + ambientColor * color + reflection);

@@ -19,6 +19,7 @@ void TerrainShaders::UpdateSettings() {
 	Settings.Default.AmbientScale = TheSettingManager->GetSettingF("Shaders.Terrain.Main", "AmbientScale");
 	Settings.Default.SkylightingScale = TheSettingManager->GetSettingF("Shaders.Terrain.Main", "SkylightingScale");
 	Settings.Default.SkylightingDirectionality = TheSettingManager->GetSettingF("Shaders.Terrain.Main", "SkylightingDirectionality");
+	Settings.Default.SkylightingNormalStrength = TheSettingManager->GetSettingF("Shaders.Terrain.Main", "SkylightingNormalStrength");
 
 	Settings.Rain.Saturation = TheSettingManager->GetSettingF("Shaders.Terrain.Rain", "TerrainSaturation");
 	Settings.Rain.Metallicness = TheSettingManager->GetSettingF("Shaders.Terrain.Rain", "Metallicness");
@@ -27,6 +28,7 @@ void TerrainShaders::UpdateSettings() {
 	Settings.Rain.AmbientScale = TheSettingManager->GetSettingF("Shaders.Terrain.Rain", "AmbientScale");
 	Settings.Rain.SkylightingScale = TheSettingManager->GetSettingF("Shaders.Terrain.Rain", "SkylightingScale");
 	Settings.Rain.SkylightingDirectionality = TheSettingManager->GetSettingF("Shaders.Terrain.Rain", "SkylightingDirectionality");
+	Settings.Rain.SkylightingNormalStrength = TheSettingManager->GetSettingF("Shaders.Terrain.Rain", "SkylightingNormalStrength");
 
 	Settings.Night.Saturation = TheSettingManager->GetSettingF("Shaders.Terrain.Night", "TerrainSaturation");
 	Settings.Night.Metallicness = TheSettingManager->GetSettingF("Shaders.Terrain.Night", "Metallicness");
@@ -35,6 +37,7 @@ void TerrainShaders::UpdateSettings() {
 	Settings.Night.AmbientScale = TheSettingManager->GetSettingF("Shaders.Terrain.Night", "AmbientScale");
 	Settings.Night.SkylightingScale = TheSettingManager->GetSettingF("Shaders.Terrain.Night", "SkylightingScale");
 	Settings.Night.SkylightingDirectionality = TheSettingManager->GetSettingF("Shaders.Terrain.Night", "SkylightingDirectionality");
+	Settings.Night.SkylightingNormalStrength = TheSettingManager->GetSettingF("Shaders.Terrain.Night", "SkylightingNormalStrength");
 
 	Settings.NightRain.Saturation = TheSettingManager->GetSettingF("Shaders.Terrain.NightRain", "TerrainSaturation");
 	Settings.NightRain.Metallicness = TheSettingManager->GetSettingF("Shaders.Terrain.NightRain", "Metallicness");
@@ -43,6 +46,7 @@ void TerrainShaders::UpdateSettings() {
 	Settings.NightRain.AmbientScale = TheSettingManager->GetSettingF("Shaders.Terrain.NightRain", "AmbientScale");
 	Settings.NightRain.SkylightingScale = TheSettingManager->GetSettingF("Shaders.Terrain.NightRain", "SkylightingScale");
 	Settings.NightRain.SkylightingDirectionality = TheSettingManager->GetSettingF("Shaders.Terrain.NightRain", "SkylightingDirectionality");
+	Settings.NightRain.SkylightingNormalStrength = TheSettingManager->GetSettingF("Shaders.Terrain.NightRain", "SkylightingNormalStrength");
 
 	ParallaxSettings.Enabled = TheSettingManager->GetSettingF("Shaders.Terrain.Parallax", "Enabled");
 	ParallaxSettings.HighQuality = TheSettingManager->GetSettingF("Shaders.Terrain.Parallax", "HighQuality");
@@ -73,6 +77,11 @@ void TerrainShaders::UpdateConstants() {
 
 
 	// Used only when SKYLIGHTING_MODE is 1; the SH path has no direction to lean.
+	// How far the sky's diffuse follows the ground's normal maps. The reflection always
+	// takes the full shading normal.
+	Constants.SkyData.z = std::lerp(TheShaderManager->GetTransitionValue(Settings.Default.SkylightingNormalStrength, Settings.Night.SkylightingNormalStrength, 0.0),
+		TheShaderManager->GetTransitionValue(Settings.Rain.SkylightingNormalStrength, Settings.NightRain.SkylightingNormalStrength, 0.0), rainFactor);
+
 	Constants.SkyData.y = std::lerp(TheShaderManager->GetTransitionValue(Settings.Default.SkylightingDirectionality, Settings.Night.SkylightingDirectionality, 0.0),
 		TheShaderManager->GetTransitionValue(Settings.Rain.SkylightingDirectionality, Settings.NightRain.SkylightingDirectionality, 0.0), rainFactor);
 

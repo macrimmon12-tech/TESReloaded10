@@ -137,7 +137,13 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos);
     float sunShadow = FORWARD_SHADOWS ? GetSunShadow(IN.shadowWorldPos, shadowNormal) : 1.0f;
 
-    float3 lighting = getSunLighting(IN.sunDirection.xyz, PSLightColor.rgb, eyeDir, normal.xyz, AmbientColor.rgb, baseColor, normal.a, LandLODSpec.x, 1.0, sunShadow, shadowNormal, normalize(-IN.shadowWorldPos));
+    // The LOD normal maps are not tangent space: normal.xyz is used directly against
+    // sunDirection and eyeDir, which the engine supplies in object space, so it is already an
+    // object-space normal and only needs rotating. Top level: this takes gradients.
+    float3 worldShadingNormal = ObjectToWorldNormal(normal.xyz, IN.lPosition.xyz,
+                                                    IN.shadowWorldPos, shadowNormal);
+
+    float3 lighting = getSunLighting(IN.sunDirection.xyz, PSLightColor.rgb, eyeDir, normal.xyz, AmbientColor.rgb, baseColor, normal.a, LandLODSpec.x, 1.0, sunShadow, shadowNormal, normalize(-IN.shadowWorldPos), worldShadingNormal);
 
     float3 final = lighting;
     final = lerp(final, final * (0.8 * noise + 0.55), saturate(TESR_TerrainExtraData.z)); // Apply noise.

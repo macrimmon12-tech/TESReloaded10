@@ -849,6 +849,7 @@ Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 1.0              # Sky-colour ambient boost. 0 disables it.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0     # How far the sky's diffuse follows the ground's normal maps. 0 uses the flat geometric normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -858,6 +859,7 @@ Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 1.0              # Sky-colour ambient boost. 0 disables it.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0     # How far the sky's diffuse follows the ground's normal maps. 0 uses the flat geometric normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -867,6 +869,7 @@ Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 1.0              # Sky-colour ambient boost. 0 disables it.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0     # How far the sky's diffuse follows the ground's normal maps. 0 uses the flat geometric normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -876,6 +879,7 @@ Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 1.0              # Sky-colour ambient boost. 0 disables it.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0     # How far the sky's diffuse follows the ground's normal maps. 0 uses the flat geometric normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
