@@ -25,6 +25,7 @@ public:
 	void					RenderShadowSpotlight(NiSpotLight** Lights, UInt32 LightIndex);
 	void					RenderShadowMaps();
 	void					ClearShadowCascade(D3DVIEWPORT9* ViewPort, D3DXVECTOR4* ClearColor);
+	void					ClearShadowAtlas();
 	void                    BlurShadowAtlas();
 
 	ShadowRenderPass*				geometryPass;
@@ -32,6 +33,9 @@ public:
 	SkinnedGeoShadowRenderPass*		skinnedGeoPass;
 	SpeedTreeShadowRenderPass*		speedTreePass;
 	TerrainLODPass*					terrainLODPass;
+
+	// The sun cascades hold the last exterior frame until the player is outdoors again.
+	bool					AtlasHasExteriorData = false;
 
 	NiVector4				BillboardRight;
 	NiVector4				BillboardUp;

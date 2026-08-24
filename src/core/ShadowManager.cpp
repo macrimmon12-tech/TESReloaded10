@@ -668,6 +668,17 @@ void ShadowManager::RenderShadowMaps() {
 	// Render all shadow maps
 	Device->BeginScene();
 
+	// Going indoors leaves the sun cascades holding the last exterior frame. The block below is
+	// gated on isExterior, so nothing rewrites them until the player is back outside, while
+	// GetSunShadow keeps sampling them -- TESR_ShadowFade.y, its enable, means "interior shadows
+	// on" in here, not "the atlas is valid". So an interior inherits the shadows of whatever was
+	// standing outside the door. Clear once on the way in rather than every frame: nothing
+	// dirties the atlas again until the exterior path runs.
+	if (!isExterior && AtlasHasExteriorData) {
+		ClearShadowAtlas();
+		AtlasHasExteriorData = false;
+	}
+
 	// Quantize sun direction angle to reduce shimmer by a large factor.
 	D3DXVECTOR3 SunDir = Shadows->CalculateSmoothedSunDir();
 
@@ -733,6 +744,8 @@ void ShadowManager::RenderShadowMaps() {
 
 			if (Shadows->Settings.ShadowMaps.Mipmaps)
 				Shadows->ShadowAtlasTexture->GenerateMipSubLevels();
+
+			AtlasHasExteriorData = true;
 		}
 
 		// render ortho map if one of the effects using ortho is active
@@ -844,6 +857,40 @@ void ShadowManager::RenderShadowMaps() {
 
 	FrameCounter = (FrameCounter + 1) % 4;
 	shadowMapsRenderTime = timer.LogTime("ShadowManager::RenderShadowMaps");
+}
+
+
+/*
+ * Clear every sun cascade to "nothing occludes this".
+ *
+ * A plain Clear to white is only correct for the plain depth mode; VSM and the EVSM variants
+ * store moments, whose unoccluded value depends on the warp, which is what ClearColor and
+ * CustomClearRequired carry. Same sequence RenderShadowMap uses before it accumulates.
+ *
+ * Note: the caller must already be inside BeginScene. The render target is set here.
+ */
+void ShadowManager::ClearShadowAtlas() {
+	ShadowsExteriorEffect* Shadows = TheShaderManager->Effects.ShadowsExteriors;
+	IDirect3DDevice9* Device = TheRenderManager->device;
+
+	// The resolved surface, not the MSAA one: that is only ever a scratch target that gets
+	// StretchRect'd down, and the texture the shaders sample is this one.
+	Device->SetRenderTarget(0, Shadows->ShadowAtlasSurface);
+	Device->SetDepthStencilSurface(Shadows->ShadowAtlasDepthSurface);
+
+	for (int i = MapNear; i < MapOrtho; i++) {
+		ShadowsExteriorEffect::ShadowMapSettings* ShadowMap = &Shadows->ShadowMaps[i];
+
+		Device->SetViewport(&ShadowMap->ShadowMapViewPort);
+		Device->Clear(0L, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DXCOLOR(1.0f, 1.0f, 1.0f, 1.0f), 1.0f, 0L);
+
+		if (ShadowMap->CustomClearRequired)
+			ClearShadowCascade(&ShadowMap->ShadowMapViewPort, &ShadowMap->ClearColor);
+	}
+
+	// The deferred path samples mips; GetSunShadow is tex2Dlod at 0 and does not.
+	if (Shadows->Settings.ShadowMaps.Mipmaps)
+		Shadows->ShadowAtlasTexture->GenerateMipSubLevels();
 }
 
 
