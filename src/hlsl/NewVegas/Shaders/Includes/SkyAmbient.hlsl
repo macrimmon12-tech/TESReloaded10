@@ -87,6 +87,25 @@ float3 BlendShadingNormal(float3 geoNormal, float3 mappedNormal, float strength)
     return n * rsqrt(l);
 }
 
+// Aesthetic, not physical: pushes the sky's colour away from or toward its own luminance
+// before anything consumes it. 1 leaves the sky as projected, 0 renders it grey, above 1
+// exaggerates the difference between the warm and cool halves of the dome. Applied at the
+// entry points below, so it reaches the diffuse irradiance and the specular radiance alike, and
+// every shader family with them -- objects, parallax, terrain and the hand-ported set all route
+// through here. c155: c137-c154 are the sky constants, and Shadow.hlsl pins c100-c133.
+float4 TESR_SkyLightData : register(c155);   // x: saturation
+
+// Encoded space, matching the albedo Saturation knob. Saturation above 1 can drive a channel
+// negative, which would read as a dark fringe rather than a vivid one.
+//
+// The BT.709 weights are spelled out rather than calling Helpers' luma(): this header is pulled
+// in by the standalone shaders through PBRScale.hlsl, which does not carry Helpers, so relying
+// on it would make the file depend on each caller's include order.
+float3 SkySaturate(float3 color) {
+    float y = dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+    return max(lerp(y.xxx, color, TESR_SkyLightData.x), 0.0f);
+}
+
 #if SKYLIGHTING_MODE == 1
 
 // ---------------------------------------------------------------------------
@@ -155,13 +174,13 @@ float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
     float wSky = 0.5f * dot(worldNormal, up) + 0.5f;
 
     // GetSkyColor returns linear; encode to match the space the callers work in.
-    return sqrt(max(GetSkyRadiance(dir), 0.0f)) * wSky;
+    return SkySaturate(sqrt(max(GetSkyRadiance(dir), 0.0f))) * wSky;
 }
 
 // Radiance looking along dir, with no cosine form factor: a specular lobe samples what the sky
 // looks like that way, not how much of the hemisphere a surface can see.
 float3 SkyRadianceAlong(float3 dir) {
-    return sqrt(max(GetSkyRadiance(dir), 0.0f));
+    return SkySaturate(sqrt(max(GetSkyRadiance(dir), 0.0f)));
 }
 
 #else
@@ -205,7 +224,7 @@ float3 SkyIrradianceLinear(float3 n) {
 float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
     // max() before sqrt because an order-2 SH fit can ring slightly negative, and sqrt of a
     // negative is NaN.
-    return sqrt(max(SkyIrradianceLinear(worldNormal), 0.0f));
+    return SkySaturate(sqrt(max(SkyIrradianceLinear(worldNormal), 0.0f)));
 }
 
 // LINEAR radiance along dir, from the set the convolution was divided out of.
@@ -231,7 +250,7 @@ float3 SkyRadianceLinear(float3 n) {
 }
 
 float3 SkyRadianceAlong(float3 dir) {
-    return sqrt(max(SkyRadianceLinear(dir), 0.0f));
+    return SkySaturate(sqrt(max(SkyRadianceLinear(dir), 0.0f)));
 }
 
 #endif

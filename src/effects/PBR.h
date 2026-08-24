@@ -120,6 +120,7 @@ public:
 		float SkylightingScale;
 		float SkylightingDirectionality;
 		float SkylightingNormalStrength;
+		float SkylightingSaturation;
 	};
 	struct PBRSettingsStruct {
 		PBRSettings Default;
@@ -133,6 +134,7 @@ public:
 	struct PBRStruct {
 		D3DXVECTOR4		Data;
 		D3DXVECTOR4		ExtraData;
+		D3DXVECTOR4		SkyLightData;
 	};
 	PBRStruct	Constants;
 
