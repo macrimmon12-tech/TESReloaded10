@@ -205,7 +205,7 @@ float3 SkyRadianceAlong(float3 dir) {
 // to the convolution. There is no direction to lean, so `directionality` is ignored here.
 // ---------------------------------------------------------------------------
 float4 TESR_SkyIrradiance[9] : register(c137);   // c137-c145, cosine-convolved
-float4 TESR_SkyRadiance[9]   : register(c146);   // c146-c154, convolution divided back out
+float4 TESR_SkyRadiance[9]   : register(c146);   // c146-c154, no convolution, full sphere
 
 // LINEAR irradiance along n. Callers encode.
 float3 SkyIrradianceLinear(float3 n) {
@@ -227,12 +227,16 @@ float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
     return SkySaturate(sqrt(max(SkyIrradianceLinear(worldNormal), 0.0f)));
 }
 
-// LINEAR radiance along dir, from the set the convolution was divided out of.
+// LINEAR radiance along dir, from the unconvolved set.
 //
 // Not SkyIrradianceLinear: that one reconstructs an average radiance already -- SkyShaders folds
 // 1/pi in alongside the band factors -- so it needs no further division, and it still carries
 // the cosine lobe. Reading it for a reflection makes a uniformly bright sky report half its
 // brightness at the horizon, which is the diffuse form factor leaking into a specular lookup.
+//
+// This set is projected over the whole sphere against a sky continued below the horizon, so it
+// holds no horizon edge and none of the ringing that fitting one produces. The edge belongs to
+// SkyHorizonVisibility below; without it this function reports sky underground.
 //
 // Order 2 still cannot hold a mirror image of the sky, only its gross gradient. That is
 // tolerable because the sky is smooth and its one sharp feature, the sun disk, has its own lobe
@@ -280,6 +284,21 @@ float3 EnvBRDFApprox(float3 f0, float roughness, float NdotV) {
     return f0 * ab.x + ab.y;
 }
 
+// Nothing is below the horizon: Sky.cpp models no ground bounce, so a reflection pointing down
+// reflects black. The coefficient sets do not carry that edge -- a step is what order-2 SH is
+// worst at, and fitting one cost a 25% overshoot at the zenith, half brightness at the horizon
+// and a glow reaching 42 degrees under it. Applying it here instead keeps the harmonics on the
+// smooth part of the problem.
+//
+// The band widens with roughness because a wide lobe straddling the horizon genuinely does see
+// part of the sky; alpha = roughness^2 is that lobe's angular scale. The floor keeps a near
+// mirror from aliasing along the edge, where the reflection direction moves fast across a
+// normal-mapped surface.
+float SkyHorizonVisibility(float dirZ, float roughness) {
+    float w = clamp(roughness * roughness, 0.02f, 0.5f);
+    return smoothstep(-w, w, dirZ);
+}
+
 // worldNormal is the shading normal -- WorldNormalFromMap above rotates the normal map into
 // world space, so surface detail steers the reflection. worldView points from the surface
 // toward the camera.
@@ -293,7 +312,8 @@ float3 SkyAmbientSpecular(float3 worldNormal, float3 worldView, float roughness,
     float3 dir = normalize(lerp(mirror, worldNormal, roughness * roughness));
 
     float NdotV = saturate(dot(worldNormal, worldView));
-    return SkyRadianceAlong(dir) * EnvBRDFApprox(f0, roughness, NdotV);
+    return SkyRadianceAlong(dir) * EnvBRDFApprox(f0, roughness, NdotV)
+         * SkyHorizonVisibility(dir.z, roughness);
 }
 
 #endif

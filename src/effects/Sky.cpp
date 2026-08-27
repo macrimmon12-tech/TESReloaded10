@@ -81,14 +81,27 @@ void SkyShaders::UpdateConstants() {
 	float sunSet = std::clamp(powf(1.0f - sunHeight, 8.0f), 0.0f, 1.0f) * dayTime;
 	D3DXVECTOR3 sunColor = (1.0f + sunHeight) * sunDisk + sunsetC * (sunSet * Constants.SkyData.x);
 
-	// Upper hemisphere only; the lower half contributes nothing, so it is skipped rather than
-	// evaluated. Order-2 SH is smooth enough that this stratification is ample.
-	const int STEPS_T = 16, STEPS_P = 32;
-	const float dTheta = (D3DX_PI * 0.5f) / STEPS_T;
+	// Two coefficient sets out of one sweep.
+	//
+	// sh is the sky as it stands: upper hemisphere, nothing below, which is what the diffuse
+	// irradiance integrates and is correct for it.
+	//
+	// shR is the same sky continued below the horizon at its horizon colour, for the reflection.
+	// The horizon is a step, and order-2 SH cannot hold a step -- fitting one is what put a 25%
+	// overshoot at the zenith, half brightness at the horizon and a visible glow 42 degrees
+	// below it into the set the reflection used to read. Fitting a continuous function and
+	// applying the edge in the shader is exact for a flat sky, where the hemisphere-with-zeros
+	// fit is 0.474 out; against a graded sky with a sun it is 0.582 against 1.757. Continuing at
+	// the horizon colour beat mirroring the sky at every gradient tested.
+	//
+	// 32 steps over the full sphere land the upper-half samples exactly where 16 steps over a
+	// hemisphere landed them, so the irradiance set does not move.
+	const int STEPS_T = 32, STEPS_P = 32;
+	const float dTheta = D3DX_PI / STEPS_T;
 	const float dPhi = (2.0f * D3DX_PI) / STEPS_P;
 
-	D3DXVECTOR3 sh[9];
-	for (int i = 0; i < 9; i++) sh[i] = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+	D3DXVECTOR3 sh[9], shR[9];
+	for (int i = 0; i < 9; i++) sh[i] = shR[i] = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
 
 	for (int i = 0; i < STEPS_T; i++) {
 		float theta = (i + 0.5f) * dTheta;
@@ -98,23 +111,43 @@ void SkyShaders::UpdateConstants() {
 			float phi = (j + 0.5f) * dPhi;
 			D3DXVECTOR3 d(st * cosf(phi), st * sinf(phi), ct);
 
+			// Below the horizon the sky is sampled at the horizon directly beneath, which is
+			// what makes the continued function continuous there. Above it, dc is d, so both
+			// sets take the same sample and only one EvalSky is paid for.
+			D3DXVECTOR3 dc = d;
+			if (dc.z < 0.0f) {
+				dc.z = 0.0f;
+				float len = sqrtf(dc.x * dc.x + dc.y * dc.y);
+				if (len > 1e-6f) { dc.x /= len; dc.y /= len; }
+				else { dc.x = 1.0f; dc.y = 0.0f; }
+			}
+
 			// LINEAR radiance, as GetSkyColor returns and as the integral requires. The shader
 			// encodes on reconstruction. Integrating encoded values instead was measurably
 			// wrong -- it cost walls about a third of their brightness, since their lobe spans
 			// the widest range of sky and a concave curve pulls an average of spread values
 			// down hardest.
-			D3DXVECTOR3 L = EvalSky(d, sunPos, Constants.SkyData, skyC, skyLowC, horizonC,
+			D3DXVECTOR3 L = EvalSky(dc, sunPos, Constants.SkyData, skyC, skyLowC, horizonC,
 				sunColor, sunHeight, isDayTime) * dOmega;
 
-			sh[0] += L * 0.282095f;
-			sh[1] += L * (0.488603f * d.y);
-			sh[2] += L * (0.488603f * d.z);
-			sh[3] += L * (0.488603f * d.x);
-			sh[4] += L * (1.092548f * d.x * d.y);
-			sh[5] += L * (1.092548f * d.y * d.z);
-			sh[6] += L * (0.315392f * (3.0f * d.z * d.z - 1.0f));
-			sh[7] += L * (1.092548f * d.x * d.z);
-			sh[8] += L * (0.546274f * (d.x * d.x - d.y * d.y));
+			// Projected against d, the direction the coefficient set is indexed by, not against
+			// dc, which only chooses what colour is being continued downward.
+			const float Y[9] = {
+				0.282095f,
+				0.488603f * d.y,
+				0.488603f * d.z,
+				0.488603f * d.x,
+				1.092548f * d.x * d.y,
+				1.092548f * d.y * d.z,
+				0.315392f * (3.0f * d.z * d.z - 1.0f),
+				1.092548f * d.x * d.z,
+				0.546274f * (d.x * d.x - d.y * d.y)
+			};
+
+			for (int k = 0; k < 9; k++) {
+				shR[k] += L * Y[k];
+				if (d.z > 0.0f) sh[k] += L * Y[k];
+			}
 		}
 	}
 
@@ -130,11 +163,11 @@ void SkyShaders::UpdateConstants() {
 		D3DXVECTOR3 c = sh[i] * (band[i] * basis[i]);
 		Constants.Irradiance[i] = D3DXVECTOR4(c.x, c.y, c.z, 0.0f);
 
-		// Radiance is the same projection without the convolution: dividing by band[i] leaves
-		// a weight of 1 on every band. A specular lobe asks what the sky looks like along a
-		// direction, and the cosine kernel that makes the set above right for diffuse is
-		// exactly what has to come back out here.
-		D3DXVECTOR3 r = sh[i] * basis[i];
+		// Radiance carries no convolution -- a weight of 1 on every band. A specular lobe asks
+		// what the sky looks like along a direction, and the cosine kernel that makes the set
+		// above right for diffuse is exactly what must not be in this one. It is also the
+		// continued sky rather than the clipped one; SkyHorizonVisibility puts the edge back.
+		D3DXVECTOR3 r = shR[i] * basis[i];
 		Constants.Radiance[i] = D3DXVECTOR4(r.x, r.y, r.z, 0.0f);
 	}
 }

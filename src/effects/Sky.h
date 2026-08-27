@@ -21,11 +21,16 @@ public:
 		// as an average radiance -- what the diffuse ambient wants, since a surface collects
 		// the hemisphere weighted by the cosine.
 		//
-		// Radiance is the same projection with that convolution divided back out, so it
-		// reconstructs as radiance along a direction -- what a specular lobe wants, since it
-		// asks what the sky LOOKS like that way rather than how much of it a surface sees.
-		// Reconstructing the cosine-weighted set for a reflection reads a uniformly bright sky
-		// as half as bright at the horizon as at the zenith.
+		// Radiance carries no convolution, so it reconstructs as radiance along a direction --
+		// what a specular lobe wants, since it asks what the sky LOOKS like that way rather
+		// than how much of it a surface sees. Reconstructing the cosine-weighted set for a
+		// reflection reads a uniformly bright sky as half as bright at the horizon as at the
+		// zenith.
+		//
+		// It is also projected over the FULL sphere against a sky continued below the horizon
+		// at its horizon colour, where Irradiance is projected over the hemisphere with nothing
+		// below. Order 2 cannot represent the horizon step, so this set does not try; the
+		// shader applies that edge with SkyHorizonVisibility instead.
 		D3DXVECTOR4		Irradiance[9];
 		D3DXVECTOR4		Radiance[9];
 	};
