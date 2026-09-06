@@ -512,9 +512,11 @@ reading `SettingsMain` before this write lands. Add a minimal read-only ImGui
 window: current cell/worldspace EditorID, `IsInterior`, assigned keyword if
 any, resolved tier, resolved filename. No Save/Load/Reload buttons yet.
 
-**Session 3 — Minimal log window in Dev Tools.** Mirror `Logger::Log()` into
-a capped ring buffer (§ "Debug/authoring tooling"), basic scrolling window in
-the existing NVR Dev Tools panel (`ImGuiManager.cpp:472`). No filter yet.
+**Session 3 — Minimal log window in Dev Tools.** ✅ Done. Mirrors `Logger::Log()`
+into a capped (500-entry), mutex-guarded ring buffer, rendered as a collapsible
+"Log" section inside the existing NVR Dev Tools panel. No filter yet — Session
+7 adds the free-text box and "Preset only" checkbox. Not build-verified in
+this environment (no MSVC toolchain here).
 
 **Session 4 — Variants persistence + diff-stacking.** `EnabledVariants.ini`
 read/write (§ "Persisting which Variants are enabled"), extend the apply
