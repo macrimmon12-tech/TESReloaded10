@@ -537,7 +537,7 @@ OK/Cancel warnings, "Reload current preset", a shared confirmation popup
 instead of three duplicated ones. No new keyboard/text-entry widgets needed
 yet — every Save target name is derived, not typed — so the `CLAUDE.md`
 DXVK-safe input patterns don't come into play until Session 6's free-text
-preset names. Not build-verified in this environment.
+preset names. Build- and playtest-verified after the fix-up below.
 
 **Session 5 fix-up — shared confirmation popup never opened.** The
 first live playtest found the popup completely dead: no "Confirm OK
@@ -557,9 +557,22 @@ context every frame — this also preserves the original intent that the
 confirm popup keeps working even if the "NVR Preset Manager" window is
 closed mid-confirm.
 
-**Session 6 — Preset browser / Load.** Persistent preset list, Keyword-
-grouped-first, kind-tagged by name lookup, Load + OK/Cancel, the
-Unsaved/previewing status state (§ "In-game UI — Preset browser / Load").
+**Session 6 — Preset browser / Load.** ✅ Done. Added
+`PresetManager::ListAllPresets()` (enumerates `Data\NVR\Presets\` fresh off
+disk every call, classifies each name as Default/Keyword/Override by lookup
+against the reserved Default names and the cached keyword set, sorted
+Keyword-group-first per the docs), `ApplyPreviewPreset()` (pushes a preset's
+contents into the engine without touching the resolved tier), and
+`GetResolveGeneration()` (bumped once per real `ResolveAndApply`, i.e. once
+per actual cell transition). The in-game panel gained a persistent,
+always-visible preset list + Load button sharing the same confirm-popup
+infrastructure as the Save buttons, and an Unsaved/previewing banner that
+replaces the normal shown/highlighted indicators while a Load preview is
+live. Walking to a different location without saving silently discards the
+preview with no extra plumbing: the next real `ResolveAndApply` (on cell
+change, or from a Save/Reload) bumps the generation counter, and the panel
+notices the mismatch and clears the preview on its next frame. Not
+build-verified in this environment.
 
 **Session 7 — Variants UI, Refresh All Presets, remaining Dev Tools items.**
 Variants checkbox panel + Save Variant flow (§ "In-game UI — Variants");

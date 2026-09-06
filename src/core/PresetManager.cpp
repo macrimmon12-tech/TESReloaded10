@@ -29,6 +29,7 @@ static std::string ResolvePresetPath(const char* RelativePath) {
 std::unordered_map<std::string, std::string>	PresetManager::s_cellToKeyword;
 std::unordered_map<std::string, UInt32>		PresetManager::s_keywordCellCount;
 PresetManager::ResolveResult					PresetManager::s_lastResolveResult;
+UInt32											PresetManager::s_resolveGeneration = 0;
 
 // ---- setting-scope blacklist ---------------------------------------------
 // docs/preset-manager-design.md § "Setting scope -- a blacklist, still needed"
@@ -451,6 +452,7 @@ void PresetManager::ResolveAndApply(TESObjectCELL* Cell) {
 
 	ApplyPreset(target);
 	s_lastResolveResult = result;
+	s_resolveGeneration++;
 
 	Logger::Log("PresetManager: [Preset] Resolved %s -> tier=%d name='%s' rawDefaults=%d keyword='%s' variants=%u",
 		result.IsInterior ? result.CellEditorID.c_str() : result.WorldspaceEditorID.c_str(),
@@ -460,6 +462,52 @@ void PresetManager::ResolveAndApply(TESObjectCELL* Cell) {
 
 const PresetManager::ResolveResult& PresetManager::GetLastResolveResult() {
 	return s_lastResolveResult;
+}
+
+// ---- Session 6: Preset browser / Load -------------------------------------
+// docs § "In-game UI -- Preset browser / Load", § "Unsaved/previewing state"
+
+std::vector<PresetManager::PresetListEntry> PresetManager::ListAllPresets() {
+	namespace fs = std::filesystem;
+	std::vector<PresetListEntry> entries;
+
+	std::string resolvedDir = ResolvePresetPath(kPresetsDir);
+	const fs::path presetsPath = resolvedDir;
+	if (!fs::exists(presetsPath) || !fs::is_directory(presetsPath))
+		return entries;
+
+	for (const auto& entry : fs::directory_iterator(presetsPath)) {
+		if (!entry.is_regular_file() || entry.path().extension() != ".ini")
+			continue;
+
+		std::string name = entry.path().stem().string();
+		PresetKind kind;
+		if (name == kDefaultInteriorName || name == kDefaultExteriorName)
+			kind = PresetKind::Default;
+		else if (s_keywordCellCount.find(name) != s_keywordCellCount.end())
+			kind = PresetKind::Keyword;
+		else
+			kind = PresetKind::Override;
+
+		entries.push_back({ name, kind });
+	}
+
+	// Keyword group first, then Default, then Override (docs: "Keyword
+	// presets are grouped first"); alphabetical within each group.
+	std::sort(entries.begin(), entries.end(), [](const PresetListEntry& a, const PresetListEntry& b) {
+		if (a.Kind != b.Kind) return (int)a.Kind < (int)b.Kind;
+		return a.Name < b.Name;
+	});
+
+	return entries;
+}
+
+void PresetManager::ApplyPreviewPreset(const PresetData& Data) {
+	ApplyPreset(Data);
+}
+
+UInt32 PresetManager::GetResolveGeneration() {
+	return s_resolveGeneration;
 }
 
 // ---- Session 4: Variants -------------------------------------------------

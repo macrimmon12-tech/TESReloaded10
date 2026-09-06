@@ -96,6 +96,41 @@ public:
 	// a sparse user config omits). This is what a Save button writes.
 	static bool			CaptureLiveState(PresetData& OutData);
 
+	// ---- Session 6: Preset browser / Load (docs § "In-game UI -- Preset
+	// browser / Load") -----------------------------------------------------
+
+	// Ordering matches the docs' display order -- Keyword presets grouped
+	// first, ahead of Default and Override -- since the enum's own ordinal
+	// is what ListAllPresets() sorts by.
+	enum class PresetKind { Keyword, Default, Override };
+	struct PresetListEntry {
+		std::string	Name;
+		PresetKind	Kind;
+	};
+
+	// Enumerates Data\NVR\Presets\ fresh off disk every call -- same
+	// never-cached philosophy as ReadPreset itself, so a preset saved a
+	// moment ago via the authoring UI shows up immediately. Classifies each
+	// by name alone (cross-linked by name only, no per-file metadata):
+	// DefaultInterior/DefaultExterior -> Default, a name matching a known
+	// keyword -> Keyword, everything else -> Override.
+	static std::vector<PresetListEntry>	ListAllPresets();
+
+	// Pushes Data into the engine exactly like the normal resolve path does,
+	// but deliberately does NOT touch s_lastResolveResult or the resolve
+	// generation counter below -- Load previews a preset's contents without
+	// redefining what's actually assigned to the current location (docs §
+	// "Unsaved/previewing state"). Walking away without saving silently
+	// reverts because the next real ResolveAndApply overwrites it.
+	static void				ApplyPreviewPreset(const PresetData& Data);
+
+	// Bumped once per actual ResolveAndApply call (i.e. once per real cell
+	// transition). The in-game UI captures this value when a Load preview
+	// starts and compares it every frame -- a mismatch means the player
+	// walked to a different location, so the preview should be silently
+	// dropped per the docs, with no extra plumbing needed to detect that.
+	static UInt32			GetResolveGeneration();
+
 	// ---- Session 4: Variants (docs § "Variants",
 	// § "Persisting which Variants are enabled") -------------------------
 
@@ -140,4 +175,5 @@ private:
 	static std::vector<std::string>						s_enabledVariants;
 
 	static ResolveResult	s_lastResolveResult;
+	static UInt32			s_resolveGeneration;
 };

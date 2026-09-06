@@ -461,9 +461,9 @@ static const char* PresetTierName(PresetManager::ResolvedTier tier) {
 // ---- Session 5: Save/Reload confirmation --------------------------------
 // docs/preset-manager-design.md § "In-game UI -- location assignment"
 
-enum class PresetPendingAction { None, Save, Reload };
+enum class PresetPendingAction { None, Save, Reload, Load };
 static PresetPendingAction s_presetPendingAction = PresetPendingAction::None;
-static std::string         s_presetPendingTarget;  // preset name a pending Save writes to
+static std::string         s_presetPendingTarget;  // preset name a pending Save writes to, or Load reads from
 static std::string         s_presetPendingWarning;
 // Set by RequestPresetAction, consumed by RenderPresetConfirmPopup. The
 // actual ImGui::OpenPopup() call is deferred to RenderPresetConfirmPopup
@@ -471,6 +471,13 @@ static std::string         s_presetPendingWarning;
 // inside the "NVR Preset Manager" window's button handler -- see the long
 // comment on RenderPresetConfirmPopup for why that distinction matters.
 static bool s_presetPopupRequested = false;
+
+// ---- Session 6: Preset browser / Load -----------------------------------
+// docs § "In-game UI -- Preset browser / Load", § "Unsaved/previewing state"
+static std::string s_presetSelectedName;    // row selected in the browser list, if any
+static bool        s_previewActive = false; // true while a Load preview hasn't been saved/discarded yet
+static std::string s_previewSourceName;     // name of the preset currently being previewed
+static UInt32      s_previewStartGeneration = 0; // PresetManager::GetResolveGeneration() when the preview started
 
 static void PresetManagerPerformSave(const std::string& TargetName) {
 	PresetManager::PresetData live;
@@ -493,6 +500,24 @@ static void PresetManagerPerformReload() {
 	if (Player && Player->parentCell)
 		PresetManager::ResolveAndApply(Player->parentCell);
 	Logger::Log("PresetManager: [Preset] Reloaded current preset, discarding unsaved edits");
+}
+
+static void PresetManagerPerformLoad(const std::string& Name) {
+	PresetManager::PresetData data;
+	if (!PresetManager::ReadPreset(Name, data)) {
+		Logger::Log("PresetManager: [Preset] Load '%s' failed -- couldn't read file", Name.c_str());
+		return;
+	}
+	// Wholesale replace, not stacked with the current tier's contents or the
+	// enabled Variants -- docs: "replaces the live editing state wholesale
+	// with that preset's full contents." Nothing is written to disk; the
+	// current location's actual resolved assignment is untouched until an
+	// explicit Save.
+	PresetManager::ApplyPreviewPreset(data);
+	s_previewActive = true;
+	s_previewSourceName = Name;
+	s_previewStartGeneration = PresetManager::GetResolveGeneration();
+	Logger::Log("PresetManager: [Preset] Loaded '%s' as an unsaved preview", Name.c_str());
 }
 
 // Requests a Save or Reload confirmation. Call exactly once, from the
@@ -541,6 +566,8 @@ static void RenderPresetConfirmPopup() {
 			s_presetPendingTarget.c_str(), (int)s_presetPendingAction);
 		if (s_presetPendingAction == PresetPendingAction::Reload)
 			PresetManagerPerformReload();
+		else if (s_presetPendingAction == PresetPendingAction::Load)
+			PresetManagerPerformLoad(s_presetPendingTarget);
 		else
 			PresetManagerPerformSave(s_presetPendingTarget);
 		s_presetPendingAction = PresetPendingAction::None;
@@ -557,7 +584,7 @@ static void RenderPresetConfirmPopup() {
 static void RenderPresetManagerPanel() {
 	if (!s_presetManagerOpen) return;
 
-	ImGui::SetNextWindowSize(ImVec2(460.0f, 380.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(460.0f, 540.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowPos(ImVec2(540.0f, 380.0f), ImGuiCond_FirstUseEver);
 
 	if (!ImGui::Begin("NVR Preset Manager", &s_presetManagerOpen)) {
@@ -570,12 +597,30 @@ static void RenderPresetManagerPanel() {
 	// that follows already accounts for it.
 	ImGui::SetWindowFontScale(1.1f);
 
+	// Walking to a different location without saving silently discards an
+	// in-progress Load preview (docs § "Unsaved/previewing state") -- the
+	// generation counter bumps on every real ResolveAndApply, i.e. every
+	// actual cell transition, so a mismatch here means exactly that happened.
+	if (s_previewActive && PresetManager::GetResolveGeneration() != s_previewStartGeneration) {
+		Logger::Log("PresetManager: [Preset] Unsaved preview of '%s' discarded -- location changed", s_previewSourceName.c_str());
+		s_previewActive = false;
+	}
+
 	const auto& r = PresetManager::GetLastResolveResult();
 	const ImVec4 kHighlight(0.4f, 1.0f, 0.7f, 1.0f);
+	const ImVec4 kWarning(1.0f, 0.8f, 0.2f, 1.0f);
 
 	ImGui::Text("Cell EditorID:       %s", r.CellEditorID.empty() ? "(none)" : r.CellEditorID.c_str());
 	ImGui::Text("Worldspace EditorID: %s", r.WorldspaceEditorID.empty() ? "(none)" : r.WorldspaceEditorID.c_str());
 	ImGui::Text("IsInterior:          %s", r.IsInterior ? "true" : "false");
+
+	// While previewing, the three status indicators below switch to this one
+	// distinct "Unsaved" banner in place of their normal shown/highlighted
+	// display -- the location's actually-resolved tier hasn't changed, only
+	// the live editing state has (docs § "Unsaved/previewing state").
+	if (s_previewActive)
+		ImGui::TextColored(kWarning, "Unsaved -- previewing '%s'", s_previewSourceName.c_str());
+
 	ImGui::Separator();
 
 	// Label column width is measured, not guessed -- a fixed SameLine offset
@@ -597,7 +642,7 @@ static void RenderPresetManagerPanel() {
 
 	// ---- Default -- always shown, highlighted when nothing more specific applies.
 	{
-		bool highlighted = (r.Tier == PresetManager::ResolvedTier::Default);
+		bool highlighted = !s_previewActive && (r.Tier == PresetManager::ResolvedTier::Default);
 		if (highlighted) ImGui::TextColored(kHighlight, "[Default]"); else ImGui::Text("[Default]");
 		ImGui::SameLine(buttonColumnX);
 		if (ImGui::SmallButton("Save to Default")) {
@@ -615,7 +660,7 @@ static void RenderPresetManagerPanel() {
 	// ---- Keyword -- interior only, shown whenever the cell has a tag at all,
 	// even with no preset authored for it yet (docs' shown-vs-highlighted table).
 	if (showKeywordRow) {
-		bool highlighted = (r.Tier == PresetManager::ResolvedTier::Keyword);
+		bool highlighted = !s_previewActive && (r.Tier == PresetManager::ResolvedTier::Keyword);
 		if (highlighted) ImGui::TextColored(kHighlight, "%s", keywordLabel);
 		else ImGui::Text("%s", keywordLabel);
 		ImGui::SameLine(buttonColumnX);
@@ -636,8 +681,9 @@ static void RenderPresetManagerPanel() {
 	// checks it first), so "shown" and "highlighted" collapse to the same test.
 	{
 		bool overrideExists = (r.Tier == PresetManager::ResolvedTier::Override);
+		bool highlighted = !s_previewActive && overrideExists;
 		std::string identity = r.IsInterior ? r.CellEditorID : r.WorldspaceEditorID;
-		if (overrideExists) ImGui::TextColored(kHighlight, "[Override]"); else ImGui::Text("[Override]");
+		if (highlighted) ImGui::TextColored(kHighlight, "[Override]"); else ImGui::Text("[Override]");
 		ImGui::SameLine(buttonColumnX);
 		bool canSave = !identity.empty();
 		if (!canSave) ImGui::BeginDisabled();
@@ -656,6 +702,43 @@ static void RenderPresetManagerPanel() {
 	if (ImGui::Button("Reload current preset"))
 		RequestPresetAction(PresetPendingAction::Reload, "",
 			"This will discard any unsaved live edits and reload what's actually assigned to this location. Continue?");
+
+	ImGui::Separator();
+
+	// ---- Session 6: Preset browser / Load -- a persistent, always-visible
+	// list of every existing Default/Keyword/Override preset (docs § "In-game
+	// UI -- Preset browser / Load"). Re-enumerated fresh off disk every
+	// frame the window's open, same never-cached philosophy as the rest of
+	// this panel -- a preset saved a moment ago via the buttons above shows
+	// up immediately, with no separate refresh step.
+	ImGui::TextUnformatted("Preset browser");
+	{
+		auto presets = PresetManager::ListAllPresets();
+
+		ImGui::BeginChild("##presetBrowser", ImVec2(0.0f, 130.0f), true);
+		for (const auto& entry : presets) {
+			const char* kindTag =
+				entry.Kind == PresetManager::PresetKind::Keyword  ? "[Keyword] " :
+				entry.Kind == PresetManager::PresetKind::Default  ? "[Default] " :
+				                                                     "[Override] ";
+			char label[256];
+			snprintf(label, sizeof(label), "%s%s", kindTag, entry.Name.c_str());
+			if (ImGui::Selectable(label, s_presetSelectedName == entry.Name))
+				s_presetSelectedName = entry.Name;
+		}
+		if (presets.empty())
+			ImGui::TextDisabled("(no presets on disk yet)");
+		ImGui::EndChild();
+
+		bool canLoad = !s_presetSelectedName.empty();
+		if (!canLoad) ImGui::BeginDisabled();
+		if (ImGui::Button("Load")) {
+			Logger::Log("PresetManager: [Preset] Load clicked, target='%s'", s_presetSelectedName.c_str());
+			RequestPresetAction(PresetPendingAction::Load, s_presetSelectedName,
+				"This will override your current unsaved settings. Continue?");
+		}
+		if (!canLoad) ImGui::EndDisabled();
+	}
 
 	ImGui::Separator();
 
