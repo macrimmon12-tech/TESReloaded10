@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <ctime>
 #include <unordered_set>
+#include <deque>
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -508,8 +509,8 @@ static void RenderDevPanel() {
 	if (s_savedTimeScale < 0.0f && tg && tg->TimeScale)
 		s_savedTimeScale = tg->TimeScale->data;
 
-	ImGui::SetNextWindowSize(ImVec2(420.0f, 270.0f), ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowPos(ImVec2(100.0f, 380.0f),  ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(420.0f, 460.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(100.0f, 200.0f),  ImGuiCond_FirstUseEver);
 
 	if (!ImGui::Begin("NVR Dev Tools", &s_devOpen)) {
 		ImGui::End();
@@ -602,6 +603,25 @@ static void RenderDevPanel() {
 		}
 		ImGui::SameLine();
 		ImGui::TextDisabled("(Press NVR key to restore)");
+	}
+
+	ImGui::Spacing();
+
+	// ---- Log (Session 3) ----------------------------------------------
+	// docs/preset-manager-design.md § "Debug/authoring tooling". No filter
+	// yet -- Session 7 adds the free-text box and "Preset only" checkbox.
+	if (ImGui::CollapsingHeader("Log", ImGuiTreeNodeFlags_DefaultOpen)) {
+		std::deque<std::string> lines;
+		Logger::GetRecentLines(lines);
+
+		ImGui::BeginChild("##logscroll", ImVec2(0.0f, 180.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+		for (const auto& line : lines)
+			ImGui::TextUnformatted(line.c_str());
+		// Auto-scroll to bottom, but only if the user was already at the
+		// bottom -- don't yank them back down if they scrolled up to read.
+		if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+			ImGui::SetScrollHereY(1.0f);
+		ImGui::EndChild();
 	}
 
 	ImGui::End();
