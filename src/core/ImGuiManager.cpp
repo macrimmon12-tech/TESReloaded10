@@ -461,9 +461,9 @@ static const char* PresetTierName(PresetManager::ResolvedTier tier) {
 // ---- Session 5: Save/Reload confirmation --------------------------------
 // docs/preset-manager-design.md § "In-game UI -- location assignment"
 
-enum class PresetPendingAction { None, Save, Reload, Load };
+enum class PresetPendingAction { None, Save, Reload, Load, RefreshAll, SaveVariant };
 static PresetPendingAction s_presetPendingAction = PresetPendingAction::None;
-static std::string         s_presetPendingTarget;  // preset name a pending Save writes to, or Load reads from
+static std::string         s_presetPendingTarget;  // preset/Variant name a pending action targets
 static std::string         s_presetPendingWarning;
 // Set by RequestPresetAction, consumed by RenderPresetConfirmPopup. The
 // actual ImGui::OpenPopup() call is deferred to RenderPresetConfirmPopup
@@ -520,6 +520,36 @@ static void PresetManagerPerformLoad(const std::string& Name) {
 	Logger::Log("PresetManager: [Preset] Loaded '%s' as an unsaved preview", Name.c_str());
 }
 
+// ---- Session 7: Refresh All Presets, Save Variant ------------------------
+// docs § "Refresh all presets", § "Variants" authoring flow
+
+static void PresetManagerPerformRefreshAll() {
+	auto summaries = PresetManager::RefreshAllPresets();
+	for (const auto& summary : summaries) {
+		Logger::Log("PresetManager: [Preset] Refresh backfilled %u key(s) into '%s':",
+			(UInt32)summary.AddedKeys.size(), summary.PresetName.c_str());
+		for (const auto& line : summary.AddedKeys)
+			Logger::Log("PresetManager: [Preset]   %s", line.c_str());
+	}
+	Logger::Log("PresetManager: [Preset] Refresh All Presets done -- %u file(s) touched", (UInt32)summaries.size());
+}
+
+static void PresetManagerPerformSaveVariant(const std::string& Name) {
+	PresetManager::PresetData diff;
+	PresetManager::CaptureVariantDiff(diff);
+	if (diff.empty()) {
+		Logger::Log("PresetManager: [Preset] Save Variant '%s' skipped -- no live changes since the base preset loaded", Name.c_str());
+		return;
+	}
+	if (!PresetManager::WriteVariant(Name, diff)) {
+		Logger::Log("PresetManager: [Preset] Save Variant '%s' failed -- couldn't write file", Name.c_str());
+		return;
+	}
+	UInt32 keyCount = 0;
+	for (const auto& [section, keys] : diff) keyCount += (UInt32)keys.size();
+	Logger::Log("PresetManager: [Preset] Saved Variant '%s' (%u changed key(s))", Name.c_str(), keyCount);
+}
+
 // Requests a Save or Reload confirmation. Call exactly once, from the
 // triggering button's click handler. Does NOT call ImGui::OpenPopup itself --
 // see RenderPresetConfirmPopup for why that has to happen elsewhere.
@@ -568,6 +598,10 @@ static void RenderPresetConfirmPopup() {
 			PresetManagerPerformReload();
 		else if (s_presetPendingAction == PresetPendingAction::Load)
 			PresetManagerPerformLoad(s_presetPendingTarget);
+		else if (s_presetPendingAction == PresetPendingAction::RefreshAll)
+			PresetManagerPerformRefreshAll();
+		else if (s_presetPendingAction == PresetPendingAction::SaveVariant)
+			PresetManagerPerformSaveVariant(s_presetPendingTarget);
 		else
 			PresetManagerPerformSave(s_presetPendingTarget);
 		s_presetPendingAction = PresetPendingAction::None;
@@ -584,7 +618,7 @@ static void RenderPresetConfirmPopup() {
 static void RenderPresetManagerPanel() {
 	if (!s_presetManagerOpen) return;
 
-	ImGui::SetNextWindowSize(ImVec2(460.0f, 540.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(460.0f, 640.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowPos(ImVec2(540.0f, 380.0f), ImGuiCond_FirstUseEver);
 
 	if (!ImGui::Begin("NVR Preset Manager", &s_presetManagerOpen)) {
@@ -742,19 +776,57 @@ static void RenderPresetManagerPanel() {
 
 	ImGui::Separator();
 
-	// Session 4: no checkbox UI yet (Session 7) -- EnabledVariants.ini is
-	// hand-edited for now. Shown here purely so this is testable at all.
-	const auto& variants = PresetManager::GetEnabledVariants();
-	if (variants.empty()) {
-		ImGui::Text("Enabled Variants:    (none)");
-	} else {
-		std::string joined;
-		for (size_t i = 0; i < variants.size(); i++) {
-			if (i) joined += " -> ";
-			joined += variants[i];
+	// ---- Session 7: Variants -- a panel of checkboxes reflecting which
+	// Variants are currently enabled (docs § "In-game UI -- Variants"),
+	// global toggles independent of the current location.
+	ImGui::TextUnformatted("Variants");
+	{
+		auto variantNames = PresetManager::ListAllVariants();
+		const auto& enabled = PresetManager::GetEnabledVariants();
+
+		if (variantNames.empty()) {
+			ImGui::TextDisabled("(no Variants on disk yet)");
+		} else {
+			for (const auto& name : variantNames) {
+				bool isEnabled = std::find(enabled.begin(), enabled.end(), name) != enabled.end();
+				if (ImGui::Checkbox(name.c_str(), &isEnabled))
+					PresetManager::SetVariantEnabled(name, isEnabled);
+			}
 		}
-		ImGui::Text("Enabled Variants:    %s", joined.c_str());
-		ImGui::TextDisabled("(priority: left lowest, right highest)");
+
+		if (!enabled.empty()) {
+			std::string joined;
+			for (size_t i = 0; i < enabled.size(); i++) {
+				if (i) joined += " -> ";
+				joined += enabled[i];
+			}
+			ImGui::TextDisabled("Priority: %s (left lowest, right highest)", joined.c_str());
+		}
+	}
+
+	ImGui::Spacing();
+
+	// ---- Save Variant -- captures exactly the key(s) changed since the
+	// current base preset became live (docs § "Variants" authoring flow):
+	// load any base preset, tweak only the intended setting(s), name and
+	// save. Reuses the same confirm-popup machinery as Save/Load when it
+	// would overwrite an existing Variant of the same name.
+	static char s_variantNameBuf[64] = "";
+	ImGui::SetNextItemWidth(180.0f);
+	ImGui::InputText("##variantname", s_variantNameBuf, sizeof(s_variantNameBuf));
+	ImGui::SameLine();
+	if (ImGui::Button("Save Variant")) {
+		std::string name = s_variantNameBuf;
+		if (name.empty()) {
+			Logger::Log("PresetManager: [Preset] Save Variant clicked with an empty name -- ignored");
+		} else if (PresetManager::IsReservedName(name)) {
+			Logger::Log("PresetManager: [Preset] Save Variant '%s' rejected -- reserved name", name.c_str());
+		} else if (PresetManager::VariantExists(name)) {
+			RequestPresetAction(PresetPendingAction::SaveVariant, name,
+				"A Variant with this name already exists and will be overwritten. Continue?");
+		} else {
+			PresetManagerPerformSaveVariant(name);
+		}
 	}
 
 	ImGui::End();
@@ -884,16 +956,83 @@ static void RenderDevPanel() {
 
 	ImGui::Spacing();
 
-	// ---- Log (Session 3) ----------------------------------------------
-	// docs/preset-manager-design.md § "Debug/authoring tooling". No filter
-	// yet -- Session 7 adds the free-text box and "Preset only" checkbox.
+	// ---- Session 7: Cell/Worldspace coc/cow picker -----------------------
+	// docs § "Scope" -- explicitly out of scope for the preset manager
+	// itself (assignment is always done by physically standing in a
+	// location), but a genuinely useful utility on its own merits, so it
+	// lives here in Dev Tools instead, independent of and unrelated to
+	// presets.
+	if (ImGui::CollapsingHeader("Location (coc/cow)")) {
+		static char s_devLocationBuf[64] = "";
+		static int  s_devCowX = 0, s_devCowY = 0;
+
+		ImGui::SetNextItemWidth(220.0f);
+		ImGui::InputText("Cell/Worldspace EditorID", s_devLocationBuf, sizeof(s_devLocationBuf));
+
+		bool canGo = s_devLocationBuf[0] != '\0';
+		if (!canGo) ImGui::BeginDisabled();
+
+		if (ImGui::Button("COC (interior cell)")) {
+			char cmd[96];
+			snprintf(cmd, sizeof(cmd), "coc %s", s_devLocationBuf);
+			RunConsoleCommand(cmd);
+		}
+
+		ImGui::SetNextItemWidth(80.0f);
+		ImGui::InputInt("Cell X", &s_devCowX);
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(80.0f);
+		ImGui::InputInt("Cell Y", &s_devCowY);
+
+		if (ImGui::Button("COW (exterior worldspace)")) {
+			char cmd[128];
+			snprintf(cmd, sizeof(cmd), "cow %s %d %d", s_devLocationBuf, s_devCowX, s_devCowY);
+			RunConsoleCommand(cmd);
+		}
+
+		if (!canGo) ImGui::EndDisabled();
+	}
+
+	ImGui::Spacing();
+
+	// ---- Session 7: Refresh All Presets ----------------------------------
+	// docs § "Refresh all presets" -- global, infrequent, not tied to the
+	// player's current location, so it lives here rather than in the
+	// per-location NVR Preset Manager panel. Shares the same confirm-popup
+	// machinery as the Save buttons there (RequestPresetAction works from
+	// any window -- see RenderPresetConfirmPopup's own comment for why).
+	if (ImGui::CollapsingHeader("Presets")) {
+		if (ImGui::Button("Refresh All Presets")) {
+			UInt32 fileCount = (UInt32)PresetManager::ListAllPresets().size();
+			char warning[192];
+			snprintf(warning, sizeof(warning),
+				"This will check %u preset file(s) and backfill any settings missing from current defaults. Continue?", fileCount);
+			RequestPresetAction(PresetPendingAction::RefreshAll, "", warning);
+		}
+		ImGui::TextDisabled("Backfills missing settings only -- never overwrites an existing value, never prunes.");
+	}
+
+	ImGui::Spacing();
+
+	// ---- Log (Session 3; filter added Session 7) -------------------------
+	// docs/preset-manager-design.md § "Debug/authoring tooling".
 	if (ImGui::CollapsingHeader("Log", ImGuiTreeNodeFlags_DefaultOpen)) {
+		static ImGuiTextFilter s_logFilter;
+		static bool s_logPresetOnly = false;
+
+		s_logFilter.Draw("Filter", 180.0f);
+		ImGui::SameLine();
+		ImGui::Checkbox("Preset only", &s_logPresetOnly);
+
 		std::deque<std::string> lines;
 		Logger::GetRecentLines(lines);
 
 		ImGui::BeginChild("##logscroll", ImVec2(0.0f, 180.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
-		for (const auto& line : lines)
+		for (const auto& line : lines) {
+			if (s_logPresetOnly && line.find("[Preset]") == std::string::npos) continue;
+			if (!s_logFilter.PassFilter(line.c_str())) continue;
 			ImGui::TextUnformatted(line.c_str());
+		}
 		// Auto-scroll to bottom, but only if the user was already at the
 		// bottom -- don't yank them back down if they scrolled up to read.
 		if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())

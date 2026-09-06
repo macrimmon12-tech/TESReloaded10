@@ -575,9 +575,21 @@ notices the mismatch and clears the preview on its next frame. Not
 build-verified in this environment.
 
 **Session 7 — Variants UI, Refresh All Presets, remaining Dev Tools items.**
-Variants checkbox panel + Save Variant flow (§ "In-game UI — Variants");
-Refresh All Presets batch action in Dev Tools (§ "Refresh all presets" —
-backfill only, no pruning, confirmation, logged summary); Cell/Worldspace
-`coc`/`cow` picker in Dev Tools (§ Scope); log window's free-text filter +
-"Preset only" checkbox, needing a `[Preset]` tag on every preset-manager log
-call made in prior sessions.
+✅ Done. Added `PresetManager::ListAllVariants()`, `CaptureVariantDiff()` (diffs
+live settings against `s_baselineSnapshot`, a new member set at the single
+`ApplyPreset()` choke point so it covers both a normal resolve and a Session 6
+Load preview — "load any base preset, doesn't matter which"), and
+`RefreshAllPresets()` (backfill-only, never overwrites or prunes, per spec).
+In-game: the Preset Manager panel's Variants block is now real checkboxes
+(one per Variant file on disk, toggling via the existing `SetVariantEnabled`)
+plus a name field + **Save Variant** button, reusing the Save/Load confirm-
+popup machinery for the overwrite-warning case. Dev Tools gained a
+**Refresh All Presets** button (same confirm-popup machinery, called from a
+different window — confirmed safe since `RequestPresetAction`/
+`RenderPresetConfirmPopup` were already written to not depend on which window
+triggered them, per the Session 5 fix-up), a `coc`/`cow` Cell/Worldspace
+picker (§ Scope — general utility, unrelated to presets), and the log
+window's free-text `ImGuiTextFilter` + "Preset only" checkbox. Every
+`PresetManager:` log line, including the boot-time ones from prior sessions
+that had been left untagged, now carries `[Preset]` so the checkbox actually
+filters everything. Not build-verified in this environment.

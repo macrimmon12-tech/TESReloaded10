@@ -30,6 +30,7 @@ std::unordered_map<std::string, std::string>	PresetManager::s_cellToKeyword;
 std::unordered_map<std::string, UInt32>		PresetManager::s_keywordCellCount;
 PresetManager::ResolveResult					PresetManager::s_lastResolveResult;
 UInt32											PresetManager::s_resolveGeneration = 0;
+PresetManager::PresetData						PresetManager::s_baselineSnapshot;
 
 // ---- setting-scope blacklist ---------------------------------------------
 // docs/preset-manager-design.md § "Setting scope -- a blacklist, still needed"
@@ -60,7 +61,7 @@ bool PresetManager::IsReservedName(const std::string& Name) {
 // ---- init ------------------------------------------------------------------
 
 void PresetManager::Initialize() {
-	Logger::Log("PresetManager: Initializing...");
+	Logger::Log("PresetManager: [Preset] Initializing...");
 	LoadKeywords();
 	LoadEnabledVariants();
 }
@@ -87,7 +88,7 @@ void PresetManager::LoadKeywords() {
 	std::string resolvedDir = ResolvePresetPath(kKeywordsDir);
 	const fs::path keywordsPath = resolvedDir;
 	if (!fs::exists(keywordsPath) || !fs::is_directory(keywordsPath)) {
-		Logger::Log("PresetManager: Keywords directory not found: %s", resolvedDir.c_str());
+		Logger::Log("PresetManager: [Preset] Keywords directory not found: %s", resolvedDir.c_str());
 		return;
 	}
 
@@ -102,7 +103,7 @@ void PresetManager::LoadKeywords() {
 	for (const auto& path : files) {
 		std::ifstream file(path.string());
 		if (!file.is_open()) {
-			Logger::Log("PresetManager: Failed to open keyword file: %s", path.string().c_str());
+			Logger::Log("PresetManager: [Preset] Failed to open keyword file: %s", path.string().c_str());
 			continue;
 		}
 
@@ -136,7 +137,7 @@ void PresetManager::LoadKeywords() {
 		}
 	}
 
-	Logger::Log("PresetManager: Loaded %u cell keyword assignments across %u keyword(s)",
+	Logger::Log("PresetManager: [Preset] Loaded %u cell keyword assignments across %u keyword(s)",
 		(UInt32)s_cellToKeyword.size(), (UInt32)s_keywordCellCount.size());
 }
 
@@ -234,7 +235,7 @@ static bool ReadTomlPresetFile(const std::string& Path, const std::string& Label
 		WalkPresetTable(root, "", OutData);
 	}
 	catch (const std::exception& e) {
-		Logger::Log("PresetManager: Failed to parse '%s': %s", Label.c_str(), e.what());
+		Logger::Log("PresetManager: [Preset] Failed to parse '%s': %s", Label.c_str(), e.what());
 		return false;
 	}
 
@@ -271,7 +272,7 @@ static bool WriteTomlPresetFile(const std::string& Path, const std::string& Dir,
 
 	std::ofstream file(Path, std::ios::trunc | std::ios::binary);
 	if (!file.is_open()) {
-		Logger::Log("PresetManager: Failed to open '%s' for writing", Label.c_str());
+		Logger::Log("PresetManager: [Preset] Failed to open '%s' for writing", Label.c_str());
 		return false;
 	}
 
@@ -406,6 +407,14 @@ bool PresetManager::ResolveCurrentLocation(TESObjectCELL* Cell, PresetData& OutT
 void PresetManager::ApplyPreset(const PresetData& Target) {
 	if (!TheSettingManager) return;
 
+	// Whatever gets pushed here becomes the new "since step 1 began"
+	// reference point for Session 7's Save Variant diff (docs § "Variants"
+	// authoring flow) -- this one choke point covers both the normal
+	// resolve path (ResolveAndApply) and a Session 6 Load preview
+	// (ApplyPreviewPreset), matching "Load any base preset -- doesn't
+	// matter which."
+	s_baselineSnapshot = Target;
+
 	// Diff against the live value before writing -- SetSettingF/SetSettingS
 	// each trigger a full SettingManager::LoadSettings() internally, so
 	// skipping no-op writes matters here in a way it doesn't for the rare,
@@ -535,7 +544,7 @@ void PresetManager::LoadEnabledVariants() {
 
 	std::ifstream file(ResolvePresetPath(kEnabledVariantsPath));
 	if (!file.is_open()) {
-		Logger::Log("PresetManager: EnabledVariants.ini not found (no Variants enabled yet)");
+		Logger::Log("PresetManager: [Preset] EnabledVariants.ini not found (no Variants enabled yet)");
 		return;
 	}
 
@@ -560,7 +569,7 @@ void PresetManager::LoadEnabledVariants() {
 			s_enabledVariants.push_back(name);
 	}
 
-	Logger::Log("PresetManager: Loaded %u enabled Variant(s)", (UInt32)s_enabledVariants.size());
+	Logger::Log("PresetManager: [Preset] Loaded %u enabled Variant(s)", (UInt32)s_enabledVariants.size());
 }
 
 void PresetManager::SaveEnabledVariants() {
@@ -568,7 +577,7 @@ void PresetManager::SaveEnabledVariants() {
 
 	std::ofstream file(ResolvePresetPath(kEnabledVariantsPath), std::ios::trunc | std::ios::binary);
 	if (!file.is_open()) {
-		Logger::Log("PresetManager: Failed to open EnabledVariants.ini for writing");
+		Logger::Log("PresetManager: [Preset] Failed to open EnabledVariants.ini for writing");
 		return;
 	}
 
@@ -593,4 +602,94 @@ void PresetManager::SetVariantEnabled(const std::string& Name, bool Enabled) {
 	}
 
 	SaveEnabledVariants();
+}
+
+// ---- Session 7: Variants UI, Refresh All Presets ---------------------------
+// docs § "In-game UI -- Variants", § "Refresh all presets"
+
+std::vector<std::string> PresetManager::ListAllVariants() {
+	namespace fs = std::filesystem;
+	std::vector<std::string> names;
+
+	std::string resolvedDir = ResolvePresetPath(kVariantsDir);
+	const fs::path variantsPath = resolvedDir;
+	if (!fs::exists(variantsPath) || !fs::is_directory(variantsPath))
+		return names;
+
+	for (const auto& entry : fs::directory_iterator(variantsPath)) {
+		if (entry.is_regular_file() && entry.path().extension() == ".ini")
+			names.push_back(entry.path().stem().string());
+	}
+	std::sort(names.begin(), names.end());
+
+	return names;
+}
+
+void PresetManager::CaptureVariantDiff(PresetData& OutDiff) {
+	OutDiff.clear();
+
+	PresetData live;
+	if (!CaptureLiveState(live)) return;
+
+	for (const auto& [section, keys] : live) {
+		auto baseSectionIt = s_baselineSnapshot.find(section);
+
+		for (const auto& [key, value] : keys) {
+			bool changed = true; // no baseline value to compare against -> conservatively "changed"
+
+			if (baseSectionIt != s_baselineSnapshot.end()) {
+				auto baseKeyIt = baseSectionIt->second.find(key);
+				if (baseKeyIt != baseSectionIt->second.end() && baseKeyIt->second.Type == value.Type) {
+					changed = (value.Type == PresetValue::ValueType::String)
+						? (baseKeyIt->second.StringValue != value.StringValue)
+						: (baseKeyIt->second.FloatValue != value.FloatValue);
+				}
+			}
+
+			if (changed) OutDiff[section][key] = value;
+		}
+	}
+}
+
+std::vector<PresetManager::RefreshSummary> PresetManager::RefreshAllPresets() {
+	std::vector<RefreshSummary> summaries;
+
+	PresetData eligible; // current defaults, minus the blacklist -- the "universe" (docs step 1)
+	if (!ReadRawDefaults(eligible)) return summaries;
+
+	for (const auto& entry : ListAllPresets()) {
+		PresetData existing;
+		if (!ReadPreset(entry.Name, existing)) continue;
+
+		RefreshSummary summary;
+		summary.PresetName = entry.Name;
+		bool changed = false;
+
+		for (const auto& [section, keys] : eligible) {
+			auto existingSectionIt = existing.find(section);
+			for (const auto& [key, defaultValue] : keys) {
+				bool alreadyHasKey = existingSectionIt != existing.end()
+					&& existingSectionIt->second.find(key) != existingSectionIt->second.end();
+				if (alreadyHasKey) continue; // never overwrite an existing customization (step 3)
+
+				existing[section][key] = defaultValue;
+				existingSectionIt = existing.find(section); // existing[section] may have just been created
+				changed = true;
+
+				char line[320];
+				if (defaultValue.Type == PresetValue::ValueType::String)
+					snprintf(line, sizeof(line), "%s.%s = %s", section.c_str(), key.c_str(), defaultValue.StringValue.c_str());
+				else
+					snprintf(line, sizeof(line), "%s.%s = %g", section.c_str(), key.c_str(), defaultValue.FloatValue);
+				summary.AddedKeys.push_back(line);
+			}
+		}
+
+		// No pruning (docs step 4) -- `existing` is only ever added to above,
+		// never trimmed, so any stale key it already had survives untouched.
+		if (changed && WritePreset(entry.Name, existing))
+			summaries.push_back(std::move(summary));
+	}
+
+	return summaries;
 }

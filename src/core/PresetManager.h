@@ -141,10 +141,43 @@ public:
 	static const std::vector<std::string>&	GetEnabledVariants();
 
 	// Toggles one Variant on/off and writes EnabledVariants.ini immediately --
-	// no in-game checkbox calls this yet (Session 7). Enabling appends to the
-	// bottom of the list (becomes highest priority); disabling removes the
-	// entry entirely, so re-enabling later appends fresh at the bottom again.
+	// enabling appends to the bottom of the list (becomes highest priority);
+	// disabling removes the entry entirely, so re-enabling later appends
+	// fresh at the bottom again.
 	static void				SetVariantEnabled(const std::string& Name, bool Enabled);
+
+	// ---- Session 7: Variants UI, Refresh All Presets, Dev Tools ------------
+
+	// Every Variant file on disk (Data\NVR\Variants\*.ini), alphabetical --
+	// unlike GetEnabledVariants() this includes disabled ones too, since the
+	// in-game checkbox panel needs to list all of them, not just active ones.
+	static std::vector<std::string>	ListAllVariants();
+
+	// Diffs the current live settings against the baseline snapshot captured
+	// by the most recent ApplyPreset call (i.e. whatever base preset is
+	// currently live, however it got there -- normal resolution or a Session
+	// 6 Load) and returns only the keys that differ, as absolute values
+	// (docs § "Variants" authoring flow steps 2-3). A key present live but
+	// absent from the baseline (an out-of-date preset file predating that
+	// setting) is conservatively treated as changed, since there's no
+	// baseline value to compare it against.
+	static void				CaptureVariantDiff(PresetData& OutDiff);
+
+	// One touched-file's summary for a Refresh All Presets run (docs §
+	// "Refresh all presets"), logged by the caller.
+	struct RefreshSummary {
+		std::string					PresetName;
+		std::vector<std::string>	AddedKeys; // "Section.Key = value", already formatted
+	};
+
+	// For every Default/Keyword/Override preset file: adds any eligible key
+	// (from the current defaults, minus the blacklist) the file doesn't
+	// already have, at the current default value. Never touches a key the
+	// file already has, and never prunes a stale one (docs § "Refresh all
+	// presets" -- no implicit apply-time fallback, no back-compat break).
+	// Returns one entry per file actually touched; untouched files are
+	// omitted entirely.
+	static std::vector<RefreshSummary>	RefreshAllPresets();
 
 private:
 	static void			LoadKeywords();
@@ -176,4 +209,9 @@ private:
 
 	static ResolveResult	s_lastResolveResult;
 	static UInt32			s_resolveGeneration;
+
+	// Whatever ApplyPreset most recently pushed into the engine -- the
+	// "since step 1 began" reference point CaptureVariantDiff() compares
+	// live settings against (docs § "Variants" authoring flow).
+	static PresetData		s_baselineSnapshot;
 };
