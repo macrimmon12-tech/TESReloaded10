@@ -464,6 +464,12 @@ enum class PresetPendingAction { None, Save, Reload };
 static PresetPendingAction s_presetPendingAction = PresetPendingAction::None;
 static std::string         s_presetPendingTarget;  // preset name a pending Save writes to
 static std::string         s_presetPendingWarning;
+// Set by RequestPresetAction, consumed by RenderPresetConfirmPopup. The
+// actual ImGui::OpenPopup() call is deferred to RenderPresetConfirmPopup
+// (called from BuildUI()'s top level) rather than fired immediately from
+// inside the "NVR Preset Manager" window's button handler -- see the long
+// comment on RenderPresetConfirmPopup for why that distinction matters.
+static bool s_presetPopupRequested = false;
 
 static void PresetManagerPerformSave(const std::string& TargetName) {
 	PresetManager::PresetData live;
@@ -489,19 +495,39 @@ static void PresetManagerPerformReload() {
 }
 
 // Requests a Save or Reload confirmation. Call exactly once, from the
-// triggering button's click handler -- ImGui::OpenPopup only needs (and
-// should only get) one call per actual open, not one every frame.
+// triggering button's click handler. Does NOT call ImGui::OpenPopup itself --
+// see RenderPresetConfirmPopup for why that has to happen elsewhere.
 static void RequestPresetAction(PresetPendingAction Kind, const std::string& TargetName, const std::string& Warning) {
 	s_presetPendingAction = Kind;
 	s_presetPendingTarget = TargetName;
 	s_presetPendingWarning = Warning;
 	Logger::Log("PresetManager: [Preset] Confirmation requested for '%s' (kind=%d)", TargetName.c_str(), (int)Kind);
-	ImGui::OpenPopup("Confirm##presetaction");
+	s_presetPopupRequested = true;
 }
 
-// Safe to call unconditionally every frame -- BeginPopupModal only returns
-// true once a matching OpenPopup call has actually fired.
+// Call unconditionally, once per frame, from BuildUI()'s own top level (NOT
+// from inside another window's Begin/End, and NOT from inside the button
+// handler that requests the popup).
+//
+// Why: ImGui::GetID(str_id) -- used internally by both OpenPopup and
+// BeginPopupModal -- hashes str_id against whatever window is current on the
+// ID stack *at the moment of the call*. The original code called OpenPopup()
+// immediately from inside RenderPresetManagerPanel()'s Begin/End (so it
+// hashed against the "NVR Preset Manager" window's ID), then called
+// BeginPopupModal() separately from BuildUI()'s top level, outside any
+// window (a different ID context). The two IDs never matched, so the modal
+// could never actually open -- RequestPresetAction's log line fired every
+// time, but "Confirm OK clicked" never did, and no popup ever appeared.
+// Deferring the OpenPopup() call itself to this function (called from the
+// same top-level context as BeginPopupModal, every frame) keeps both calls
+// on the same ID stack, and also means the popup keeps working even if the
+// "NVR Preset Manager" window is closed mid-confirm.
 static void RenderPresetConfirmPopup() {
+	if (s_presetPopupRequested) {
+		ImGui::OpenPopup("Confirm##presetaction");
+		s_presetPopupRequested = false;
+	}
+
 	ImGui::SetNextWindowSize(ImVec2(340.0f, 0.0f), ImGuiCond_Always);
 	if (!ImGui::BeginPopupModal("Confirm##presetaction", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize))
 		return;

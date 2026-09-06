@@ -539,6 +539,24 @@ yet — every Save target name is derived, not typed — so the `CLAUDE.md`
 DXVK-safe input patterns don't come into play until Session 6's free-text
 preset names. Not build-verified in this environment.
 
+**Session 5 fix-up — shared confirmation popup never opened.** The
+first live playtest found the popup completely dead: no "Confirm OK
+clicked" log line ever followed a "Confirmation requested" line, and no
+popup rendered at all, for either Save target. Root cause: `ImGui::OpenPopup`
+was called from inside `RenderPresetManagerPanel()`'s own `Begin`/`End`
+(the "NVR Preset Manager" window's ID-stack context), while
+`ImGui::BeginPopupModal` was called separately afterward from `BuildUI()`'s
+top level (a different ID-stack context, outside any window). Dear ImGui
+hashes a popup's string ID against whatever window is current at the moment
+of the call, so the two calls hashed to different IDs and never matched —
+silently, with no error. Fixed by deferring the actual `OpenPopup()` call
+itself into `RenderPresetConfirmPopup()` (a `s_presetPopupRequested` flag set
+by `RequestPresetAction()`, consumed once per frame at the top of
+`RenderPresetConfirmPopup()`), so both calls now run from the same top-level
+context every frame — this also preserves the original intent that the
+confirm popup keeps working even if the "NVR Preset Manager" window is
+closed mid-confirm.
+
 **Session 6 — Preset browser / Load.** Persistent preset list, Keyword-
 grouped-first, kind-tagged by name lookup, Load + OK/Cancel, the
 Unsaved/previewing status state (§ "In-game UI — Preset browser / Load").
