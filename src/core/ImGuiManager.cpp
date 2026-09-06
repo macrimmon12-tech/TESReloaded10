@@ -495,6 +495,7 @@ static void RequestPresetAction(PresetPendingAction Kind, const std::string& Tar
 	s_presetPendingAction = Kind;
 	s_presetPendingTarget = TargetName;
 	s_presetPendingWarning = Warning;
+	Logger::Log("PresetManager: [Preset] Confirmation requested for '%s' (kind=%d)", TargetName.c_str(), (int)Kind);
 	ImGui::OpenPopup("Confirm##presetaction");
 }
 
@@ -509,6 +510,8 @@ static void RenderPresetConfirmPopup() {
 	ImGui::Spacing();
 
 	if (ImGui::Button("OK", ImVec2(120.0f, 0.0f))) {
+		Logger::Log("PresetManager: [Preset] Confirm OK clicked for '%s' (kind=%d)",
+			s_presetPendingTarget.c_str(), (int)s_presetPendingAction);
 		if (s_presetPendingAction == PresetPendingAction::Reload)
 			PresetManagerPerformReload();
 		else
@@ -553,6 +556,7 @@ static void RenderPresetManagerPanel() {
 			const char* scope = r.IsInterior ? "every interior" : "every exterior";
 			char warning[192];
 			snprintf(warning, sizeof(warning), "This will rewrite the floor for %s in the game. Continue?", scope);
+			Logger::Log("PresetManager: [Preset] Save to Default clicked, target='%s'", targetName.c_str());
 			RequestPresetAction(PresetPendingAction::Save, targetName, warning);
 		}
 	}

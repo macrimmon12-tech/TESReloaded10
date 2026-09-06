@@ -6,6 +6,26 @@
 #include <vector>
 #include <string_view>
 
+// Mirrors SettingManager.cpp's own GetConfigBase() pattern: GetCurrentDirectoryA
+// is reliable at startup but can be silently changed later by common-dialog
+// calls (GetSaveFileNameA etc.) from anything else loaded in the process.
+// Every path PresetManager touches gets resolved against this cached value,
+// not the live CWD, for the same reason SettingManager already does this.
+static const std::string& PresetManagerBase() {
+	static std::string base;
+	if (base.empty()) {
+		char cwd[MAX_PATH] = {};
+		GetCurrentDirectoryA(MAX_PATH, cwd);
+		base = cwd;
+		base += "\\";
+	}
+	return base;
+}
+
+static std::string ResolvePresetPath(const char* RelativePath) {
+	return PresetManagerBase() + RelativePath;
+}
+
 std::unordered_map<std::string, std::string>	PresetManager::s_cellToKeyword;
 std::unordered_map<std::string, UInt32>		PresetManager::s_keywordCellCount;
 PresetManager::ResolveResult					PresetManager::s_lastResolveResult;
@@ -63,9 +83,10 @@ void PresetManager::LoadKeywords() {
 	s_cellToKeyword.clear();
 	s_keywordCellCount.clear();
 
-	const fs::path keywordsPath = kKeywordsDir;
+	std::string resolvedDir = ResolvePresetPath(kKeywordsDir);
+	const fs::path keywordsPath = resolvedDir;
 	if (!fs::exists(keywordsPath) || !fs::is_directory(keywordsPath)) {
-		Logger::Log("PresetManager: Keywords directory not found: %s", kKeywordsDir);
+		Logger::Log("PresetManager: Keywords directory not found: %s", resolvedDir.c_str());
 		return;
 	}
 
@@ -135,11 +156,11 @@ UInt32 PresetManager::CountCellsForKeyword(const std::string& Keyword) {
 // cached -- always read/written fresh off disk at the point of use.
 
 std::string PresetManager::GetPresetPath(const std::string& Name) {
-	return std::string(kPresetsDir) + Name + ".ini";
+	return ResolvePresetPath(kPresetsDir) + Name + ".ini";
 }
 
 std::string PresetManager::GetVariantPath(const std::string& Name) {
-	return std::string(kVariantsDir) + Name + ".ini";
+	return ResolvePresetPath(kVariantsDir) + Name + ".ini";
 }
 
 bool PresetManager::PresetExists(const std::string& Name) {
@@ -220,7 +241,7 @@ static bool ReadTomlPresetFile(const std::string& Path, const std::string& Label
 }
 
 // Shared by WritePreset/WriteVariant -- same format, different folder/caller.
-static bool WriteTomlPresetFile(const std::string& Path, const char* Dir, const std::string& Label, const PresetManager::PresetData& Data) {
+static bool WriteTomlPresetFile(const std::string& Path, const std::string& Dir, const std::string& Label, const PresetManager::PresetData& Data) {
 	tomlValue root = toml::table();
 
 	for (const auto& [section, keys] : Data) {
@@ -263,7 +284,7 @@ bool PresetManager::ReadPreset(const std::string& Name, PresetData& OutData) {
 }
 
 bool PresetManager::WritePreset(const std::string& Name, const PresetData& Data) {
-	return WriteTomlPresetFile(GetPresetPath(Name), kPresetsDir, Name, Data);
+	return WriteTomlPresetFile(GetPresetPath(Name), ResolvePresetPath(kPresetsDir), Name, Data);
 }
 
 bool PresetManager::ReadVariant(const std::string& Name, PresetData& OutData) {
@@ -271,7 +292,7 @@ bool PresetManager::ReadVariant(const std::string& Name, PresetData& OutData) {
 }
 
 bool PresetManager::WriteVariant(const std::string& Name, const PresetData& Data) {
-	return WriteTomlPresetFile(GetVariantPath(Name), kVariantsDir, Name, Data);
+	return WriteTomlPresetFile(GetVariantPath(Name), ResolvePresetPath(kVariantsDir), Name, Data);
 }
 
 // ---- Session 2: resolution + apply ---------------------------------------
@@ -464,7 +485,7 @@ void PresetManager::ApplyVariants(PresetData& Target) {
 void PresetManager::LoadEnabledVariants() {
 	s_enabledVariants.clear();
 
-	std::ifstream file(kEnabledVariantsPath);
+	std::ifstream file(ResolvePresetPath(kEnabledVariantsPath));
 	if (!file.is_open()) {
 		Logger::Log("PresetManager: EnabledVariants.ini not found (no Variants enabled yet)");
 		return;
@@ -495,9 +516,9 @@ void PresetManager::LoadEnabledVariants() {
 }
 
 void PresetManager::SaveEnabledVariants() {
-	std::filesystem::create_directories(std::filesystem::path("Data\\NVR\\"));
+	std::filesystem::create_directories(std::filesystem::path(ResolvePresetPath("Data\\NVR\\")));
 
-	std::ofstream file(kEnabledVariantsPath, std::ios::trunc | std::ios::binary);
+	std::ofstream file(ResolvePresetPath(kEnabledVariantsPath), std::ios::trunc | std::ios::binary);
 	if (!file.is_open()) {
 		Logger::Log("PresetManager: Failed to open EnabledVariants.ini for writing");
 		return;
