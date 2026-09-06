@@ -518,10 +518,14 @@ into a capped (500-entry), mutex-guarded ring buffer, rendered as a collapsible
 7 adds the free-text box and "Preset only" checkbox. Not build-verified in
 this environment (no MSVC toolchain here).
 
-**Session 4 — Variants persistence + diff-stacking.** `EnabledVariants.ini`
-read/write (§ "Persisting which Variants are enabled"), extend the apply
-mechanism to layer active Variants' diffs on top of the resolved base preset
-using file line-order for conflicts (§ "Variants").
+**Session 4 — Variants persistence + diff-stacking.** ✅ Done. Refactored
+`ReadPreset`/`WritePreset` into shared helpers so `ReadVariant`/`WriteVariant`
+reuse the same logic against `Data\NVR\Variants\` instead of duplicating it.
+`EnabledVariants.ini` read/write, `ApplyVariants()` layering enabled Variants
+onto the resolved target in priority order between resolution and apply. Debug
+window shows the enabled-Variants list for testability, since there's no
+checkbox UI yet — `EnabledVariants.ini` and `Variants\*.ini` are still
+hand-authored until Session 7. Not build-verified in this environment.
 
 **Session 5 — Core authoring UI: location assignment.** Promote Session 2's
 debug window into the real tool: shown/highlighted status indicators and Save
