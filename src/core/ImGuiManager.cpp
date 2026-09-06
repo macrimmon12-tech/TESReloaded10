@@ -587,10 +587,12 @@ static void RenderPresetManagerPanel() {
 	bool showKeywordRow = r.IsInterior && !r.Keyword.empty();
 	char keywordLabel[160];
 	snprintf(keywordLabel, sizeof(keywordLabel), "[Keyword: %s]", r.Keyword.c_str());
+	// Parenthesized calls (std::max)(...) -- windows.h's max/min macros
+	// (absent NOMINMAX) would otherwise mangle a bare std::max(a, b) here.
 	float labelColumnW = ImGui::CalcTextSize("[Default]").x;
-	labelColumnW = std::max(labelColumnW, ImGui::CalcTextSize("[Override]").x);
+	labelColumnW = (std::max)(labelColumnW, ImGui::CalcTextSize("[Override]").x);
 	if (showKeywordRow)
-		labelColumnW = std::max(labelColumnW, ImGui::CalcTextSize(keywordLabel).x);
+		labelColumnW = (std::max)(labelColumnW, ImGui::CalcTextSize(keywordLabel).x);
 	const float buttonColumnX = labelColumnW + 24.0f; // breathing room past the longest label
 
 	// ---- Default -- always shown, highlighted when nothing more specific applies.
