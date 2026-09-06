@@ -111,11 +111,11 @@ static bool  s_devFreecamOn   = false;
 static bool  s_devMenusHidden = false;
 static bool  s_screenshotMode = false;
 
-// ---- Preset Manager debug window (Session 2) --------------------------
-// Minimal read-only skeleton -- Session 5 promotes this into the real
-// status-indicator/save-button UI (docs/preset-manager-design.md
-// § "Implementation session plan").
-static bool  s_presetDebugOpen = false;
+// ---- Preset Manager panel ------------------------------------------------
+// Session 2: minimal read-only skeleton. Session 5 (current): promoted into
+// the real status-indicator/save-button UI (docs/preset-manager-design.md
+// § "In-game UI -- location assignment").
+static bool  s_presetManagerOpen = false;
 
 static void CfabSaveBaselines() {
 	if (!TheSettingManager || s_cfabBase.loaded) return;
@@ -457,28 +457,148 @@ static const char* PresetTierName(PresetManager::ResolvedTier tier) {
 	}
 }
 
-static void RenderPresetDebugPanel() {
-	if (!s_presetDebugOpen) return;
+// ---- Session 5: Save/Reload confirmation --------------------------------
+// docs/preset-manager-design.md § "In-game UI -- location assignment"
 
-	ImGui::SetNextWindowSize(ImVec2(360.0f, 200.0f), ImGuiCond_FirstUseEver);
+enum class PresetPendingAction { None, Save, Reload };
+static PresetPendingAction s_presetPendingAction = PresetPendingAction::None;
+static std::string         s_presetPendingTarget;  // preset name a pending Save writes to
+static std::string         s_presetPendingWarning;
+
+static void PresetManagerPerformSave(const std::string& TargetName) {
+	PresetManager::PresetData live;
+	if (!PresetManager::CaptureLiveState(live)) {
+		Logger::Log("PresetManager: [Preset] Save to '%s' failed -- couldn't capture live state", TargetName.c_str());
+		return;
+	}
+	if (!PresetManager::WritePreset(TargetName, live)) {
+		Logger::Log("PresetManager: [Preset] Save to '%s' failed -- couldn't write file", TargetName.c_str());
+		return;
+	}
+	Logger::Log("PresetManager: [Preset] Saved current settings to '%s'", TargetName.c_str());
+	// Refresh the resolved tier immediately -- otherwise the status
+	// indicators wouldn't reflect the new file until the next cell change.
+	if (Player && Player->parentCell)
+		PresetManager::ResolveAndApply(Player->parentCell);
+}
+
+static void PresetManagerPerformReload() {
+	if (Player && Player->parentCell)
+		PresetManager::ResolveAndApply(Player->parentCell);
+	Logger::Log("PresetManager: [Preset] Reloaded current preset, discarding unsaved edits");
+}
+
+// Requests a Save or Reload confirmation. Call exactly once, from the
+// triggering button's click handler -- ImGui::OpenPopup only needs (and
+// should only get) one call per actual open, not one every frame.
+static void RequestPresetAction(PresetPendingAction Kind, const std::string& TargetName, const std::string& Warning) {
+	s_presetPendingAction = Kind;
+	s_presetPendingTarget = TargetName;
+	s_presetPendingWarning = Warning;
+	ImGui::OpenPopup("Confirm##presetaction");
+}
+
+// Safe to call unconditionally every frame -- BeginPopupModal only returns
+// true once a matching OpenPopup call has actually fired.
+static void RenderPresetConfirmPopup() {
+	ImGui::SetNextWindowSize(ImVec2(340.0f, 0.0f), ImGuiCond_Always);
+	if (!ImGui::BeginPopupModal("Confirm##presetaction", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize))
+		return;
+
+	ImGui::TextWrapped("%s", s_presetPendingWarning.c_str());
+	ImGui::Spacing();
+
+	if (ImGui::Button("OK", ImVec2(120.0f, 0.0f))) {
+		if (s_presetPendingAction == PresetPendingAction::Reload)
+			PresetManagerPerformReload();
+		else
+			PresetManagerPerformSave(s_presetPendingTarget);
+		s_presetPendingAction = PresetPendingAction::None;
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+		s_presetPendingAction = PresetPendingAction::None;
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::EndPopup();
+}
+
+static void RenderPresetManagerPanel() {
+	if (!s_presetManagerOpen) return;
+
+	ImGui::SetNextWindowSize(ImVec2(400.0f, 340.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowPos(ImVec2(540.0f, 380.0f), ImGuiCond_FirstUseEver);
 
-	if (!ImGui::Begin("NVR Preset Manager [debug]", &s_presetDebugOpen)) {
+	if (!ImGui::Begin("NVR Preset Manager", &s_presetManagerOpen)) {
 		ImGui::End();
 		return;
 	}
 
 	const auto& r = PresetManager::GetLastResolveResult();
+	const ImVec4 kHighlight(0.4f, 1.0f, 0.7f, 1.0f);
 
 	ImGui::Text("Cell EditorID:       %s", r.CellEditorID.empty() ? "(none)" : r.CellEditorID.c_str());
 	ImGui::Text("Worldspace EditorID: %s", r.WorldspaceEditorID.empty() ? "(none)" : r.WorldspaceEditorID.c_str());
 	ImGui::Text("IsInterior:          %s", r.IsInterior ? "true" : "false");
-	ImGui::Text("Keyword:             %s", r.Keyword.empty() ? "(none)" : r.Keyword.c_str());
 	ImGui::Separator();
-	ImGui::Text("Resolved tier:       %s", PresetTierName(r.Tier));
-	ImGui::Text("Resolved file:       %s",
-		r.UsedRawDefaults ? "(raw TOML defaults -- no Default preset authored yet)"
-		: (r.PresetName.empty() ? "(none)" : r.PresetName.c_str()));
+
+	// ---- Default -- always shown, highlighted when nothing more specific applies.
+	{
+		bool highlighted = (r.Tier == PresetManager::ResolvedTier::Default);
+		if (highlighted) ImGui::TextColored(kHighlight, "[Default]"); else ImGui::Text("[Default]");
+		ImGui::SameLine(140.0f);
+		if (ImGui::SmallButton("Save to Default")) {
+			std::string targetName = r.IsInterior ? PresetManager::kDefaultInteriorName : PresetManager::kDefaultExteriorName;
+			const char* scope = r.IsInterior ? "every interior" : "every exterior";
+			char warning[192];
+			snprintf(warning, sizeof(warning), "This will rewrite the floor for %s in the game. Continue?", scope);
+			RequestPresetAction(PresetPendingAction::Save, targetName, warning);
+		}
+	}
+
+	// ---- Keyword -- interior only, shown whenever the cell has a tag at all,
+	// even with no preset authored for it yet (docs' shown-vs-highlighted table).
+	if (r.IsInterior && !r.Keyword.empty()) {
+		bool highlighted = (r.Tier == PresetManager::ResolvedTier::Keyword);
+		if (highlighted) ImGui::TextColored(kHighlight, "[Keyword: %s]", r.Keyword.c_str());
+		else ImGui::Text("[Keyword: %s]", r.Keyword.c_str());
+		ImGui::SameLine(140.0f);
+		if (ImGui::SmallButton("Save to Keyword")) {
+			UInt32 count = PresetManager::CountCellsForKeyword(r.Keyword);
+			char warning[192];
+			snprintf(warning, sizeof(warning), "This affects %u cell(s) using keyword '%s'. Continue?", count, r.Keyword.c_str());
+			RequestPresetAction(PresetPendingAction::Save, r.Keyword, warning);
+		}
+	}
+	// Save-to-Keyword is deliberately absent, not just disabled, when the
+	// cell has no tag -- keyword membership is strictly offline (docs
+	// "Keyword files"), no in-game path exists to unlock this button.
+
+	// ---- Override -- if one exists it's always the active tier (resolution
+	// checks it first), so "shown" and "highlighted" collapse to the same test.
+	{
+		bool overrideExists = (r.Tier == PresetManager::ResolvedTier::Override);
+		std::string identity = r.IsInterior ? r.CellEditorID : r.WorldspaceEditorID;
+		if (overrideExists) ImGui::TextColored(kHighlight, "[Override]"); else ImGui::Text("[Override]");
+		ImGui::SameLine(140.0f);
+		bool canSave = !identity.empty();
+		if (!canSave) ImGui::BeginDisabled();
+		if (ImGui::SmallButton("Save to Override")) {
+			if (overrideExists)
+				RequestPresetAction(PresetPendingAction::Save, identity,
+					"An override for this location already exists and will be overwritten. Continue?");
+			else
+				PresetManagerPerformSave(identity); // nothing to overwrite -- no warning needed
+		}
+		if (!canSave) ImGui::EndDisabled();
+	}
+
+	ImGui::Separator();
+
+	if (ImGui::Button("Reload current preset"))
+		RequestPresetAction(PresetPendingAction::Reload, "",
+			"This will discard any unsaved live edits and reload what's actually assigned to this location. Continue?");
 
 	ImGui::Separator();
 
@@ -2157,7 +2277,7 @@ void ImGuiManager::BuildUI() {
 			if (!s_devOpen) DevPanelCleanup();
 		}
 		ImGui::SameLine();
-		if (ImGui::SmallButton("Presets [debug]")) s_presetDebugOpen = !s_presetDebugOpen;
+		if (ImGui::SmallButton("Presets")) s_presetManagerOpen = !s_presetManagerOpen;
 		if (s_devFreecamOn) {
 			ImGui::SameLine();
 			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[freecam]");
@@ -2183,5 +2303,6 @@ void ImGuiManager::BuildUI() {
 	ImGui::End();
 	RenderConfabulator();
 	RenderDevPanel();
-	RenderPresetDebugPanel();
+	RenderPresetManagerPanel();
+	RenderPresetConfirmPopup(); // unconditional -- stays functional even if the panel above gets closed mid-confirm
 }

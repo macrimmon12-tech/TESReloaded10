@@ -284,6 +284,39 @@ bool PresetManager::ReadRawDefaults(PresetData& OutData) {
 	return true;
 }
 
+bool PresetManager::CaptureLiveState(PresetData& OutData) {
+	OutData.clear();
+	if (!TheSettingManager) return false;
+
+	// The schema (which sections/keys exist, and each one's type) comes from
+	// the defaults -- guaranteed complete. The VALUE for each comes from the
+	// live getters, which correctly fall back to defaults for anything the
+	// user's actual TomlConfig doesn't explicitly override, so this can't
+	// silently miss an entry the way walking TomlConfig directly could.
+	PresetData schema;
+	if (!ReadRawDefaults(schema)) return false;
+
+	for (const auto& [section, keys] : schema) {
+		for (const auto& [key, defaultValue] : keys) {
+			PresetValue live{};
+			live.Type = defaultValue.Type;
+
+			if (live.Type == PresetValue::ValueType::String) {
+				char buf[256] = {};
+				TheSettingManager->GetSettingS(section.c_str(), key.c_str(), buf);
+				live.StringValue = buf;
+			}
+			else {
+				live.FloatValue = TheSettingManager->GetSettingF(section.c_str(), key.c_str());
+			}
+
+			OutData[section][key] = live;
+		}
+	}
+
+	return true;
+}
+
 bool PresetManager::ResolveCurrentLocation(TESObjectCELL* Cell, PresetData& OutTarget, ResolveResult& OutResult) {
 	OutTarget.clear();
 	OutResult = ResolveResult{};

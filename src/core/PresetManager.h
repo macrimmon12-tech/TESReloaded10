@@ -86,6 +86,16 @@ public:
 	static void					ResolveAndApply(TESObjectCELL* Cell);
 	static const ResolveResult&	GetLastResolveResult();
 
+	// ---- Session 5: authoring (docs § "In-game UI -- location assignment") --
+
+	// Captures every non-blacklisted setting's CURRENT effective value (not a
+	// diff) -- enumerates the full schema from raw TOML defaults, then reads
+	// each key's live value via GetSettingF/GetSettingS (correctly falls back
+	// to defaults for anything the live TomlConfig doesn't explicitly
+	// override, unlike walking TomlConfig directly which could miss entries
+	// a sparse user config omits). This is what a Save button writes.
+	static bool			CaptureLiveState(PresetData& OutData);
+
 	// ---- Session 4: Variants (docs § "Variants",
 	// § "Persisting which Variants are enabled") -------------------------
 
