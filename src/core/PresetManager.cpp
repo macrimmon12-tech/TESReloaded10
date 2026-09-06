@@ -41,6 +41,7 @@ bool PresetManager::IsReservedName(const std::string& Name) {
 void PresetManager::Initialize() {
 	Logger::Log("PresetManager: Initializing...");
 	LoadKeywords();
+	LoadEnabledVariants();
 }
 
 // ---- keyword files -----------------------------------------------------
@@ -137,8 +138,16 @@ std::string PresetManager::GetPresetPath(const std::string& Name) {
 	return std::string(kPresetsDir) + Name + ".ini";
 }
 
+std::string PresetManager::GetVariantPath(const std::string& Name) {
+	return std::string(kVariantsDir) + Name + ".ini";
+}
+
 bool PresetManager::PresetExists(const std::string& Name) {
 	return std::filesystem::exists(GetPresetPath(Name));
+}
+
+bool PresetManager::VariantExists(const std::string& Name) {
+	return std::filesystem::exists(GetVariantPath(Name));
 }
 
 // Recursively walks a parsed toml table, reconstructing the dotted Section
@@ -193,29 +202,29 @@ static void WalkPresetTable(const tomlValue& Node, const std::string& SectionPat
 	}
 }
 
-bool PresetManager::ReadPreset(const std::string& Name, PresetData& OutData) {
+// Shared by ReadPreset/ReadVariant -- same format, different folder/caller.
+static bool ReadTomlPresetFile(const std::string& Path, const std::string& Label, PresetManager::PresetData& OutData) {
 	OutData.clear();
-
-	std::string path = GetPresetPath(Name);
-	if (!std::filesystem::exists(path)) return false;
+	if (!std::filesystem::exists(Path)) return false;
 
 	try {
-		tomlValue root = toml::parse<toml::preserve_comments, std::map>((std::string_view)path);
+		tomlValue root = toml::parse<toml::preserve_comments, std::map>((std::string_view)Path);
 		WalkPresetTable(root, "", OutData);
 	}
 	catch (const std::exception& e) {
-		Logger::Log("PresetManager: Failed to parse preset '%s': %s", Name.c_str(), e.what());
+		Logger::Log("PresetManager: Failed to parse '%s': %s", Label.c_str(), e.what());
 		return false;
 	}
 
 	return true;
 }
 
-bool PresetManager::WritePreset(const std::string& Name, const PresetData& Data) {
+// Shared by WritePreset/WriteVariant -- same format, different folder/caller.
+static bool WriteTomlPresetFile(const std::string& Path, const char* Dir, const std::string& Label, const PresetManager::PresetData& Data) {
 	tomlValue root = toml::table();
 
 	for (const auto& [section, keys] : Data) {
-		if (IsBlacklistedSection(section)) continue; // never write blacklisted content
+		if (PresetManager::IsBlacklistedSection(section)) continue; // never write blacklisted content
 
 		StringList parts;
 		SettingManager::SplitString(section.c_str(), ".", &parts);
@@ -229,24 +238,40 @@ bool PresetManager::WritePreset(const std::string& Name, const PresetData& Data)
 		}
 
 		for (const auto& [key, value] : keys) {
-			if (value.Type == PresetValue::ValueType::String)
+			if (value.Type == PresetManager::PresetValue::ValueType::String)
 				(*node)[key] = value.StringValue;
 			else
 				(*node)[key] = value.FloatValue;
 		}
 	}
 
-	std::filesystem::create_directories(std::filesystem::path(kPresetsDir));
+	std::filesystem::create_directories(std::filesystem::path(Dir));
 
-	std::ofstream file(GetPresetPath(Name), std::ios::trunc | std::ios::binary);
+	std::ofstream file(Path, std::ios::trunc | std::ios::binary);
 	if (!file.is_open()) {
-		Logger::Log("PresetManager: Failed to open preset '%s' for writing", Name.c_str());
+		Logger::Log("PresetManager: Failed to open '%s' for writing", Label.c_str());
 		return false;
 	}
 
 	file << root << std::endl;
 	file.close();
 	return true;
+}
+
+bool PresetManager::ReadPreset(const std::string& Name, PresetData& OutData) {
+	return ReadTomlPresetFile(GetPresetPath(Name), Name, OutData);
+}
+
+bool PresetManager::WritePreset(const std::string& Name, const PresetData& Data) {
+	return WriteTomlPresetFile(GetPresetPath(Name), kPresetsDir, Name, Data);
+}
+
+bool PresetManager::ReadVariant(const std::string& Name, PresetData& OutData) {
+	return ReadTomlPresetFile(GetVariantPath(Name), Name, OutData);
+}
+
+bool PresetManager::WriteVariant(const std::string& Name, const PresetData& Data) {
+	return WriteTomlPresetFile(GetVariantPath(Name), kVariantsDir, Name, Data);
 }
 
 // ---- Session 2: resolution + apply ---------------------------------------
@@ -368,14 +393,102 @@ void PresetManager::ResolveAndApply(TESObjectCELL* Cell) {
 	if (!ResolveCurrentLocation(Cell, target, result))
 		return;
 
+	ApplyVariants(target);
+
 	ApplyPreset(target);
 	s_lastResolveResult = result;
 
-	Logger::Log("PresetManager: [Preset] Resolved %s -> tier=%d name='%s' rawDefaults=%d keyword='%s'",
+	Logger::Log("PresetManager: [Preset] Resolved %s -> tier=%d name='%s' rawDefaults=%d keyword='%s' variants=%u",
 		result.IsInterior ? result.CellEditorID.c_str() : result.WorldspaceEditorID.c_str(),
-		(int)result.Tier, result.PresetName.c_str(), result.UsedRawDefaults, result.Keyword.c_str());
+		(int)result.Tier, result.PresetName.c_str(), result.UsedRawDefaults, result.Keyword.c_str(),
+		(UInt32)s_enabledVariants.size());
 }
 
 const PresetManager::ResolveResult& PresetManager::GetLastResolveResult() {
 	return s_lastResolveResult;
+}
+
+// ---- Session 4: Variants -------------------------------------------------
+// docs § "Variants", § "Persisting which Variants are enabled"
+
+std::vector<std::string> PresetManager::s_enabledVariants;
+
+void PresetManager::ApplyVariants(PresetData& Target) {
+	// Order is priority: later-enabled Variants unconditionally overwrite
+	// earlier ones (and the base preset) for any key they define.
+	for (const auto& variantName : s_enabledVariants) {
+		if (!VariantExists(variantName)) continue;
+
+		PresetData variantData;
+		if (!ReadVariant(variantName, variantData)) continue;
+
+		for (const auto& [section, keys] : variantData)
+			for (const auto& [key, value] : keys)
+				Target[section][key] = value;
+	}
+}
+
+void PresetManager::LoadEnabledVariants() {
+	s_enabledVariants.clear();
+
+	std::ifstream file(kEnabledVariantsPath);
+	if (!file.is_open()) {
+		Logger::Log("PresetManager: EnabledVariants.ini not found (no Variants enabled yet)");
+		return;
+	}
+
+	std::string line;
+	bool inSection = false;
+
+	while (std::getline(file, line)) {
+		std::string_view view = TrimView(line);
+
+		if (view.empty() || view[0] == ';')
+			continue;
+
+		if (view.front() == '[' && view.back() == ']') {
+			inSection = (view == "[EnabledVariants]");
+			continue;
+		}
+
+		if (!inSection) continue;
+
+		std::string name(view);
+		if (std::find(s_enabledVariants.begin(), s_enabledVariants.end(), name) == s_enabledVariants.end())
+			s_enabledVariants.push_back(name);
+	}
+
+	Logger::Log("PresetManager: Loaded %u enabled Variant(s)", (UInt32)s_enabledVariants.size());
+}
+
+void PresetManager::SaveEnabledVariants() {
+	std::filesystem::create_directories(std::filesystem::path("Data\\NVR\\"));
+
+	std::ofstream file(kEnabledVariantsPath, std::ios::trunc | std::ios::binary);
+	if (!file.is_open()) {
+		Logger::Log("PresetManager: Failed to open EnabledVariants.ini for writing");
+		return;
+	}
+
+	file << "[EnabledVariants]\n";
+	for (const auto& name : s_enabledVariants)
+		file << name << "\n";
+}
+
+const std::vector<std::string>& PresetManager::GetEnabledVariants() {
+	return s_enabledVariants;
+}
+
+void PresetManager::SetVariantEnabled(const std::string& Name, bool Enabled) {
+	auto it = std::find(s_enabledVariants.begin(), s_enabledVariants.end(), Name);
+
+	if (Enabled) {
+		if (it == s_enabledVariants.end())
+			s_enabledVariants.push_back(Name); // append to bottom -- becomes highest priority
+	}
+	else if (it != s_enabledVariants.end()) {
+		s_enabledVariants.erase(it); // removed entirely, not just disabled
+	}
+
+	SaveEnabledVariants();
 }

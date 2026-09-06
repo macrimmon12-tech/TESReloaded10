@@ -480,6 +480,23 @@ static void RenderPresetDebugPanel() {
 		r.UsedRawDefaults ? "(raw TOML defaults -- no Default preset authored yet)"
 		: (r.PresetName.empty() ? "(none)" : r.PresetName.c_str()));
 
+	ImGui::Separator();
+
+	// Session 4: no checkbox UI yet (Session 7) -- EnabledVariants.ini is
+	// hand-edited for now. Shown here purely so this is testable at all.
+	const auto& variants = PresetManager::GetEnabledVariants();
+	if (variants.empty()) {
+		ImGui::Text("Enabled Variants:    (none)");
+	} else {
+		std::string joined;
+		for (size_t i = 0; i < variants.size(); i++) {
+			if (i) joined += " -> ";
+			joined += variants[i];
+		}
+		ImGui::Text("Enabled Variants:    %s", joined.c_str());
+		ImGui::TextDisabled("(priority: left lowest, right highest)");
+	}
+
 	ImGui::End();
 }
 
