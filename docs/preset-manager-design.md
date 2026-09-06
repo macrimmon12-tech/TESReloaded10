@@ -527,12 +527,17 @@ window shows the enabled-Variants list for testability, since there's no
 checkbox UI yet — `EnabledVariants.ini` and `Variants\*.ini` are still
 hand-authored until Session 7. Not build-verified in this environment.
 
-**Session 5 — Core authoring UI: location assignment.** Promote Session 2's
-debug window into the real tool: shown/highlighted status indicators and Save
-buttons for interior (Default/Keyword/Override) and exterior
-(Default/Override), escalating OK/Cancel warnings, "Reload current preset"
-(§ "In-game UI — location assignment"). Follow the `CLAUDE.md` DXVK-safe input
-patterns throughout.
+**Session 5 — Core authoring UI: location assignment.** ✅ Done. Added
+`PresetManager::CaptureLiveState()` (full current effective value per
+eligible key, not a diff — enumerated from raw defaults, read via
+`GetSettingF`/`GetSettingS`). Promoted the panel from debug-only into the
+real tool: shown/highlighted status indicators and Save buttons for interior
+(Default/Keyword/Override) and exterior (Default/Override), escalating
+OK/Cancel warnings, "Reload current preset", a shared confirmation popup
+instead of three duplicated ones. No new keyboard/text-entry widgets needed
+yet — every Save target name is derived, not typed — so the `CLAUDE.md`
+DXVK-safe input patterns don't come into play until Session 6's free-text
+preset names. Not build-verified in this environment.
 
 **Session 6 — Preset browser / Load.** Persistent preset list, Keyword-
 grouped-first, kind-tagged by name lookup, Load + OK/Cancel, the
