@@ -8,6 +8,7 @@
 #include <ctime>
 #include <unordered_set>
 #include <deque>
+#include <algorithm>
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -556,13 +557,18 @@ static void RenderPresetConfirmPopup() {
 static void RenderPresetManagerPanel() {
 	if (!s_presetManagerOpen) return;
 
-	ImGui::SetNextWindowSize(ImVec2(400.0f, 340.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(460.0f, 380.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowPos(ImVec2(540.0f, 380.0f), ImGuiCond_FirstUseEver);
 
 	if (!ImGui::Begin("NVR Preset Manager", &s_presetManagerOpen)) {
 		ImGui::End();
 		return;
 	}
+
+	// A smidge bigger throughout this window -- purely a render-time scale,
+	// applied before any CalcTextSize call below so the label-column math
+	// that follows already accounts for it.
+	ImGui::SetWindowFontScale(1.1f);
 
 	const auto& r = PresetManager::GetLastResolveResult();
 	const ImVec4 kHighlight(0.4f, 1.0f, 0.7f, 1.0f);
@@ -572,11 +578,26 @@ static void RenderPresetManagerPanel() {
 	ImGui::Text("IsInterior:          %s", r.IsInterior ? "true" : "false");
 	ImGui::Separator();
 
+	// Label column width is measured, not guessed -- a fixed SameLine offset
+	// (the previous "140.0f") clips as soon as a keyword name is long enough
+	// to run into the button (e.g. "[Keyword: DCHouse]"). Measure whichever
+	// of the three labels will actually render this frame and align the
+	// button column just past the widest one, so it can never overlap
+	// regardless of how long a keyword name gets.
+	bool showKeywordRow = r.IsInterior && !r.Keyword.empty();
+	char keywordLabel[160];
+	snprintf(keywordLabel, sizeof(keywordLabel), "[Keyword: %s]", r.Keyword.c_str());
+	float labelColumnW = ImGui::CalcTextSize("[Default]").x;
+	labelColumnW = std::max(labelColumnW, ImGui::CalcTextSize("[Override]").x);
+	if (showKeywordRow)
+		labelColumnW = std::max(labelColumnW, ImGui::CalcTextSize(keywordLabel).x);
+	const float buttonColumnX = labelColumnW + 24.0f; // breathing room past the longest label
+
 	// ---- Default -- always shown, highlighted when nothing more specific applies.
 	{
 		bool highlighted = (r.Tier == PresetManager::ResolvedTier::Default);
 		if (highlighted) ImGui::TextColored(kHighlight, "[Default]"); else ImGui::Text("[Default]");
-		ImGui::SameLine(140.0f);
+		ImGui::SameLine(buttonColumnX);
 		if (ImGui::SmallButton("Save to Default")) {
 			std::string targetName = r.IsInterior ? PresetManager::kDefaultInteriorName : PresetManager::kDefaultExteriorName;
 			const char* scope = r.IsInterior ? "every interior" : "every exterior";
@@ -587,13 +608,15 @@ static void RenderPresetManagerPanel() {
 		}
 	}
 
+	ImGui::Spacing();
+
 	// ---- Keyword -- interior only, shown whenever the cell has a tag at all,
 	// even with no preset authored for it yet (docs' shown-vs-highlighted table).
-	if (r.IsInterior && !r.Keyword.empty()) {
+	if (showKeywordRow) {
 		bool highlighted = (r.Tier == PresetManager::ResolvedTier::Keyword);
-		if (highlighted) ImGui::TextColored(kHighlight, "[Keyword: %s]", r.Keyword.c_str());
-		else ImGui::Text("[Keyword: %s]", r.Keyword.c_str());
-		ImGui::SameLine(140.0f);
+		if (highlighted) ImGui::TextColored(kHighlight, "%s", keywordLabel);
+		else ImGui::Text("%s", keywordLabel);
+		ImGui::SameLine(buttonColumnX);
 		if (ImGui::SmallButton("Save to Keyword")) {
 			UInt32 count = PresetManager::CountCellsForKeyword(r.Keyword);
 			char warning[192];
@@ -605,13 +628,15 @@ static void RenderPresetManagerPanel() {
 	// cell has no tag -- keyword membership is strictly offline (docs
 	// "Keyword files"), no in-game path exists to unlock this button.
 
+	ImGui::Spacing();
+
 	// ---- Override -- if one exists it's always the active tier (resolution
 	// checks it first), so "shown" and "highlighted" collapse to the same test.
 	{
 		bool overrideExists = (r.Tier == PresetManager::ResolvedTier::Override);
 		std::string identity = r.IsInterior ? r.CellEditorID : r.WorldspaceEditorID;
 		if (overrideExists) ImGui::TextColored(kHighlight, "[Override]"); else ImGui::Text("[Override]");
-		ImGui::SameLine(140.0f);
+		ImGui::SameLine(buttonColumnX);
 		bool canSave = !identity.empty();
 		if (!canSave) ImGui::BeginDisabled();
 		if (ImGui::SmallButton("Save to Override")) {
