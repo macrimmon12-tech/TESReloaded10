@@ -203,7 +203,13 @@ struct VS_OUTPUT {
     
     float3 viewDir : TEXCOORD6;
 
-    // TEXCOORD4/5 are free at LIGHTS < 4. .w carries SHADOW_VS_SENTINEL.
+    // Object-space squared distances for point-light attenuation (vanillaAttSq), bypassing
+    // lightDir/light2Dir/light3Dir above -- those are tangent-space (TBN-transformed) and their
+    // length is only correct if the TBN basis is orthonormal. .x = light0 (DIFFUSE/POINT only,
+    // where light0 is itself a point light rather than the sun), .y = light2, .z = light3.
+    float3 lightDistSq : TEXCOORD5;
+
+    // TEXCOORD4 is free at LIGHTS < 4. .w carries SHADOW_VS_SENTINEL.
     float4 shadowWorldPos : TEXCOORD4;
 
 #ifdef PROJ_SHADOW
@@ -259,25 +265,28 @@ VS_OUTPUT main(VS_INPUT IN) {
     
     #if defined(DIFFUSE) || defined(POINT)
         float3 light = LightData[0].xyz - position.xyz;
+        OUT.lightDistSq.x = dot(light, light);
     #else
         float3 light = LightData[0].xyz;
     #endif
-    
+
     OUT.lightDir.w = LightData[0].w;
     OUT.lightDir.xyz = mul(tbn, light);
-    
+
     OUT.viewDir.xyz = mul(tbn, EyePosition.xyz - position.xyz);
-    
+
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
         light = LightData[1].xyz - position.xyz;
         OUT.light2Dir.w = LightData[1].w;
         OUT.light2Dir.xyz = mul(tbn, light);
+        OUT.lightDistSq.y = dot(light, light);
     #endif
-    
+
     #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
         light = LightData[2].xyz - position.xyz;
         OUT.light3Dir.w = LightData[2].w;
         OUT.light3Dir.xyz = mul(tbn, light);
+        OUT.lightDistSq.z = dot(light, light);
     #endif
     
     #ifndef NO_VERTEX_COLOR
@@ -492,6 +501,7 @@ struct PS_INPUT {
 #endif
     float3 viewDir : TEXCOORD6_centroid;
     float4 shadowWorldPos : TEXCOORD4;
+    float3 lightDistSq : TEXCOORD5;
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
@@ -613,8 +623,11 @@ PS_OUTPUT main(PS_INPUT IN) {
     #if !defined(DIFFUSE) && !defined(POINT)
         float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #else
-        // Pointlights only.
-        float3 lighting = getPointLightLighting(IN.lightDir.xyz, IN.lightDir.w, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        // Pointlights only. Attenuate from the object-space lightDistSq.x carried from the VS,
+        // not length(IN.lightDir.xyz) -- that vector is tangent-space (TBN-transformed) and its
+        // length is only correct if the TBN basis is orthonormal.
+        float att0 = vanillaAttSq(IN.lightDistSq.x, IN.lightDir.w);
+        float3 lighting = getPointLightLightingAtt(IN.lightDir.xyz, att0, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
     // Self emmitance.
@@ -631,13 +644,15 @@ PS_OUTPUT main(PS_INPUT IN) {
                                        SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
     #endif
 
-    // Other light sources.
+    // Other light sources. Same object-space attenuation fix as light0 above.
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
-        lighting += getPointLightLighting(IN.light2Dir.xyz, IN.light2Dir.w, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        float att2 = vanillaAttSq(IN.lightDistSq.y, IN.light2Dir.w);
+        lighting += getPointLightLightingAtt(IN.light2Dir.xyz, att2, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
-    
+
     #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
-        lighting += getPointLightLighting(IN.light3Dir.xyz, IN.light3Dir.w, PSLightColor[2].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        float att3 = vanillaAttSq(IN.lightDistSq.z, IN.light3Dir.w);
+        lighting += getPointLightLightingAtt(IN.light3Dir.xyz, att3, PSLightColor[2].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
     float3 finalColor = lighting.rgb;
