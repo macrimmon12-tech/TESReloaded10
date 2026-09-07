@@ -437,21 +437,8 @@ void PresetManager::ApplyPreset(const PresetData& Target) {
 	// case ImGuiManager.cpp's RevertToSnapshot() already has to apply.
 	LUTEffect* lut = TheShaderManager ? TheShaderManager->Effects.LUT : nullptr;
 
-	// TEMP DIAGNOSTIC (remove once the "presets resolve/save correctly but
-	// Brightness specifically doesn't visibly apply" report is root-caused):
-	// counts + a few example writes, plus an unconditional per-key dump for
-	// Shaders.ImageAdjust specifically, so the next repro's log says
-	// definitively whether Brightness is actually being diffed and written.
-	UInt32 consideredCount = 0, writtenCount = 0, loggedExamples = 0;
 	for (const auto& [section, keys] : Target) {
 		for (const auto& [key, value] : keys) {
-			consideredCount++;
-
-			// DEBUG (temp, tracking the "ImageAdjust Brightness doesn't
-			// apply" report): log every Shaders.ImageAdjust key regardless
-			// of the 5-example cap below, written or not.
-			bool isImageAdjustDebug = (section.rfind("Shaders.ImageAdjust", 0) == 0);
-
 			if (value.Type == PresetValue::ValueType::String) {
 				char buf[256] = {};
 				TheSettingManager->GetSettingS(section.c_str(), key.c_str(), buf);
@@ -461,55 +448,20 @@ void PresetManager::ApplyPreset(const PresetData& Target) {
 					if (value.StringValue != buf) {
 						int slot = (key == "DayLUT") ? 0 : (key == "NightLUT") ? 1 : 2;
 						lut->LoadLUT(slot, value.StringValue.c_str());
-						writtenCount++;
-						if (loggedExamples < 5) {
-							Logger::Log("PresetManager: [Preset]   apply %s.%s (LUT reload): '%s' -> '%s'",
-								section.c_str(), key.c_str(), buf, value.StringValue.c_str());
-							loggedExamples++;
-						}
 					}
 					continue;
 				}
 
-				if (value.StringValue != buf) {
+				if (value.StringValue != buf)
 					TheSettingManager->SetSettingS(section.c_str(), key.c_str(), value.StringValue.c_str());
-					writtenCount++;
-					if (loggedExamples < 5) {
-						Logger::Log("PresetManager: [Preset]   apply %s.%s: '%s' -> '%s'",
-							section.c_str(), key.c_str(), buf, value.StringValue.c_str());
-						loggedExamples++;
-					}
-				}
 			}
 			else {
 				float current = TheSettingManager->GetSettingF(section.c_str(), key.c_str());
-				bool changed = (current != value.FloatValue);
-				if (changed)
+				if (current != value.FloatValue)
 					TheSettingManager->SetSettingF(section.c_str(), key.c_str(), value.FloatValue);
-				if (changed) writtenCount++;
-				if (changed && loggedExamples < 5) {
-					Logger::Log("PresetManager: [Preset]   apply %s.%s: %g -> %g",
-						section.c_str(), key.c_str(), current, value.FloatValue);
-					loggedExamples++;
-				}
-				if (isImageAdjustDebug) {
-					Logger::Log("PresetManager: [Preset]   [ImageAdjust debug] %s.%s: current=%g target=%g changed=%d",
-						section.c_str(), key.c_str(), current, value.FloatValue, changed);
-				}
-				// DEBUG (temp, tracking the "some shader Enabled toggles
-				// don't stick" report -- ImageAdjust's own Enabled worked,
-				// Coloring's reportedly didn't): every Status.Enabled write
-				// attempt, uncapped, regardless of which shader.
-				else if (key == "Enabled" && section.size() > 7 &&
-					section.compare(section.size() - 7, 7, ".Status") == 0) {
-					Logger::Log("PresetManager: [Preset]   [Enabled debug] %s: current=%g target=%g changed=%d",
-						section.c_str(), current, value.FloatValue, changed);
-				}
 			}
 		}
 	}
-	Logger::Log("PresetManager: [Preset] ApplyPreset: %u key(s) considered, %u actually written",
-		consideredCount, writtenCount);
 
 	// Re-sync shader Enabled flags -- same pattern as ImGuiManager.cpp's
 	// RevertToSnapshot(), since a preset can toggle Shaders.*.Status.Enabled.
@@ -518,18 +470,8 @@ void PresetManager::ApplyPreset(const PresetData& Target) {
 	for (const auto& name : shaders) {
 		bool want = TheSettingManager->GetMenuShaderEnabled(name.c_str());
 		EffectRecord* effect = TheShaderManager->GetEffectByName(name.c_str());
-		ShaderCollection* shader = effect ? nullptr : TheShaderManager->GetShaderCollectionByName(name.c_str());
-
-		// DEBUG (temp, same report as above): only fires when this pass is
-		// actually about to flip something, or when neither lookup found a
-		// match at all (which would silently no-op the resync for that name).
-		bool before = effect ? effect->Enabled : (shader ? shader->Enabled : !want);
-		if (before != want || (!effect && !shader)) {
-			Logger::Log("PresetManager: [Preset]   [Enabled resync debug] %s: want=%d matchedEffect=%d matchedShader=%d before=%d",
-				name.c_str(), want, effect != nullptr, shader != nullptr, before);
-		}
-
 		if (effect) { effect->Enabled = want; continue; }
+		ShaderCollection* shader = TheShaderManager->GetShaderCollectionByName(name.c_str());
 		if (shader) shader->Enabled = want;
 	}
 

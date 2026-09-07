@@ -192,14 +192,6 @@ bool SettingManager::Configuration::FillNode(ConfigNode* Node, const char* Secti
 
 	//Logger::Log("FillNode %s.%s value: %s (from defaults? %i)", path, Key, value.c_str(), fromDefault);
 
-	// TEMP DEBUG -- see SetValue's matching debug block for why. Every read
-	// of this exact key, from any caller, showing what FillNode resolved
-	// (and whether it fell back to defaults).
-	if (!strcmp(Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Key, "Brightness")) {
-		Logger::Log("PresetManager: [Preset]   [FillNode debug] Shaders.ImageAdjust.Interiors.Brightness -> %s fromDefault=%d",
-			value.c_str(), fromDefault);
-	}
-
 	// write the value in case it was obtained from defaults
 	if (fromDefault) SetValue(Node);
 
@@ -303,18 +295,6 @@ void SettingManager::Configuration::SetValue(ConfigNode* Node) {
 			table = &table->at(address);
 		}
 		section = table;
-	}
-
-	// TEMP DEBUG -- tracking a value that gets written correctly (confirmed
-	// by logs) but reads back as the old/default value shortly after, with
-	// no additional PresetManager resolve in between. Pinpoints every write
-	// this exact key goes through, from ANY caller (PresetManager, the
-	// settings UI, or FillNode's own fromDefault auto-write), to prove
-	// whether something else is writing the old value back in, or whether
-	// this write path is fine and the READ side is the actual problem.
-	if (!strcmp(Node->Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Node->Key, "Brightness")) {
-		Logger::Log("PresetManager: [Preset]   [SetValue debug] Shaders.ImageAdjust.Interiors.Brightness <- %g (type=%d)",
-			Node->FloatValue, (int)Node->Type);
 	}
 
 	// setting value based on type. The node's typed fields are the source of
@@ -842,12 +822,6 @@ void SettingManager::SetSetting(const char* Section, const char* Key, bool Value
 
 void SettingManager::SetSetting(const char* Section, const char* Key, float Value) {
 
-	// TEMP DEBUG -- identifies the caller for the Interiors.Brightness revert
-	// mystery: this is the manual-UI entry point (RenderSetting's DragFloat
-	// handler etc.), as opposed to SetSettingF (PresetManager's own path).
-	if (!strcmp(Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Key, "Brightness"))
-		Logger::Log("PresetManager: [Preset]   [SetSetting(float) debug] called with Value=%g", Value);
-
 	Configuration::ConfigNode Node;
 	CreateNode(&Node, Section, Key, Value, false);
 	SetSetting(&Node);
@@ -857,10 +831,6 @@ void SettingManager::SetSetting(const char* Section, const char* Key, float Valu
 * Builds a node and sets the value
 */
 void SettingManager::SetSettingS(const char* Section, const char* Key, const char* Value) {
-
-	// TEMP DEBUG -- see SetSetting(float)'s matching block for why.
-	if (!strcmp(Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Key, "Brightness"))
-		Logger::Log("PresetManager: [Preset]   [SetSettingS debug] called with Value='%s'", Value);
 
 	Configuration::ConfigNode Node;
 
@@ -894,14 +864,6 @@ void SettingManager::SetSettingS(const char* Section, const char* Key, const cha
 * Set a setting from a float value
 */
 void SettingManager::SetSettingF(const char* Section, const char* Key, float Value) {
-
-	// TEMP DEBUG -- see SetSetting(float)'s matching block for why. This is
-	// PresetManager's own entry point (ApplyPreset's diff loop) -- if THIS
-	// fires with Value=1 for the revert, ApplyPreset itself is somehow being
-	// asked to write the old value, which would point back at PresetManager
-	// rather than something external.
-	if (!strcmp(Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Key, "Brightness"))
-		Logger::Log("PresetManager: [Preset]   [SetSettingF debug] called with Value=%g", Value);
 
 	Configuration::ConfigNode Node;
 	Config.FillNode(&Node, Section, Key); // guess the type based on defaults/current setting

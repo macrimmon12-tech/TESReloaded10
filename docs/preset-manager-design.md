@@ -611,3 +611,37 @@ this session (`s_visitedInteriorCells`, tracked once per frame from
 `BuildUI()`'s top level, capped at 50, most-recent first). Both lists are
 filterable and clicking a row fills the existing text field, which stays
 editable for anything neither list happens to know about yet.
+
+**Session 7 fix-up — presets applying correctly but visibly reverting: not
+our bug.** A live playtest found several settings (`Shaders.ImageAdjust`'s
+`Brightness`, LUT filenames, `Shaders.Coloring`'s enabled state) that
+`ApplyPreset` visibly wrote correctly — confirmed with targeted logging down
+to the exact `Config.SetValue` call, at every layer from the TOML write
+through to the value actually feeding the shader's GPU constant — only for
+the value to revert to the opposite location's setting moments later, with
+no second `ResolveAndApply` anywhere nearby. Root cause: the player still had
+**Cartographer** (the third-party mod this whole design supersedes, see
+"Background" and "Deliberate departures from Cartographer" above) active at
+the same time, running its own independent location-based settings switch
+via OBScript. Two systems competing to set the same NVR settings on every
+cell transition, with Cartographer's script-tick write landing after our
+render-hook-driven one — not a bug in this feature. **Cartographer must be
+disabled before testing or using this Preset Manager**; the two are mutually
+exclusive by design (this system exists to replace it).
+
+Two genuine, unrelated bugs were found and fixed along the way while
+chasing this:
+- `PresetManager::ApplyPreset` didn't know `LUTEffect::UpdateSettings()`
+  never re-reads `DayLUT`/`NightLUT`/`InteriorLUT` from config (needs an
+  explicit `LoadLUT()` call to actually reload the bound texture) — the
+  same special case `ImGuiManager.cpp`'s `RevertToSnapshot()` already
+  carried. Fixed by giving `ApplyPreset` the same LUT-reload path,
+  diffed first so it doesn't force a texture reload on every transition.
+- `SettingManager::Configuration::FillNode`'s `fromDefault` flag was never
+  set `false` on a successful live-config read (only ever set `true`,
+  redundantly, in the two fallback paths) — meaning every settings read
+  anywhere in the mod, not just this feature, silently wrote that value
+  back into the live config tree regardless of whether it came from
+  defaults or the user's own explicit setting, contradicting the
+  function's own documented intent. Real bug, real fix, independent of
+  the Cartographer conflict above.
