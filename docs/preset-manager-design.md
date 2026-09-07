@@ -645,3 +645,19 @@ chasing this:
   defaults or the user's own explicit setting, contradicting the
   function's own documented intent. Real bug, real fix, independent of
   the Cartographer conflict above.
+
+**Session 7 fix-up — CoC froze the game completely.** Every button
+handler in this file, including the coc picker's own, executes inside
+`RenderInterfaceHook` — the same detour `ImGuiManager::NewFrame()`/
+`Render()` are called from (`NewVegas/Hooks/Render.cpp`), itself part of
+the game's own D3D9 render call chain for the current frame. `coc`
+triggers a multi-frame loading screen that needs to `Present()` further
+frames to show progress, which can never happen while still inside the
+frame the button click occurred in — a deadlock, reproducing on every
+single use regardless of target cell. Fixed by deferring the actual
+`RunConsoleCommand` call via a posted window message
+(`WM_NVR_DEFERRED_CONSOLE_COMMAND`, handled in `ImGuiManager::WndProc`),
+so it runs on the next message-pump cycle instead — outside of any
+render call. `cow` (exterior worldspace) was dropped from the picker
+entirely at this point — unused, and exterior worldspaces are reachable
+by walking anyway; keeping only the interior `coc` half.

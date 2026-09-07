@@ -838,29 +838,25 @@ static void RunConsoleCommand(const char* cmd) {
 	if (g_ConsoleInterface) g_ConsoleInterface->RunScriptLine(cmd, nullptr);
 }
 
-// ---- Session 7 fix-up: coc/cow picker's actual browse lists ---------------
-// A blind text field isn't a picker -- these give it real lists, built from
-// sources that are either provably complete (worldspaces) or honest about
-// their own limits (interior cells, where no complete engine-level
-// enumerator is used here -- see the long comment on
-// GetKnownInteriorCellNames for why).
+// Custom message used to defer a console command off the render thread --
+// see RunConsoleCommandDeferred's comment. WM_APP-based, so it can't collide
+// with any standard Windows message.
+static const UINT WM_NVR_DEFERRED_CONSOLE_COMMAND = WM_APP + 0x4E56; // "NV"
 
-// TESWorldSpace records are lightweight, persistent, and (like TESWeather,
-// already enumerated the same way in MainDataHandler::FillNames above)
-// DataHandler->worldSpaceList holds every one from the current load order,
-// not just visited ones -- so this list is genuinely complete. Cached once
-// since worldspaces don't change at runtime; recomputed only if the list
-// somehow comes back empty (e.g. called before DataHandler is ready).
-static const std::vector<std::string>& GetAllWorldspaceNames() {
-	static std::vector<std::string> names;
-	if (names.empty() && DataHandler) {
-		for (TList<TESWorldSpace>::Iterator itr = DataHandler->worldSpaceList.Begin(); !itr.End() && itr.Get(); ++itr) {
-			const char* name = itr.Get()->GetEditorName();
-			if (name && name[0]) names.push_back(name);
-		}
-		std::sort(names.begin(), names.end());
-	}
-	return names;
+// coc (and any other command that triggers a multi-frame loading screen)
+// cannot be run synchronously via RunConsoleCommand from a button handler --
+// every button handler in this file executes inside RenderInterfaceHook,
+// itself part of the game's own D3D9 render call chain for the CURRENT
+// frame (see NewVegas/Hooks/Render.cpp: ImGuiManager::NewFrame()/Render()
+// are both called from directly inside it). A command that needs to
+// Present() further frames to show loading progress can never get past the
+// frame we're still inside of -- confirmed root cause of "CoC freezes the
+// game completely." Posting a message defers the actual RunConsoleCommand
+// call to the next time the game's message pump processes its queue, which
+// happens outside of any render call.
+static void RunConsoleCommandDeferred(const char* cmd) {
+	if (!ImGuiManager::GameWindow) { RunConsoleCommand(cmd); return; } // no window yet -- best effort
+	PostMessage(ImGuiManager::GameWindow, WM_NVR_DEFERRED_CONSOLE_COMMAND, 0, (LPARAM)_strdup(cmd));
 }
 
 // Unlike worldspaces, interior TESObjectCELL records are NOT preloaded into
@@ -1006,40 +1002,26 @@ static void RenderDevPanel() {
 
 	ImGui::Spacing();
 
-	// ---- Session 7: Cell/Worldspace coc/cow picker -----------------------
+	// ---- Session 7: Cell coc picker ---------------------------------------
 	// docs § "Scope" -- explicitly out of scope for the preset manager
 	// itself (assignment is always done by physically standing in a
 	// location), but a genuinely useful utility on its own merits, so it
 	// lives here in Dev Tools instead, independent of and unrelated to
-	// presets.
-	if (ImGui::CollapsingHeader("Location (coc/cow)")) {
+	// presets. cow was dropped -- nobody used it, and exterior worldspaces
+	// are reachable by walking anyway.
+	if (ImGui::CollapsingHeader("Location (coc)")) {
 		static char s_devLocationBuf[64] = "";
-		static int  s_devCowX = 0, s_devCowY = 0;
-		static ImGuiTextFilter s_worldspaceFilter;
 		static ImGuiTextFilter s_cellFilter;
 
 		ImGui::SetNextItemWidth(220.0f);
-		ImGui::InputText("Cell/Worldspace EditorID", s_devLocationBuf, sizeof(s_devLocationBuf));
+		ImGui::InputText("Interior cell EditorID", s_devLocationBuf, sizeof(s_devLocationBuf));
 		ImGui::TextDisabled("(type freely, or pick from a list below)");
 
 		ImGui::Spacing();
 
-		// Worldspaces -- a complete list (see GetAllWorldspaceNames's comment).
-		ImGui::TextUnformatted("Worldspaces");
-		s_worldspaceFilter.Draw("##worldspacefilter", 200.0f);
-		ImGui::BeginChild("##worldspacelist", ImVec2(0.0f, 90.0f), true);
-		for (const auto& name : GetAllWorldspaceNames()) {
-			if (!s_worldspaceFilter.PassFilter(name.c_str())) continue;
-			if (ImGui::Selectable(name.c_str()))
-				strncpy_s(s_devLocationBuf, name.c_str(), _TRUNCATE);
-		}
-		ImGui::EndChild();
-
-		ImGui::Spacing();
-
-		// Interior cells -- keyword-tagged ones plus whatever's actually been
-		// visited this session (see s_visitedInteriorCells's comment for why
-		// this, not a complete engine-level list).
+		// Keyword-tagged cells plus whatever's actually been visited this
+		// session (see s_visitedInteriorCells's comment for why this, not a
+		// complete engine-level list).
 		ImGui::TextUnformatted("Interior cells (keyword-tagged + visited this session)");
 		s_cellFilter.Draw("##cellfilter", 200.0f);
 		ImGui::BeginChild("##celllist", ImVec2(0.0f, 90.0f), true);
@@ -1064,22 +1046,17 @@ static void RenderDevPanel() {
 		bool canGo = s_devLocationBuf[0] != '\0';
 		if (!canGo) ImGui::BeginDisabled();
 
-		if (ImGui::Button("COC (interior cell)")) {
+		if (ImGui::Button("COC")) {
 			char cmd[96];
 			snprintf(cmd, sizeof(cmd), "coc %s", s_devLocationBuf);
-			RunConsoleCommand(cmd);
-		}
-
-		ImGui::SetNextItemWidth(80.0f);
-		ImGui::InputInt("Cell X", &s_devCowX);
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(80.0f);
-		ImGui::InputInt("Cell Y", &s_devCowY);
-
-		if (ImGui::Button("COW (exterior worldspace)")) {
-			char cmd[128];
-			snprintf(cmd, sizeof(cmd), "cow %s %d %d", s_devLocationBuf, s_devCowX, s_devCowY);
-			RunConsoleCommand(cmd);
+			// coc triggers a multi-frame loading screen that needs to Present()
+			// new frames -- calling it synchronously here would deadlock, since
+			// this button handler runs inside RenderInterfaceHook, itself part
+			// of the game's own D3D9 render call chain for the CURRENT frame
+			// (confirmed root cause of "CoC freezes the game completely").
+			// Deferred via a posted window message instead, so it actually
+			// runs once we're back out on the next message-pump cycle.
+			RunConsoleCommandDeferred(cmd);
 		}
 
 		if (!canGo) ImGui::EndDisabled();
@@ -1264,6 +1241,18 @@ static void RevertToSnapshot() {
 // ---- WndProc -----------------------------------------------------------------
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+	// Deferred console command (see RunConsoleCommandDeferred) -- processed
+	// here because message-pump dispatch happens outside any render call,
+	// unlike the button handler that posted this.
+	if (msg == WM_NVR_DEFERRED_CONSOLE_COMMAND) {
+		char* cmd = (char*)lParam;
+		if (cmd) {
+			RunConsoleCommand(cmd);
+			free(cmd);
+		}
+		return 0;
+	}
+
 	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
 		SetOverlayVisible(false);
 
