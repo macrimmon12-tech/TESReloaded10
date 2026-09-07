@@ -496,6 +496,15 @@ void PresetManager::ApplyPreset(const PresetData& Target) {
 					Logger::Log("PresetManager: [Preset]   [ImageAdjust debug] %s.%s: current=%g target=%g changed=%d",
 						section.c_str(), key.c_str(), current, value.FloatValue, changed);
 				}
+				// DEBUG (temp, tracking the "some shader Enabled toggles
+				// don't stick" report -- ImageAdjust's own Enabled worked,
+				// Coloring's reportedly didn't): every Status.Enabled write
+				// attempt, uncapped, regardless of which shader.
+				else if (key == "Enabled" && section.size() > 7 &&
+					section.compare(section.size() - 7, 7, ".Status") == 0) {
+					Logger::Log("PresetManager: [Preset]   [Enabled debug] %s: current=%g target=%g changed=%d",
+						section.c_str(), current, value.FloatValue, changed);
+				}
 			}
 		}
 	}
@@ -509,8 +518,18 @@ void PresetManager::ApplyPreset(const PresetData& Target) {
 	for (const auto& name : shaders) {
 		bool want = TheSettingManager->GetMenuShaderEnabled(name.c_str());
 		EffectRecord* effect = TheShaderManager->GetEffectByName(name.c_str());
+		ShaderCollection* shader = effect ? nullptr : TheShaderManager->GetShaderCollectionByName(name.c_str());
+
+		// DEBUG (temp, same report as above): only fires when this pass is
+		// actually about to flip something, or when neither lookup found a
+		// match at all (which would silently no-op the resync for that name).
+		bool before = effect ? effect->Enabled : (shader ? shader->Enabled : !want);
+		if (before != want || (!effect && !shader)) {
+			Logger::Log("PresetManager: [Preset]   [Enabled resync debug] %s: want=%d matchedEffect=%d matchedShader=%d before=%d",
+				name.c_str(), want, effect != nullptr, shader != nullptr, before);
+		}
+
 		if (effect) { effect->Enabled = want; continue; }
-		ShaderCollection* shader = TheShaderManager->GetShaderCollectionByName(name.c_str());
 		if (shader) shader->Enabled = want;
 	}
 

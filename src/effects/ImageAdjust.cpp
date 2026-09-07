@@ -1,6 +1,14 @@
 #include "ImageAdjust.h"
 
 void ImageAdjustEffect::UpdateConstants() {
+	// TEMP DEBUG -- edge-triggered (only logs when Interiors.Brightness
+	// actually changes) to avoid flooding the log every single frame.
+	static float s_lastLoggedBrightness = -12345.0f;
+	if (Settings.Interiors.Brightness != s_lastLoggedBrightness) {
+		s_lastLoggedBrightness = Settings.Interiors.Brightness;
+		Logger::Log("PresetManager: [Preset]   [ImageAdjust UpdateConstants debug] isExterior=%d Main.Brightness=%g Night.Brightness=%g Interiors.Brightness=%g",
+			TheShaderManager->GameState.isExterior, Settings.Main.Brightness, Settings.Night.Brightness, Settings.Interiors.Brightness);
+	}
 	Constants.Data.x = TheShaderManager->GetTransitionValue(Settings.Main.Brightness, Settings.Night.Brightness, Settings.Interiors.Brightness);
 	Constants.Data.y = TheShaderManager->GetTransitionValue(Settings.Main.Contrast, Settings.Night.Contrast, Settings.Interiors.Contrast);
 	Constants.Data.z = TheShaderManager->GetTransitionValue(Settings.Main.Saturation, Settings.Night.Saturation, Settings.Interiors.Saturation);
@@ -39,6 +47,7 @@ void ImageAdjustEffect::UpdateSettings(){
 	Settings.Night.LightColorB = TheSettingManager->GetSettingF("Shaders.ImageAdjust.Night", "LightColorB");
 
 	Settings.Interiors.Brightness = TheSettingManager->GetSettingF("Shaders.ImageAdjust.Interiors", "Brightness");
+	Logger::Log("PresetManager: [Preset]   [ImageAdjust UpdateSettings debug] Interiors.Brightness read as %g", Settings.Interiors.Brightness); // TEMP
 	Settings.Interiors.Contrast = TheSettingManager->GetSettingF("Shaders.ImageAdjust.Interiors", "Contrast");
 	Settings.Interiors.Saturation = TheSettingManager->GetSettingF("Shaders.ImageAdjust.Interiors", "Saturation");
 	Settings.Interiors.Strength = TheSettingManager->GetSettingF("Shaders.ImageAdjust.Interiors", "Strength");
