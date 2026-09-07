@@ -372,25 +372,42 @@ void ShaderManager::UpdateConstants() {
 	ShaderConst.fogColor.z = WorldSky->fogColor.b;
 	ShaderConst.fogColor.w = 1.0f;
 
-	ShaderConst.horizonColor.x = WorldSky->Horizon.r;
-	ShaderConst.horizonColor.y = WorldSky->Horizon.g;
-	ShaderConst.horizonColor.z = WorldSky->Horizon.b;
-	ShaderConst.horizonColor.w = 1.0f;
+	// WorldSky->Horizon/SkyLower/skyUpper are native engine memory, only ever written by the
+	// vanilla Sky::RefreshClimate, which only runs for an exterior worldspace's climate. On a
+	// fresh process load straight into an interior save, currentWeather/currentClimate are
+	// still NULL -- RefreshClimate has never run this session -- so those fields sit at
+	// whatever the engine's own un-refreshed default is (effectively black). SkyShaders::
+	// UpdateConstants (Sky.cpp) projects them into the SH sky irradiance every frame
+	// regardless, so black input there silently zeroes PBR Skylighting until the player visits
+	// an exterior cell once and RefreshClimate actually runs -- after which these fields keep
+	// their last real value even back indoors, which is why the setting then "just works".
+	// Substitute a plausible neutral daylight sky so Skylighting isn't dead on arrival.
+	if (currentWeather) {
+		ShaderConst.horizonColor.x = WorldSky->Horizon.r;
+		ShaderConst.horizonColor.y = WorldSky->Horizon.g;
+		ShaderConst.horizonColor.z = WorldSky->Horizon.b;
+		ShaderConst.horizonColor.w = 1.0f;
+
+		ShaderConst.skyLowColor.x = WorldSky->SkyLower.r;
+		ShaderConst.skyLowColor.y = WorldSky->SkyLower.g;
+		ShaderConst.skyLowColor.z = WorldSky->SkyLower.b;
+		ShaderConst.skyLowColor.w = 1.0f;
+
+		ShaderConst.skyColor.x = WorldSky->skyUpper.r;
+		ShaderConst.skyColor.y = WorldSky->skyUpper.g;
+		ShaderConst.skyColor.z = WorldSky->skyUpper.b;
+		ShaderConst.skyColor.w = 1.0f;
+	}
+	else {
+		ShaderConst.horizonColor = D3DXVECTOR4(0.55f, 0.55f, 0.55f, 1.0f);
+		ShaderConst.skyLowColor  = D3DXVECTOR4(0.45f, 0.50f, 0.60f, 1.0f);
+		ShaderConst.skyColor     = D3DXVECTOR4(0.35f, 0.45f, 0.65f, 1.0f);
+	}
 
 	ShaderConst.sunAmbient.x = WorldSky->sunAmbient.r;
 	ShaderConst.sunAmbient.y = WorldSky->sunAmbient.g;
 	ShaderConst.sunAmbient.z = WorldSky->sunAmbient.b;
 	ShaderConst.sunAmbient.w = 1.0f;
-
-	ShaderConst.skyLowColor.x = WorldSky->SkyLower.r;
-	ShaderConst.skyLowColor.y = WorldSky->SkyLower.g;
-	ShaderConst.skyLowColor.z = WorldSky->SkyLower.b;
-	ShaderConst.skyLowColor.w = 1.0f;
-
-	ShaderConst.skyColor.x = WorldSky->skyUpper.r;
-	ShaderConst.skyColor.y = WorldSky->skyUpper.g;
-	ShaderConst.skyColor.z = WorldSky->skyUpper.b;
-	ShaderConst.skyColor.w = 1.0f;
 
 	// replicate vanilla behavior of enforcing max fog distance in interiors
 	ShaderConst.fogData.y = WorldSky->fogFarPlane;
