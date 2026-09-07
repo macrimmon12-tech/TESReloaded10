@@ -428,21 +428,44 @@ void PresetManager::ApplyPreset(const PresetData& Target) {
 	// each trigger a full SettingManager::LoadSettings() internally, so
 	// skipping no-op writes matters here in a way it doesn't for the rare,
 	// user-triggered RevertToSnapshot() this is modeled on.
+	//
+	// TEMP DIAGNOSTIC (remove once the "presets resolve/save correctly but
+	// don't visibly apply" report is root-caused): counts + a few example
+	// writes, so the next repro's log says definitively whether this loop is
+	// actually writing anything, or silently diffing everything away.
+	UInt32 consideredCount = 0, writtenCount = 0, loggedExamples = 0;
 	for (const auto& [section, keys] : Target) {
 		for (const auto& [key, value] : keys) {
+			consideredCount++;
 			if (value.Type == PresetValue::ValueType::String) {
 				char buf[256] = {};
 				TheSettingManager->GetSettingS(section.c_str(), key.c_str(), buf);
-				if (value.StringValue != buf)
+				if (value.StringValue != buf) {
 					TheSettingManager->SetSettingS(section.c_str(), key.c_str(), value.StringValue.c_str());
+					writtenCount++;
+					if (loggedExamples < 5) {
+						Logger::Log("PresetManager: [Preset]   apply %s.%s: '%s' -> '%s'",
+							section.c_str(), key.c_str(), buf, value.StringValue.c_str());
+						loggedExamples++;
+					}
+				}
 			}
 			else {
 				float current = TheSettingManager->GetSettingF(section.c_str(), key.c_str());
-				if (current != value.FloatValue)
+				if (current != value.FloatValue) {
 					TheSettingManager->SetSettingF(section.c_str(), key.c_str(), value.FloatValue);
+					writtenCount++;
+					if (loggedExamples < 5) {
+						Logger::Log("PresetManager: [Preset]   apply %s.%s: %g -> %g",
+							section.c_str(), key.c_str(), current, value.FloatValue);
+						loggedExamples++;
+					}
+				}
 			}
 		}
 	}
+	Logger::Log("PresetManager: [Preset] ApplyPreset: %u key(s) considered, %u actually written",
+		consideredCount, writtenCount);
 
 	// Re-sync shader Enabled flags -- same pattern as ImGuiManager.cpp's
 	// RevertToSnapshot(), since a preset can toggle Shaders.*.Status.Enabled.
