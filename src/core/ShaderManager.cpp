@@ -404,6 +404,19 @@ void ShaderManager::UpdateConstants() {
 		ShaderConst.skyColor     = D3DXVECTOR4(0.35f, 0.45f, 0.65f, 1.0f);
 	}
 
+	// TEMP DIAGNOSTIC -- interior Skylighting investigation. Fires once per cell transition
+	// (includes the very first frame of a fresh load). Remove once the real condition is known.
+	if (GameState.isCellChanged) {
+		Logger::Log("[SkyDebug] isExterior=%d currentWeather=%p currentClimate=%p raw.skyUpper=(%.3f,%.3f,%.3f) raw.SkyLower=(%.3f,%.3f,%.3f) raw.Horizon=(%.3f,%.3f,%.3f) -> ShaderConst skyColor=(%.3f,%.3f,%.3f) skyLowColor=(%.3f,%.3f,%.3f) horizonColor=(%.3f,%.3f,%.3f)",
+			GameState.isExterior, (void*)currentWeather, (void*)currentClimate,
+			WorldSky->skyUpper.r, WorldSky->skyUpper.g, WorldSky->skyUpper.b,
+			WorldSky->SkyLower.r, WorldSky->SkyLower.g, WorldSky->SkyLower.b,
+			WorldSky->Horizon.r, WorldSky->Horizon.g, WorldSky->Horizon.b,
+			ShaderConst.skyColor.x, ShaderConst.skyColor.y, ShaderConst.skyColor.z,
+			ShaderConst.skyLowColor.x, ShaderConst.skyLowColor.y, ShaderConst.skyLowColor.z,
+			ShaderConst.horizonColor.x, ShaderConst.horizonColor.y, ShaderConst.horizonColor.z);
+	}
+
 	ShaderConst.sunAmbient.x = WorldSky->sunAmbient.r;
 	ShaderConst.sunAmbient.y = WorldSky->sunAmbient.g;
 	ShaderConst.sunAmbient.z = WorldSky->sunAmbient.b;

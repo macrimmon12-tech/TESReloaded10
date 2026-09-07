@@ -129,6 +129,15 @@ void SkyShaders::UpdateConstants() {
 		D3DXVECTOR3 c = sh[i] * (band[i] * basis[i]);
 		Constants.Irradiance[i] = D3DXVECTOR4(c.x, c.y, c.z, 0.0f);
 	}
+
+	// TEMP DIAGNOSTIC -- interior Skylighting investigation. Remove once the real condition is
+	// known. Enabled here confirms Sky::UpdateConstants actually ran; Irradiance[0] is the DC
+	// (average) SH term -- near zero there means the sky data fed in was near-black regardless
+	// of the ShaderManager.cpp fallback.
+	if (TheShaderManager->GameState.isCellChanged) {
+		Logger::Log("[SkyDebug] SkyShaders::UpdateConstants ran, Enabled=%d, Irradiance[0]=(%.4f,%.4f,%.4f)",
+			Enabled, Constants.Irradiance[0].x, Constants.Irradiance[0].y, Constants.Irradiance[0].z);
+	}
 }
 
 void SkyShaders::UpdateSettings() {
