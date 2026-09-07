@@ -429,17 +429,48 @@ void PresetManager::ApplyPreset(const PresetData& Target) {
 	// skipping no-op writes matters here in a way it doesn't for the rare,
 	// user-triggered RevertToSnapshot() this is modeled on.
 	//
+	// LUT filenames need the texture/index reloaded at runtime, not just the
+	// TOML value rewritten -- LUTEffect::UpdateSettings() never re-reads
+	// DayLUT/NightLUT/InteriorLUT, so a plain SetSettingS updates the config
+	// but leaves the actual bound texture on whatever was last explicitly
+	// loaded. Confirmed root cause of "LUTs didn't swap" -- same special
+	// case ImGuiManager.cpp's RevertToSnapshot() already has to apply.
+	LUTEffect* lut = TheShaderManager ? TheShaderManager->Effects.LUT : nullptr;
+
 	// TEMP DIAGNOSTIC (remove once the "presets resolve/save correctly but
-	// don't visibly apply" report is root-caused): counts + a few example
-	// writes, so the next repro's log says definitively whether this loop is
-	// actually writing anything, or silently diffing everything away.
+	// Brightness specifically doesn't visibly apply" report is root-caused):
+	// counts + a few example writes, plus an unconditional per-key dump for
+	// Shaders.ImageAdjust specifically, so the next repro's log says
+	// definitively whether Brightness is actually being diffed and written.
 	UInt32 consideredCount = 0, writtenCount = 0, loggedExamples = 0;
 	for (const auto& [section, keys] : Target) {
 		for (const auto& [key, value] : keys) {
 			consideredCount++;
+
+			// DEBUG (temp, tracking the "ImageAdjust Brightness doesn't
+			// apply" report): log every Shaders.ImageAdjust key regardless
+			// of the 5-example cap below, written or not.
+			bool isImageAdjustDebug = (section.rfind("Shaders.ImageAdjust", 0) == 0);
+
 			if (value.Type == PresetValue::ValueType::String) {
 				char buf[256] = {};
 				TheSettingManager->GetSettingS(section.c_str(), key.c_str(), buf);
+
+				if (lut && section == "Shaders.LUT.Main" &&
+					(key == "DayLUT" || key == "NightLUT" || key == "InteriorLUT")) {
+					if (value.StringValue != buf) {
+						int slot = (key == "DayLUT") ? 0 : (key == "NightLUT") ? 1 : 2;
+						lut->LoadLUT(slot, value.StringValue.c_str());
+						writtenCount++;
+						if (loggedExamples < 5) {
+							Logger::Log("PresetManager: [Preset]   apply %s.%s (LUT reload): '%s' -> '%s'",
+								section.c_str(), key.c_str(), buf, value.StringValue.c_str());
+							loggedExamples++;
+						}
+					}
+					continue;
+				}
+
 				if (value.StringValue != buf) {
 					TheSettingManager->SetSettingS(section.c_str(), key.c_str(), value.StringValue.c_str());
 					writtenCount++;
@@ -452,14 +483,18 @@ void PresetManager::ApplyPreset(const PresetData& Target) {
 			}
 			else {
 				float current = TheSettingManager->GetSettingF(section.c_str(), key.c_str());
-				if (current != value.FloatValue) {
+				bool changed = (current != value.FloatValue);
+				if (changed)
 					TheSettingManager->SetSettingF(section.c_str(), key.c_str(), value.FloatValue);
-					writtenCount++;
-					if (loggedExamples < 5) {
-						Logger::Log("PresetManager: [Preset]   apply %s.%s: %g -> %g",
-							section.c_str(), key.c_str(), current, value.FloatValue);
-						loggedExamples++;
-					}
+				if (changed) writtenCount++;
+				if (changed && loggedExamples < 5) {
+					Logger::Log("PresetManager: [Preset]   apply %s.%s: %g -> %g",
+						section.c_str(), key.c_str(), current, value.FloatValue);
+					loggedExamples++;
+				}
+				if (isImageAdjustDebug) {
+					Logger::Log("PresetManager: [Preset]   [ImageAdjust debug] %s.%s: current=%g target=%g changed=%d",
+						section.c_str(), key.c_str(), current, value.FloatValue, changed);
 				}
 			}
 		}
