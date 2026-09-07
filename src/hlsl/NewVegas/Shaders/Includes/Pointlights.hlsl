@@ -10,15 +10,6 @@ float vanillaAtt(float3 lightVector, float radius) {
     return 1 - shades(att, att);
 }
 
-// Same formula as vanillaAtt, but from a precomputed object-space squared distance rather than
-// a light vector. vanillaAtt(lightVector, radius) == 1 - saturate(dot(lightVector, lightVector)
-// / radius^2), so this is exact, not an approximation -- it just lets the caller supply
-// dot(light, light) computed in object space instead of a vector that may have been carried
-// through a (possibly non-orthonormal) TBN transform, where length is not preserved.
-float vanillaAttSq(float distSq, float radius) {
-    return 1 - saturate(distSq / (radius * radius));
-}
-
 // https://lisyarus.github.io/blog/posts/point-light-attenuation.html
 float lisyarusAtt(float3 lightVector, float radius, float falloff=5.0) {
     const float3 normalized = lightVector / radius;
