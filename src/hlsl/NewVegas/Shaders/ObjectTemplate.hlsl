@@ -608,13 +608,20 @@ PS_OUTPUT main(PS_INPUT IN) {
     
     // Applied to PSLightColor[0], the sun, only: ambient, emittance and point lights are
     // untouched. ddx/ddy must stay at top level, outside any dynamic branch.
+    //
+    // Computed once here and reused by the ambient block further down (that block's condition,
+    // !DIFFUSE && !ONLY_SPECULAR, is a strict subset of this one, since POINT implies
+    // ONLY_SPECULAR) -- two separate ddx/ddy evaluations of the identical
+    // GetShadowGeometricNormal(IN.shadowWorldPos.xyz) call previously coexisted in the same
+    // pixel shader whenever FORWARD_SHADOWS was compiled in, which is fragile enough on its own
+    // to corrupt unrelated interpolator reads placed nearby.
     #if !defined(DIFFUSE) && !defined(POINT)
-        float3 sunShadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+        float3 shadowGeometricNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
         // Decline to shadow if a vanilla vertex shader ran: the interpolator is undefined.
         float sunShadow = 1.0f;
         #if FORWARD_SHADOWS
         sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
-                  ? GetSunShadow(IN.shadowWorldPos.xyz, sunShadowNormal)
+                  ? GetSunShadow(IN.shadowWorldPos.xyz, shadowGeometricNormal)
                   : 1.0f;
         #endif
         shadowMultiplier *= sunShadow;
@@ -637,10 +644,9 @@ PS_OUTPUT main(PS_INPUT IN) {
     #endif
     
     #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
-        // ddx/ddy must stay at pixel-shader top level, so derive the world normal here rather
-        // than inside getAmbientLighting.
-        float3 ambNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
-        lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
+        // Reuses shadowGeometricNormal computed above -- see the comment there. Always in scope
+        // here: POINT implies ONLY_SPECULAR, so !ONLY_SPECULAR implies !POINT.
+        lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, shadowGeometricNormal,
                                        SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
     #endif
 
