@@ -321,7 +321,21 @@ void ShaderManager::UpdateConstants() {
 
 	ShaderConst.SunPosition = SunRoot->m_localTransform.pos.toD3DXVEC4();
 	ShaderConst.SunPosition.w = 0.0f;
-	D3DXVec4Normalize(&ShaderConst.SunPosition, &ShaderConst.SunPosition);
+	// SunRoot (the sun disc's NiNode) is only positioned by the game's own sky-dome rendering,
+	// which only runs while an exterior sky is actually drawn. On a fresh process load straight
+	// into an interior save, before the player has ever seen an exterior sky this session, it
+	// sits at its post-load default -- a zero vector -- and D3DXVec4Normalize of a zero-length
+	// vector divides by zero, producing NaN. That NaN then poisons every downstream consumer of
+	// SunPosition, notably EvalSky's per-sample radiance in SkyShaders::UpdateConstants (Sky.cpp)
+	// -- every one of its 512 integration samples comes out NaN, so all 9 SH sky-irradiance
+	// coefficients do too, and PBR Skylighting goes dark (indoors AND out) until the player
+	// visits an exterior cell once and the sun disc gets a real position, matching the "only
+	// works after having been outdoors" symptom exactly -- and matches SkyDebug's logged
+	// Irradiance[0]=(nan,nan,nan) on a cold interior load.
+	if (D3DXVec4LengthSq(&ShaderConst.SunPosition) > 0.0001f)
+		D3DXVec4Normalize(&ShaderConst.SunPosition, &ShaderConst.SunPosition);
+	else
+		ShaderConst.SunPosition = D3DXVECTOR4(0.0f, 0.0f, 1.0f, 0.0f); // straight up: a safe, neutral default
 	ShaderConst.SunPosition.w = 1.0f;
 
 	ShaderConst.SunDir = Tes->directionalLight->direction.toD3DXVEC4() * -1.0f;
