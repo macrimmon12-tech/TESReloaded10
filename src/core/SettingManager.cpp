@@ -192,6 +192,14 @@ bool SettingManager::Configuration::FillNode(ConfigNode* Node, const char* Secti
 
 	//Logger::Log("FillNode %s.%s value: %s (from defaults? %i)", path, Key, value.c_str(), fromDefault);
 
+	// TEMP DEBUG -- see SetValue's matching debug block for why. Every read
+	// of this exact key, from any caller, showing what FillNode resolved
+	// (and whether it fell back to defaults).
+	if (!strcmp(Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Key, "Brightness")) {
+		Logger::Log("PresetManager: [Preset]   [FillNode debug] Shaders.ImageAdjust.Interiors.Brightness -> %s fromDefault=%d",
+			value.c_str(), fromDefault);
+	}
+
 	// write the value in case it was obtained from defaults
 	if (fromDefault) SetValue(Node);
 
@@ -295,6 +303,18 @@ void SettingManager::Configuration::SetValue(ConfigNode* Node) {
 			table = &table->at(address);
 		}
 		section = table;
+	}
+
+	// TEMP DEBUG -- tracking a value that gets written correctly (confirmed
+	// by logs) but reads back as the old/default value shortly after, with
+	// no additional PresetManager resolve in between. Pinpoints every write
+	// this exact key goes through, from ANY caller (PresetManager, the
+	// settings UI, or FillNode's own fromDefault auto-write), to prove
+	// whether something else is writing the old value back in, or whether
+	// this write path is fine and the READ side is the actual problem.
+	if (!strcmp(Node->Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Node->Key, "Brightness")) {
+		Logger::Log("PresetManager: [Preset]   [SetValue debug] Shaders.ImageAdjust.Interiors.Brightness <- %g (type=%d)",
+			Node->FloatValue, (int)Node->Type);
 	}
 
 	// setting value based on type. The node's typed fields are the source of
