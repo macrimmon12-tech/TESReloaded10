@@ -500,8 +500,8 @@ struct PS_INPUT {
     float4 light3Dir : TEXCOORD3_centroid;
 #endif
     float3 viewDir : TEXCOORD6_centroid;
-    float4 shadowWorldPos : TEXCOORD4;
     float3 lightDistSq : TEXCOORD5;
+    float4 shadowWorldPos : TEXCOORD4;
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
