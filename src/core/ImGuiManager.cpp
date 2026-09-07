@@ -118,6 +118,25 @@ static bool  s_screenshotMode = false;
 // § "In-game UI -- location assignment").
 static bool  s_presetManagerOpen = false;
 
+// ---- Lighting panel -------------------------------------------------------
+// QOL panel added after re-adding forward shadows changed the lighting model:
+// a linkable-slider view over PBR/Terrain intensity, grouped by the condition
+// a tester actually thinks in (Day/Night/Rain/Interiors) instead of by
+// effect. Each condition row can be Unlinked (every slider independent),
+// ByEffect (PBR's 3 link together, Terrain's 3 link together, separately),
+// or AllLinked (all 6 move together) -- see RenderLightingConditionRow.
+static bool s_lightingPanelOpen = false;
+
+enum class LightLinkMode { Unlinked, ByEffect, AllLinked };
+
+// Rain and Night+Rain both live under the same "Rain" toolbar condition
+// (there's no separate NightRain button), each keeping its own link mode.
+static LightLinkMode s_lightLinkDay       = LightLinkMode::Unlinked;
+static LightLinkMode s_lightLinkNight     = LightLinkMode::Unlinked;
+static LightLinkMode s_lightLinkRain      = LightLinkMode::Unlinked;
+static LightLinkMode s_lightLinkNightRain = LightLinkMode::Unlinked;
+static LightLinkMode s_lightLinkInteriors = LightLinkMode::Unlinked;
+
 static void CfabSaveBaselines() {
 	if (!TheSettingManager || s_cfabBase.loaded) return;
 	s_cfabBase.saturation   = TheSettingManager->GetSettingF("Shaders.Coloring.Default",             "Saturation");
@@ -883,6 +902,125 @@ static void TrackVisitedInteriorCell() {
 	if (it != s_visitedInteriorCells.end()) s_visitedInteriorCells.erase(it);
 	s_visitedInteriorCells.insert(s_visitedInteriorCells.begin(), name);
 	if (s_visitedInteriorCells.size() > 50) s_visitedInteriorCells.resize(50);
+}
+
+// Renders up to 6 DragFloats (PBR's 3, then Terrain's 3 when TotalCount ==
+// 6) and, on any single edit, multiplies every other value currently
+// *grouped* with it by the same before/after ratio -- which values that is
+// depends on Mode: AllLinked groups everything passed in, ByEffect groups
+// PBR's 3 and Terrain's 3 separately, Unlinked groups nothing (plain
+// independent drag). Returns true if anything changed, so the caller knows
+// to write the whole row back.
+static bool RenderLightingCells(LightLinkMode Mode, const char* const* Labels, float** Values, int PbrCount, int TotalCount) {
+	bool anyChanged = false;
+	for (int i = 0; i < TotalCount; i++) {
+		float before = *Values[i];
+		ImGui::PushID(i);
+		bool changed = ImGui::DragFloat(Labels[i], Values[i], 0.005f, 0.0f, 0.0f, "%.3f");
+		ImGui::PopID();
+		if (!changed) continue;
+		anyChanged = true;
+		if (before == 0.0f) continue; // no ratio to infer from a zero baseline -- leave siblings alone
+
+		float ratio = *Values[i] / before;
+		int lo = i, hi = i + 1; // Unlinked: nothing else moves
+		if (Mode == LightLinkMode::AllLinked) { lo = 0; hi = TotalCount; }
+		else if (Mode == LightLinkMode::ByEffect) { lo = (i < PbrCount) ? 0 : PbrCount; hi = (i < PbrCount) ? PbrCount : TotalCount; }
+
+		for (int j = lo; j < hi; j++) {
+			if (j == i) continue;
+			*Values[j] *= ratio;
+		}
+	}
+	return anyChanged;
+}
+
+// HasTerrain == false (Interiors) hides "All Linked" rather than offering it
+// as a confusing no-op identical to "By Effect" when there's no Terrain group.
+static void RenderLightLinkModeSelector(LightLinkMode& Mode, bool HasTerrain) {
+	int mode = (int)Mode;
+	ImGui::RadioButton("Unlinked", &mode, (int)LightLinkMode::Unlinked); ImGui::SameLine();
+	ImGui::RadioButton("By Effect", &mode, (int)LightLinkMode::ByEffect);
+	if (HasTerrain) {
+		ImGui::SameLine();
+		ImGui::RadioButton("All Linked", &mode, (int)LightLinkMode::AllLinked);
+	}
+	Mode = (LightLinkMode)mode;
+}
+
+// Renders one condition row (e.g. "Night") and writes back whatever changed.
+// PbrSection/TerrainSection are the exact section strings each effect's own
+// UpdateSettings() reads (see PBRShaders::UpdateSettings / TerrainShaders::
+// UpdateSettings) -- TerrainSection == nullptr for Interiors, which never
+// renders terrain. Returns true if anything was written, so the panel can
+// call LoadSettings() once for the whole frame instead of once per row.
+static bool RenderLightingConditionRow(const char* RowLabel, const char* PbrSection, const char* TerrainSection, LightLinkMode& Mode) {
+	ImGui::PushID(RowLabel);
+	ImGui::TextUnformatted(RowLabel);
+	ImGui::Separator();
+	RenderLightLinkModeSelector(Mode, TerrainSection != nullptr);
+
+	float pbr[3] = {
+		TheSettingManager->GetSettingF(PbrSection, "LightingScale"),
+		TheSettingManager->GetSettingF(PbrSection, "AmbientScale"),
+		TheSettingManager->GetSettingF(PbrSection, "SkylightingScale"),
+	};
+	float terrain[3] = {};
+	if (TerrainSection) {
+		terrain[0] = TheSettingManager->GetSettingF(TerrainSection, "LightingScale");
+		terrain[1] = TheSettingManager->GetSettingF(TerrainSection, "AmbientScale");
+		terrain[2] = TheSettingManager->GetSettingF(TerrainSection, "SkylightingScale");
+	}
+
+	static const char* kLabels[6] = { "PBR Light", "PBR Ambient", "PBR Sky", "Terrain Light", "Terrain Ambient", "Terrain Sky" };
+	float* values[6] = { &pbr[0], &pbr[1], &pbr[2], &terrain[0], &terrain[1], &terrain[2] };
+	int total = TerrainSection ? 6 : 3;
+
+	bool changed = RenderLightingCells(Mode, kLabels, values, 3, total);
+	if (changed) {
+		TheSettingManager->SetSettingF(PbrSection, "LightingScale", pbr[0]);
+		TheSettingManager->SetSettingF(PbrSection, "AmbientScale", pbr[1]);
+		TheSettingManager->SetSettingF(PbrSection, "SkylightingScale", pbr[2]);
+		if (TerrainSection) {
+			TheSettingManager->SetSettingF(TerrainSection, "LightingScale", terrain[0]);
+			TheSettingManager->SetSettingF(TerrainSection, "AmbientScale", terrain[1]);
+			TheSettingManager->SetSettingF(TerrainSection, "SkylightingScale", terrain[2]);
+		}
+	}
+	ImGui::PopID();
+	return changed;
+}
+
+static void RenderLightingPanel() {
+	if (!s_lightingPanelOpen) return;
+
+	ImGui::SetNextWindowSize(ImVec2(440.0f, 560.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(620.0f, 200.0f),  ImGuiCond_FirstUseEver);
+
+	if (!ImGui::Begin("NVR Lighting", &s_lightingPanelOpen)) {
+		ImGui::End();
+		return;
+	}
+
+	ImGui::TextWrapped("Intensity-only view over the same PBR/Terrain settings the "
+		"main menu already edits, grouped by condition, with an optional "
+		"proportional link per group.");
+
+	bool anyChanged = false;
+	if (ImGui::CollapsingHeader("Day", ImGuiTreeNodeFlags_DefaultOpen))
+		anyChanged |= RenderLightingConditionRow("Day", "Shaders.PBR.Main", "Shaders.Terrain.Main", s_lightLinkDay);
+	if (ImGui::CollapsingHeader("Night", ImGuiTreeNodeFlags_DefaultOpen))
+		anyChanged |= RenderLightingConditionRow("Night", "Shaders.PBR.Night", "Shaders.Terrain.Night", s_lightLinkNight);
+	if (ImGui::CollapsingHeader("Rain", ImGuiTreeNodeFlags_DefaultOpen)) {
+		anyChanged |= RenderLightingConditionRow("Rain", "Shaders.PBR.Rain", "Shaders.Terrain.Rain", s_lightLinkRain);
+		anyChanged |= RenderLightingConditionRow("Night + Rain", "Shaders.PBR.NightRain", "Shaders.Terrain.NightRain", s_lightLinkNightRain);
+	}
+	if (ImGui::CollapsingHeader("Interiors", ImGuiTreeNodeFlags_DefaultOpen))
+		anyChanged |= RenderLightingConditionRow("Interiors", "Shaders.PBR.Interiors", nullptr, s_lightLinkInteriors);
+
+	if (anyChanged) TheSettingManager->LoadSettings();
+
+	ImGui::End();
 }
 
 static void DevPanelCleanup() {
@@ -2644,6 +2782,8 @@ void ImGuiManager::BuildUI() {
 		}
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Presets")) s_presetManagerOpen = !s_presetManagerOpen;
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Lighting")) s_lightingPanelOpen = !s_lightingPanelOpen;
 		if (s_devFreecamOn) {
 			ImGui::SameLine();
 			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[freecam]");
@@ -2670,5 +2810,6 @@ void ImGuiManager::BuildUI() {
 	RenderConfabulator();
 	RenderDevPanel();
 	RenderPresetManagerPanel();
+	RenderLightingPanel();
 	RenderPresetConfirmPopup(); // unconditional -- stays functional even if the panel above gets closed mid-confirm
 }
