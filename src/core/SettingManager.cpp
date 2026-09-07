@@ -842,6 +842,12 @@ void SettingManager::SetSetting(const char* Section, const char* Key, bool Value
 
 void SettingManager::SetSetting(const char* Section, const char* Key, float Value) {
 
+	// TEMP DEBUG -- identifies the caller for the Interiors.Brightness revert
+	// mystery: this is the manual-UI entry point (RenderSetting's DragFloat
+	// handler etc.), as opposed to SetSettingF (PresetManager's own path).
+	if (!strcmp(Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Key, "Brightness"))
+		Logger::Log("PresetManager: [Preset]   [SetSetting(float) debug] called with Value=%g", Value);
+
 	Configuration::ConfigNode Node;
 	CreateNode(&Node, Section, Key, Value, false);
 	SetSetting(&Node);
@@ -851,6 +857,10 @@ void SettingManager::SetSetting(const char* Section, const char* Key, float Valu
 * Builds a node and sets the value
 */
 void SettingManager::SetSettingS(const char* Section, const char* Key, const char* Value) {
+
+	// TEMP DEBUG -- see SetSetting(float)'s matching block for why.
+	if (!strcmp(Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Key, "Brightness"))
+		Logger::Log("PresetManager: [Preset]   [SetSettingS debug] called with Value='%s'", Value);
 
 	Configuration::ConfigNode Node;
 
@@ -884,6 +894,14 @@ void SettingManager::SetSettingS(const char* Section, const char* Key, const cha
 * Set a setting from a float value
 */
 void SettingManager::SetSettingF(const char* Section, const char* Key, float Value) {
+
+	// TEMP DEBUG -- see SetSetting(float)'s matching block for why. This is
+	// PresetManager's own entry point (ApplyPreset's diff loop) -- if THIS
+	// fires with Value=1 for the revert, ApplyPreset itself is somehow being
+	// asked to write the old value, which would point back at PresetManager
+	// rather than something external.
+	if (!strcmp(Section, "Shaders.ImageAdjust.Interiors") && !strcmp(Key, "Brightness"))
+		Logger::Log("PresetManager: [Preset]   [SetSettingF debug] called with Value=%g", Value);
 
 	Configuration::ConfigNode Node;
 	Config.FillNode(&Node, Section, Key); // guess the type based on defaults/current setting
