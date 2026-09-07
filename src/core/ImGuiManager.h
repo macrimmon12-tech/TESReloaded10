@@ -9,6 +9,7 @@ public:
 
 	static bool		IsVisible() { return Visible; }
 	static void		SetVisible(bool visible) { Visible = visible; }
+	static HWND		GetWindow() { return GameWindow; }
 
 private:
 	static bool		Initialized;

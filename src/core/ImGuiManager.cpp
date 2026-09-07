@@ -855,8 +855,9 @@ static const UINT WM_NVR_DEFERRED_CONSOLE_COMMAND = WM_APP + 0x4E56; // "NV"
 // call to the next time the game's message pump processes its queue, which
 // happens outside of any render call.
 static void RunConsoleCommandDeferred(const char* cmd) {
-	if (!ImGuiManager::GameWindow) { RunConsoleCommand(cmd); return; } // no window yet -- best effort
-	PostMessage(ImGuiManager::GameWindow, WM_NVR_DEFERRED_CONSOLE_COMMAND, 0, (LPARAM)_strdup(cmd));
+	HWND window = ImGuiManager::GetWindow();
+	if (!window) { RunConsoleCommand(cmd); return; } // no window yet -- best effort
+	PostMessage(window, WM_NVR_DEFERRED_CONSOLE_COMMAND, 0, (LPARAM)_strdup(cmd));
 }
 
 // Unlike worldspaces, interior TESObjectCELL records are NOT preloaded into
