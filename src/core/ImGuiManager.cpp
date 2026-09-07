@@ -838,6 +838,56 @@ static void RunConsoleCommand(const char* cmd) {
 	if (g_ConsoleInterface) g_ConsoleInterface->RunScriptLine(cmd, nullptr);
 }
 
+// ---- Session 7 fix-up: coc/cow picker's actual browse lists ---------------
+// A blind text field isn't a picker -- these give it real lists, built from
+// sources that are either provably complete (worldspaces) or honest about
+// their own limits (interior cells, where no complete engine-level
+// enumerator is used here -- see the long comment on
+// GetKnownInteriorCellNames for why).
+
+// TESWorldSpace records are lightweight, persistent, and (like TESWeather,
+// already enumerated the same way in MainDataHandler::FillNames above)
+// DataHandler->worldSpaceList holds every one from the current load order,
+// not just visited ones -- so this list is genuinely complete. Cached once
+// since worldspaces don't change at runtime; recomputed only if the list
+// somehow comes back empty (e.g. called before DataHandler is ready).
+static const std::vector<std::string>& GetAllWorldspaceNames() {
+	static std::vector<std::string> names;
+	if (names.empty() && DataHandler) {
+		for (TList<TESWorldSpace>::Iterator itr = DataHandler->worldSpaceList.Begin(); !itr.End() && itr.Get(); ++itr) {
+			const char* name = itr.Get()->GetEditorName();
+			if (name && name[0]) names.push_back(name);
+		}
+		std::sort(names.begin(), names.end());
+	}
+	return names;
+}
+
+// Unlike worldspaces, interior TESObjectCELL records are NOT preloaded into
+// a stable "every cell in the load order" list -- the DataHandler's own cell
+// array is a runtime cache of cells actually instantiated so far, not a
+// static catalog, and there's no xNVSE API here for a true engine-level
+// enumerator (deliberately out of scope for the preset manager itself, see
+// docs § "Scope"). So this list is honest about being partial: every
+// interior cell mentioned in a keyword file (already cached at boot) plus
+// every interior cell the player has actually stood in this session, most
+// recent first. It grows as you play instead of claiming completeness it
+// can't back up.
+static std::vector<std::string> s_visitedInteriorCells; // MRU, most-recent first
+static std::string              s_lastTrackedCellID;
+
+static void TrackVisitedInteriorCell() {
+	if (!Player || !Player->parentCell || !Player->parentCell->IsInterior()) return;
+	const char* name = Player->parentCell->GetEditorName();
+	if (!name || !name[0] || s_lastTrackedCellID == name) return;
+	s_lastTrackedCellID = name;
+
+	auto it = std::find(s_visitedInteriorCells.begin(), s_visitedInteriorCells.end(), name);
+	if (it != s_visitedInteriorCells.end()) s_visitedInteriorCells.erase(it);
+	s_visitedInteriorCells.insert(s_visitedInteriorCells.begin(), name);
+	if (s_visitedInteriorCells.size() > 50) s_visitedInteriorCells.resize(50);
+}
+
 static void DevPanelCleanup() {
 	if (s_devMenusHidden) {
 		RunConsoleCommand("tm");
@@ -965,9 +1015,51 @@ static void RenderDevPanel() {
 	if (ImGui::CollapsingHeader("Location (coc/cow)")) {
 		static char s_devLocationBuf[64] = "";
 		static int  s_devCowX = 0, s_devCowY = 0;
+		static ImGuiTextFilter s_worldspaceFilter;
+		static ImGuiTextFilter s_cellFilter;
 
 		ImGui::SetNextItemWidth(220.0f);
 		ImGui::InputText("Cell/Worldspace EditorID", s_devLocationBuf, sizeof(s_devLocationBuf));
+		ImGui::TextDisabled("(type freely, or pick from a list below)");
+
+		ImGui::Spacing();
+
+		// Worldspaces -- a complete list (see GetAllWorldspaceNames's comment).
+		ImGui::TextUnformatted("Worldspaces");
+		s_worldspaceFilter.Draw("##worldspacefilter", 200.0f);
+		ImGui::BeginChild("##worldspacelist", ImVec2(0.0f, 90.0f), true);
+		for (const auto& name : GetAllWorldspaceNames()) {
+			if (!s_worldspaceFilter.PassFilter(name.c_str())) continue;
+			if (ImGui::Selectable(name.c_str()))
+				strncpy_s(s_devLocationBuf, name.c_str(), _TRUNCATE);
+		}
+		ImGui::EndChild();
+
+		ImGui::Spacing();
+
+		// Interior cells -- keyword-tagged ones plus whatever's actually been
+		// visited this session (see s_visitedInteriorCells's comment for why
+		// this, not a complete engine-level list).
+		ImGui::TextUnformatted("Interior cells (keyword-tagged + visited this session)");
+		s_cellFilter.Draw("##cellfilter", 200.0f);
+		ImGui::BeginChild("##celllist", ImVec2(0.0f, 90.0f), true);
+		for (const auto& name : s_visitedInteriorCells) {
+			if (!s_cellFilter.PassFilter(name.c_str())) continue;
+			char label[96];
+			snprintf(label, sizeof(label), "[Visited] %s", name.c_str());
+			if (ImGui::Selectable(label))
+				strncpy_s(s_devLocationBuf, name.c_str(), _TRUNCATE);
+		}
+		for (const auto& name : PresetManager::GetKnownKeywordCells()) {
+			if (!s_cellFilter.PassFilter(name.c_str())) continue;
+			char label[96];
+			snprintf(label, sizeof(label), "[Keyword] %s", name.c_str());
+			if (ImGui::Selectable(label))
+				strncpy_s(s_devLocationBuf, name.c_str(), _TRUNCATE);
+		}
+		ImGui::EndChild();
+
+		ImGui::Spacing();
 
 		bool canGo = s_devLocationBuf[0] != '\0';
 		if (!canGo) ImGui::BeginDisabled();
@@ -2342,6 +2434,11 @@ void ImGuiManager::BuildUI() {
 
 	CfabUpdate();
 	if (s_screenshotMode) return;
+
+	// Dev Tools coc/cow picker's "visited this session" list -- see
+	// TrackVisitedInteriorCell's own comment for why this, not an engine
+	// enumerator, is what backs the interior-cell side of that picker.
+	TrackVisitedInteriorCell();
 
 	// Wait for Escape or Alt release before closing so the game doesn't see them held.
 	static bool escapePending = false;

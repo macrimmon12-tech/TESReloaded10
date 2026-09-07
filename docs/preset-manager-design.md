@@ -593,3 +593,21 @@ window's free-text `ImGuiTextFilter` + "Preset only" checkbox. Every
 `PresetManager:` log line, including the boot-time ones from prior sessions
 that had been left untagged, now carries `[Preset]` so the checkbox actually
 filters everything. Not build-verified in this environment.
+
+**Session 7 fix-up — coc/cow needed an actual list, not a blind text field.**
+Added `PresetManager::GetKnownKeywordCells()` (every interior cell any
+keyword file mentions, already cached at boot). Worldspaces get a genuinely
+complete browsable list — `TESWorldSpace` records are lightweight and
+preloaded for the whole load order into `DataHandler->worldSpaceList`, the
+same `TList` mechanism `MainDataHandler::FillNames` already uses for
+weathers, so `GetAllWorldspaceNames()` (cached once) is exhaustive. Interior
+cells don't have an equivalent: `DataHandler`'s own cell array is a runtime
+cache of cells actually instantiated so far, not a static catalog, and
+there's no xNVSE API for a true engine-level enumerator (deliberately out of
+scope for the preset manager itself, see § "Scope"). So that list is honest
+about being partial instead of pretending completeness it can't back up:
+keyword-tagged cells plus an MRU of cells the player has actually stood in
+this session (`s_visitedInteriorCells`, tracked once per frame from
+`BuildUI()`'s top level, capped at 50, most-recent first). Both lists are
+filterable and clicking a row fills the existing text field, which stays
+editable for anything neither list happens to know about yet.

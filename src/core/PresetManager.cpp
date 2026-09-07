@@ -153,6 +153,15 @@ UInt32 PresetManager::CountCellsForKeyword(const std::string& Keyword) {
 	return it->second;
 }
 
+std::vector<std::string> PresetManager::GetKnownKeywordCells() {
+	std::vector<std::string> names;
+	names.reserve(s_cellToKeyword.size());
+	for (const auto& [cellID, keyword] : s_cellToKeyword)
+		names.push_back(cellID);
+	std::sort(names.begin(), names.end());
+	return names;
+}
+
 // ---- preset files --------------------------------------------------------
 // docs § "Preset files": toml11-based, full standalone snapshot, never
 // cached -- always read/written fresh off disk at the point of use.

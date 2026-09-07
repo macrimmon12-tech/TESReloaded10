@@ -42,6 +42,12 @@ public:
 	static const std::string*	GetKeywordForCell(const std::string& CellEditorID);
 	static UInt32				CountCellsForKeyword(const std::string& Keyword);
 
+	// Every interior cell EditorID mentioned in any keyword file, sorted --
+	// used by the Dev Tools coc/cow picker (a general utility, unrelated to
+	// presets, docs § "Scope") as one real source of "known cells" to browse,
+	// alongside whatever the player has actually visited this session.
+	static std::vector<std::string>	GetKnownKeywordCells();
+
 	// Preset file I/O. Always reads/writes fresh off disk -- never cached
 	// (docs § "Preset files"). Name is the bare preset name, no path/extension
 	// (e.g. "DefaultInterior", "HonestHeartsCave", a cell/worldspace EditorID).
