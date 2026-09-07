@@ -242,7 +242,13 @@ float4 EyePosition : register(c16);
 
 VS_OUTPUT main(VS_INPUT IN) {
     VS_OUTPUT OUT;
-    
+
+    // Zeroed unconditionally: the DIFFUSE/POINT (.x) and LIGHTS>1/LIGHTS>2 (.y/.z) blocks below
+    // only overwrite the components they actually use, and vs_3_0 requires every component of
+    // OUT to be written before return -- a component that stays at this default is simply never
+    // read by the PS either (same macro guards on both sides).
+    OUT.lightDistSq = 0;
+
     OUT.uv = IN.uv.xy;
     
     float4 position = IN.position.xyzw;
