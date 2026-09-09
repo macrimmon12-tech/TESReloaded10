@@ -858,9 +858,19 @@ static void RunConsoleCommand(const char* cmd) {
 }
 
 // Custom message used to defer a console command off the render thread --
-// see RunConsoleCommandDeferred's comment. WM_APP-based, so it can't collide
-// with any standard Windows message.
-static const UINT WM_NVR_DEFERRED_CONSOLE_COMMAND = WM_APP + 0x4E56; // "NV"
+// see RunConsoleCommandDeferred's comment. Minted via RegisterWindowMessage
+// rather than a hardcoded WM_APP + offset: WM_APP's collision-free private
+// range only covers WM_APP..WM_APP+0x3FFF (0x8000-0xBFFF); anything past
+// that lands in 0xC000-0xFFFF, the range RegisterWindowMessage hands out,
+// where some other component in-process could legitimately own that exact
+// value for its own signaling and collide with this one. RegisterWindowMessage
+// is guaranteed unique system-wide for a given name, which is what this
+// needs. Cached in a function-local static so every caller gets the same
+// value without re-registering.
+static UINT GetDeferredConsoleCommandMessage() {
+	static UINT message = RegisterWindowMessageA("NVR_DeferredConsoleCommand");
+	return message;
+}
 
 // coc (and any other command that triggers a multi-frame loading screen)
 // cannot be run synchronously via RunConsoleCommand from a button handler --
@@ -876,7 +886,7 @@ static const UINT WM_NVR_DEFERRED_CONSOLE_COMMAND = WM_APP + 0x4E56; // "NV"
 static void RunConsoleCommandDeferred(const char* cmd) {
 	HWND window = ImGuiManager::GetWindow();
 	if (!window) { RunConsoleCommand(cmd); return; } // no window yet -- best effort
-	PostMessage(window, WM_NVR_DEFERRED_CONSOLE_COMMAND, 0, (LPARAM)_strdup(cmd));
+	PostMessage(window, GetDeferredConsoleCommandMessage(), 0, (LPARAM)_strdup(cmd));
 }
 
 // Unlike worldspaces, interior TESObjectCELL records are NOT preloaded into
@@ -1383,7 +1393,7 @@ LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 	// Deferred console command (see RunConsoleCommandDeferred) -- processed
 	// here because message-pump dispatch happens outside any render call,
 	// unlike the button handler that posted this.
-	if (msg == WM_NVR_DEFERRED_CONSOLE_COMMAND) {
+	if (msg == GetDeferredConsoleCommandMessage()) {
 		char* cmd = (char*)lParam;
 		if (cmd) {
 			RunConsoleCommand(cmd);
