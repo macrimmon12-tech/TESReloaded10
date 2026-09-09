@@ -1313,15 +1313,21 @@ static void BlockGameInput(bool block) {
 
 static void SetOverlayVisible(bool visible) {
 	if (ImGuiManager::IsVisible() == visible) return;
+	Logger::Log("[OpenDebug] SetOverlayVisible(%d) entry", visible);
 	ImGuiManager::SetVisible(visible);
 	if (visible) {
 		s_snapshot.clear();
 		// Snapshot current held keys so they don't register as new presses
 		for (int vk = 0; vk < 256; vk++)
 			s_prevKeyState[vk] = (GetAsyncKeyState(vk) & 0x8000) ? 0x80 : 0;
+		Logger::Log("[OpenDebug] before PatchMouseVTable");
 		PatchMouseVTable();
+		Logger::Log("[OpenDebug] before ClipCursor");
 		ClipCursor(nullptr);
+		Logger::Log("[OpenDebug] before BlockGameInput");
 		BlockGameInput(true);
+		Logger::Log("[OpenDebug] before cursor-center block, TheRenderManager=%p m_kWndFocus=%p",
+			(void*)TheRenderManager, TheRenderManager ? (void*)TheRenderManager->m_kWndFocus : nullptr);
 		ImGui::GetIO().MouseDrawCursor = true;
 		ImGui::GetIO().ClearInputKeys();
 		// If the cursor is outside the client rect (e.g. left on another monitor
@@ -1343,6 +1349,7 @@ static void SetOverlayVisible(bool visible) {
 				}
 			}
 		}
+		Logger::Log("[OpenDebug] SetOverlayVisible(true) exit -- returning to caller");
 	} else {
 		s_screenshotMode = false;
 		CfabDeactivateIfActive();
@@ -1690,8 +1697,11 @@ void ImGuiManager::NewFrame() {
 				if (keyDown && !prev && !modHeld) {
 					if (s_screenshotMode)
 						s_screenshotMode = false;
-					else
+					else {
+						Logger::Log("[OpenDebug] toggle key edge detected, calling SetOverlayVisible(%d)", !Visible);
 						SetOverlayVisible(!Visible);
+						Logger::Log("[OpenDebug] SetOverlayVisible returned to NewFrame");
+					}
 				}
 				prev = keyDown;
 			}
@@ -1816,10 +1826,15 @@ void ImGuiManager::NewFrame() {
 
 void ImGuiManager::Render() {
 	if (!Initialized || DeviceLost) return;
+	bool wasVisible = Visible;
 	BuildUI();
+	if (wasVisible || Visible) Logger::Log("[OpenDebug] Render: after BuildUI");
 	ImGui::EndFrame();
+	if (wasVisible || Visible) Logger::Log("[OpenDebug] Render: after EndFrame");
 	ImGui::Render();
+	if (wasVisible || Visible) Logger::Log("[OpenDebug] Render: after ImGui::Render");
 	ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+	if (wasVisible || Visible) Logger::Log("[OpenDebug] Render: after RenderDrawData");
 }
 
 // ---- Menu UI -----------------------------------------------------------------
@@ -2570,6 +2585,8 @@ void ImGuiManager::BuildUI() {
 
 	if (!Visible) return;
 
+	Logger::Log("[OpenDebug] BuildUI: Visible, entering main branch");
+
 	CfabUpdate();
 	if (s_screenshotMode) return;
 
@@ -2577,6 +2594,7 @@ void ImGuiManager::BuildUI() {
 	// TrackVisitedInteriorCell's own comment for why this, not an engine
 	// enumerator, is what backs the interior-cell side of that picker.
 	TrackVisitedInteriorCell();
+	Logger::Log("[OpenDebug] BuildUI: after TrackVisitedInteriorCell");
 
 	// Wait for Escape or Alt release before closing so the game doesn't see them held.
 	static bool escapePending = false;
@@ -2602,11 +2620,13 @@ void ImGuiManager::BuildUI() {
 
 	ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 	bool open = true;
+	Logger::Log("[OpenDebug] BuildUI: before ImGui::Begin(main window)");
 	if (!ImGui::Begin("New Vegas Reloaded", &open, flags) || !open) {
 		ImGui::End();
 		if (!open) SetOverlayVisible(false);
 		return;
 	}
+	Logger::Log("[OpenDebug] BuildUI: main window Begin succeeded");
 
 	// Toolbar row 1: FX toggle | title/status | Revert / Disk / Save Copy / Save
 	{
@@ -2801,6 +2821,7 @@ void ImGuiManager::BuildUI() {
 	}
 
 	ImGui::Separator();
+	Logger::Log("[OpenDebug] BuildUI: toolbar rows done, before sidebar/content");
 
 	// Two-panel layout
 	float sidebarW = 260.0f;
@@ -2809,17 +2830,22 @@ void ImGuiManager::BuildUI() {
 	ImGui::BeginChild("##sidebar", ImVec2(sidebarW, contentH), true);
 	RenderSidebar();
 	ImGui::EndChild();
+	Logger::Log("[OpenDebug] BuildUI: after RenderSidebar");
 
 	ImGui::SameLine();
 
 	ImGui::BeginChild("##content", ImVec2(0.0f, contentH), true);
 	RenderContent();
 	ImGui::EndChild();
+	Logger::Log("[OpenDebug] BuildUI: after RenderContent");
 
 	ImGui::End();
+	Logger::Log("[OpenDebug] BuildUI: after main End(), before Confabulator/DevPanel/Preset/Lighting");
 	RenderConfabulator();
 	RenderDevPanel();
 	RenderPresetManagerPanel();
 	RenderLightingPanel();
+	Logger::Log("[OpenDebug] BuildUI: all panels rendered, before RenderPresetConfirmPopup");
 	RenderPresetConfirmPopup(); // unconditional -- stays functional even if the panel above gets closed mid-confirm
+	Logger::Log("[OpenDebug] BuildUI: end of function");
 }
