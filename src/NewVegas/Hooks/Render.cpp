@@ -2,13 +2,7 @@
 
 void (__thiscall* Render)(Main*, BSRenderedTexture*, int, int) = (void (__thiscall*)(Main*, BSRenderedTexture*, int, int))Hooks::Render;
 void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTexture, int Arg2, int Arg3) {
-	// TEMP [OpenDebug] -- menu-open-crashes-the-game investigation, see RenderInterfaceHook
-	// below and ImGuiManager.cpp's checkpoints. If this doesn't appear again after the overlay
-	// opened, the crash is in the tail of that same frame, below RenderInterfaceHook's return
-	// (Present or other engine code); if it does appear again, the crash is somewhere in this
-	// frame's setup, RenderInterfaceHook, or between them.
-	if (ImGuiManager::IsVisible()) Logger::Log("[OpenDebug] RenderHook: entry");
-
+	
 	SettingsMainStruct* SettingsMain = &TheSettingManager->SettingsMain;
 
 	TheFrameRateManager->UpdatePerformance();
@@ -247,20 +241,10 @@ static void RenderMainMenuMovie() {
 
 CallDetour kRenderInterfaceDetour;
 void __fastcall RenderInterfaceHook(void* apThis, void*, void* apCuller, bool abPipboyVisible) {
-	// TEMP [OpenDebug] -- see ImGuiManager.cpp's checkpoints. Menu-open-crashes-the-game
-	// investigation: those checkpoints all fired cleanly through Render()'s return, so the
-	// crash is somewhere after that -- either the tail of this same frame (below) or the
-	// very next frame's hook call, neither of which was instrumented yet.
-	bool dbgVisible = ImGuiManager::IsVisible();
-	if (dbgVisible) Logger::Log("[OpenDebug] RenderInterfaceHook: entry");
 	RenderMainMenuMovie();
-	if (dbgVisible) Logger::Log("[OpenDebug] RenderInterfaceHook: after RenderMainMenuMovie");
 	ImGuiManager::NewFrame();
-	if (dbgVisible || ImGuiManager::IsVisible()) Logger::Log("[OpenDebug] RenderInterfaceHook: after NewFrame, before original ThisCall");
 	ThisCall(kRenderInterfaceDetour.GetOverwrittenAddr(), apThis, apCuller, abPipboyVisible);
-	if (ImGuiManager::IsVisible()) Logger::Log("[OpenDebug] RenderInterfaceHook: after original ThisCall, before Render");
 	ImGuiManager::Render();
-	if (ImGuiManager::IsVisible()) Logger::Log("[OpenDebug] RenderInterfaceHook: exit -- returning to caller");
 }
 
 static void SetTileShaderConstants() {
