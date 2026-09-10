@@ -661,3 +661,52 @@ so it runs on the next message-pump cycle instead — outside of any
 render call. `cow` (exterior worldspace) was dropped from the picker
 entirely at this point — unused, and exterior worldspaces are reachable
 by walking anyway; keeping only the interior `coc` half.
+
+**Session 8 — Automatic resolve narrowed to real location changes, preset
+Delete, master on/off toggle.** ✅ Done.
+
+- **The automatic per-frame trigger was re-resolving on every exterior cell
+  border, not just real location changes.** `ShaderManager::UpdateConstants()`
+  called `ResolveAndApply` on any `isCellChanged`, but per "Resolution order"
+  above, exteriors resolve purely by worldspace — no keyword tier, and the
+  Override tier keys off `WorldspaceEditorID`, never the cell. So every
+  exterior cell hop within the same worldspace was re-resolving to the
+  *identical* preset and reapplying it anyway, which — since `ApplyPreset`
+  diffs against live values and pushes whatever differs — meant any unsaved
+  live tweak got silently reverted the moment the player crossed a cell
+  border, not just when the resolved preset actually changed. Also the likely
+  source of at least some of the Cartographer friction noted in the Session 7
+  fix-up above: Cartographer's own switch fires on worldspace entry, ours was
+  firing on every cell, so the two were racing far more often than either
+  design intends, even with Cartographer's OBScript conflict aside.
+  Added `PresetManager::ShouldReResolve(Cell)` — cheap, no file I/O, compares
+  by pointer identity (the interior `TESObjectCELL*` itself, or the exterior
+  `TESWorldSpace*`) against its own cached "last real location," always true
+  across an interior<->exterior boundary. The automatic trigger now gates on
+  this in addition to `isCellChanged`; `ResolveAndApply` itself stays fully
+  unconditional, since Save/Reload/Delete call it directly and expect an
+  immediate real refresh regardless of whether the player has moved.
+- **Delete**, next to the preset browser's Load button (§ "In-game UI —
+  Preset browser / Load"). `PresetManager::DeletePreset` refuses
+  `DefaultInterior`/`DefaultExterior` (`IsReservedName`, same guard Save
+  Variant already uses) — the button disables itself for those rather than
+  relying on the silent refusal. Destructive and permanent, so it goes
+  through the same confirm-popup machinery as Save/Reload/RefreshAll/Save
+  Variant. Clears `s_presetSelectedName` and drops an in-progress Load
+  preview if it targeted the deleted file, and re-resolves immediately
+  afterward so the status indicators don't keep showing a preset that no
+  longer exists.
+- **Master on/off toggle**, a checkbox at the top of the Preset Manager
+  panel. Off: the automatic trigger above never fires, so whatever's live
+  stays live as the player moves — their own settings become authoritative,
+  same as running without this feature at all. Save/Load/Delete/Reload and
+  Variants all keep working regardless — this only stops automatic
+  switching, not deliberate authoring. Persisted as
+  `Main.Main.Misc.PresetManagerEnabled`, the ordinary TOML settings path
+  (same section `RenderEffects` itself lives in, already blacklisted from
+  preset capture — required here too, or saving a preset would capture the
+  Preset Manager's own on/off state into the file and loading a different
+  preset could silently flip it) — not the ImGui ini, so it rides the
+  existing Save/Save Copy/Disk reload machinery for free instead of needing
+  a second, parallel persistence path. Re-enabling resolves immediately
+  rather than waiting for the next location change.

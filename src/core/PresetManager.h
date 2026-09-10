@@ -55,6 +55,13 @@ public:
 	static bool			WritePreset(const std::string& Name, const PresetData& Data);
 	static bool			PresetExists(const std::string& Name);
 
+	// Permanent, no undo -- callers must confirm with the user first (the
+	// in-game UI reuses the existing Save/Reload confirm-popup machinery for
+	// this). Refuses DefaultInterior/DefaultExterior (IsReservedName) the same
+	// way Save Variant already does; returns false without touching disk for
+	// those. False also covers "file didn't exist" and any filesystem error.
+	static bool			DeletePreset(const std::string& Name);
+
 	// Variant preset I/O -- same format, own folder (docs § "Folder layout").
 	// WriteVariant has no caller yet; Session 7's Save Variant flow adds one.
 	static bool			ReadVariant(const std::string& Name, PresetData& OutData);
@@ -89,8 +96,28 @@ public:
 	// Called once per actual cell transition (gated on GameState.isCellChanged
 	// at the call site -- see ShaderManager::UpdateConstants()). Resolves the
 	// winning preset for Cell and applies it via TheSettingManager directly.
+	// Unconditional -- always does a real resolve+apply when called. Deliberately
+	// does NOT gate on ShouldReResolve() below, because explicit UI actions
+	// (Save/Reload/Delete in the Preset Manager panel) call this directly and
+	// expect an immediate, real refresh regardless of whether the player has
+	// moved -- gating inside here would make those silently no-op while
+	// standing still, which is the common case for using them.
 	static void					ResolveAndApply(TESObjectCELL* Cell);
 	static const ResolveResult&	GetLastResolveResult();
+
+	// Cheap, no file I/O -- true only when Cell's PRESET-RESOLUTION IDENTITY
+	// actually changed since the last time this returned true: the specific
+	// interior cell (keywords/overrides are per-cell indoors) or the
+	// worldspace (overrides are per-worldspace outdoors -- docs §
+	// "Resolution order", no keyword tier exists for exteriors at all), not
+	// every cell border crossed within the same worldspace. Always true across
+	// an interior<->exterior boundary. For the AUTOMATIC per-frame trigger
+	// only (see ShaderManager::UpdateConstants()) -- do not call this from an
+	// explicit user action; call ResolveAndApply directly there instead (see
+	// its own comment for why). Has side effects: updates the cached "last
+	// resolved identity" whenever it returns true, so it must be called at
+	// most once per frame and only from that one call site.
+	static bool					ShouldReResolve(TESObjectCELL* Cell);
 
 	// ---- Session 5: authoring (docs § "In-game UI -- location assignment") --
 
@@ -215,6 +242,15 @@ private:
 
 	static ResolveResult	s_lastResolveResult;
 	static UInt32			s_resolveGeneration;
+
+	// ShouldReResolve()'s own cache of the last location it decided was a real
+	// change -- separate from s_lastResolveResult, which reflects the last
+	// ACTUAL resolve (automatic or explicit) rather than what the automatic
+	// trigger last considered.
+	static bool				s_hasReResolveBaseline;
+	static bool				s_lastLocationWasInterior;
+	static TESObjectCELL*	s_lastInteriorCell;        // valid only when s_lastLocationWasInterior
+	static TESWorldSpace*	s_lastExteriorWorldSpace;  // valid only when !s_lastLocationWasInterior
 
 	// Whatever ApplyPreset most recently pushed into the engine -- the
 	// "since step 1 began" reference point CaptureVariantDiff() compares

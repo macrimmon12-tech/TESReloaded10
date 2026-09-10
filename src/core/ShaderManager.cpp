@@ -279,7 +279,21 @@ void ShaderManager::UpdateConstants() {
 		// Preset resolve+apply as early in this function as possible -- before
 		// anything below reads SettingsMain, so nothing this frame observes a
 		// stale value (docs/preset-manager-design.md § "Application mechanism").
-		PresetManager::ResolveAndApply(currentCell);
+		//
+		// Gated on the master toggle and on ShouldReResolve, not on isCellChanged
+		// alone: Override presets are assigned per-worldspace outdoors (no
+		// per-cell keyword tier exists for exteriors), so re-resolving on every
+		// exterior cell border within the same worldspace was a no-op at best
+		// and, at worst, silently clobbered any live tweak that hadn't been
+		// saved yet the moment the player happened to cross one. ShouldReResolve
+		// keeps interiors at today's per-cell granularity and always re-resolves
+		// across an interior<->exterior boundary. The short-circuit order
+		// matters: ShouldReResolve has side effects (updates its cached "last
+		// resolved identity"), so it must not run while the master toggle is
+		// off, or re-enabling it later would see a stale-but-matching cache and
+		// skip the immediate resolve it needs to do.
+		if (TheSettingManager->SettingsMain.Main.PresetManagerEnabled && PresetManager::ShouldReResolve(currentCell))
+			PresetManager::ResolveAndApply(currentCell);
 	}
 
 	GameState.isUnderwater = Tes->sky->GetIsUnderWater();

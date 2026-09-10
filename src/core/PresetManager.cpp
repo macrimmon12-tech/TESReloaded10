@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <vector>
 #include <string_view>
+#include <system_error>
 
 // Mirrors SettingManager.cpp's own GetConfigBase() pattern: GetCurrentDirectoryA
 // is reliable at startup but can be silently changed later by common-dialog
@@ -31,6 +32,11 @@ std::unordered_map<std::string, UInt32>		PresetManager::s_keywordCellCount;
 PresetManager::ResolveResult					PresetManager::s_lastResolveResult;
 UInt32											PresetManager::s_resolveGeneration = 0;
 PresetManager::PresetData						PresetManager::s_baselineSnapshot;
+
+bool											PresetManager::s_hasReResolveBaseline = false;
+bool											PresetManager::s_lastLocationWasInterior = false;
+TESObjectCELL*									PresetManager::s_lastInteriorCell = nullptr;
+TESWorldSpace*									PresetManager::s_lastExteriorWorldSpace = nullptr;
 
 // ---- setting-scope blacklist ---------------------------------------------
 // docs/preset-manager-design.md § "Setting scope -- a blacklist, still needed"
@@ -176,6 +182,12 @@ std::string PresetManager::GetVariantPath(const std::string& Name) {
 
 bool PresetManager::PresetExists(const std::string& Name) {
 	return std::filesystem::exists(GetPresetPath(Name));
+}
+
+bool PresetManager::DeletePreset(const std::string& Name) {
+	if (IsReservedName(Name)) return false; // DefaultInterior/DefaultExterior are protected
+	std::error_code ec;
+	return std::filesystem::remove(GetPresetPath(Name), ec) && !ec;
 }
 
 bool PresetManager::VariantExists(const std::string& Name) {
@@ -499,6 +511,35 @@ void PresetManager::ResolveAndApply(TESObjectCELL* Cell) {
 
 const PresetManager::ResolveResult& PresetManager::GetLastResolveResult() {
 	return s_lastResolveResult;
+}
+
+bool PresetManager::ShouldReResolve(TESObjectCELL* Cell) {
+	if (!Cell) return false;
+
+	bool isInterior = Cell->IsInterior();
+	bool changed;
+
+	if (!s_hasReResolveBaseline) {
+		changed = true;
+	}
+	else if (isInterior != s_lastLocationWasInterior) {
+		changed = true; // any interior<->exterior boundary, always significant
+	}
+	else if (isInterior) {
+		changed = (Cell != s_lastInteriorCell); // interior: overrides/keywords are per-cell
+	}
+	else {
+		changed = (Cell->worldSpace != s_lastExteriorWorldSpace); // exterior: overrides are per-worldspace only
+	}
+
+	if (changed) {
+		s_hasReResolveBaseline = true;
+		s_lastLocationWasInterior = isInterior;
+		s_lastInteriorCell = isInterior ? Cell : nullptr;
+		s_lastExteriorWorldSpace = isInterior ? nullptr : Cell->worldSpace;
+	}
+
+	return changed;
 }
 
 // ---- Session 6: Preset browser / Load -------------------------------------

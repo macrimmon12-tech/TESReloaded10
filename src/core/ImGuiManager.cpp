@@ -480,7 +480,7 @@ static const char* PresetTierName(PresetManager::ResolvedTier tier) {
 // ---- Session 5: Save/Reload confirmation --------------------------------
 // docs/preset-manager-design.md § "In-game UI -- location assignment"
 
-enum class PresetPendingAction { None, Save, Reload, Load, RefreshAll, SaveVariant };
+enum class PresetPendingAction { None, Save, Reload, Load, RefreshAll, SaveVariant, Delete };
 static PresetPendingAction s_presetPendingAction = PresetPendingAction::None;
 static std::string         s_presetPendingTarget;  // preset/Variant name a pending action targets
 static std::string         s_presetPendingWarning;
@@ -537,6 +537,27 @@ static void PresetManagerPerformLoad(const std::string& Name) {
 	s_previewSourceName = Name;
 	s_previewStartGeneration = PresetManager::GetResolveGeneration();
 	Logger::Log("PresetManager: [Preset] Loaded '%s' as an unsaved preview", Name.c_str());
+}
+
+static void PresetManagerPerformDelete(const std::string& Name) {
+	if (!PresetManager::DeletePreset(Name)) {
+		Logger::Log("PresetManager: [Preset] Delete '%s' failed -- reserved name, missing file, or filesystem error", Name.c_str());
+		return;
+	}
+	Logger::Log("PresetManager: [Preset] Deleted '%s'", Name.c_str());
+
+	if (s_presetSelectedName == Name) s_presetSelectedName.clear();
+	// The file backing an in-progress preview is gone -- the already-applied
+	// live values are unaffected (preview doesn't re-read the file), but drop
+	// the "previewing X" state so the UI doesn't keep pointing at it.
+	if (s_previewActive && s_previewSourceName == Name) s_previewActive = false;
+
+	// Refresh the resolved tier immediately, same reasoning as Save/Reload --
+	// otherwise the status indicators wouldn't reflect the deletion until the
+	// next real location change, and if the deleted preset was the one
+	// actually active here, they'd keep showing it as live.
+	if (Player && Player->parentCell)
+		PresetManager::ResolveAndApply(Player->parentCell);
 }
 
 // ---- Session 7: Refresh All Presets, Save Variant ------------------------
@@ -621,6 +642,8 @@ static void RenderPresetConfirmPopup() {
 			PresetManagerPerformRefreshAll();
 		else if (s_presetPendingAction == PresetPendingAction::SaveVariant)
 			PresetManagerPerformSaveVariant(s_presetPendingTarget);
+		else if (s_presetPendingAction == PresetPendingAction::Delete)
+			PresetManagerPerformDelete(s_presetPendingTarget);
 		else
 			PresetManagerPerformSave(s_presetPendingTarget);
 		s_presetPendingAction = PresetPendingAction::None;
@@ -649,6 +672,34 @@ static void RenderPresetManagerPanel() {
 	// applied before any CalcTextSize call below so the label-column math
 	// that follows already accounts for it.
 	ImGui::SetWindowFontScale(1.1f);
+
+	// ---- Master on/off toggle -------------------------------------------
+	// Off: the automatic per-location resolve (ShaderManager::UpdateConstants's
+	// gate) never fires, so whatever's currently live stays live as you move
+	// around -- your own settings are authoritative. Everything below (Save/
+	// Load/Delete/Reload, Variants) still works regardless -- this only stops
+	// the automatic switching, not deliberate authoring. Persisted through the
+	// normal TOML settings (Main.Main.Misc, blacklisted from preset capture
+	// the same way RenderEffects itself already is), not the ImGui ini --
+	// consistent with how every other persistent preference in this mod is
+	// stored, and it rides along with the existing Save/Save Copy/Disk reload
+	// machinery for free.
+	{
+		bool enabled = TheSettingManager->SettingsMain.Main.PresetManagerEnabled;
+		if (ImGui::Checkbox("Preset Manager enabled", &enabled)) {
+			TheSettingManager->SetSetting("Main.Main.Misc", "PresetManagerEnabled", enabled);
+			TheSettingManager->LoadSettings();
+			Logger::Log("PresetManager: [Preset] Master toggle set to %s", enabled ? "enabled" : "disabled");
+			// Re-enabling: resolve immediately rather than waiting for the next
+			// location change to notice -- same immediate-refresh pattern Save/
+			// Reload/Delete already use.
+			if (enabled && Player && Player->parentCell)
+				PresetManager::ResolveAndApply(Player->parentCell);
+		}
+		if (!enabled)
+			ImGui::TextDisabled("Automatic switching is off -- your own settings are authoritative. Save/Load/Delete below still work.");
+	}
+	ImGui::Separator();
 
 	// Walking to a different location without saving silently discards an
 	// in-progress Load preview (docs § "Unsaved/previewing state") -- the
@@ -791,6 +842,20 @@ static void RenderPresetManagerPanel() {
 				"This will override your current unsaved settings. Continue?");
 		}
 		if (!canLoad) ImGui::EndDisabled();
+
+		// DefaultInterior/DefaultExterior are protected -- disable rather than
+		// let the click through and rely on DeletePreset's own refusal, so the
+		// button honestly reflects what's about to happen.
+		bool canDelete = canLoad && !PresetManager::IsReservedName(s_presetSelectedName);
+		ImGui::SameLine();
+		if (!canDelete) ImGui::BeginDisabled();
+		if (ImGui::Button("Delete")) {
+			Logger::Log("PresetManager: [Preset] Delete clicked, target='%s'", s_presetSelectedName.c_str());
+			char warning[288];
+			snprintf(warning, sizeof(warning), "Permanently delete '%s'? This cannot be undone.", s_presetSelectedName.c_str());
+			RequestPresetAction(PresetPendingAction::Delete, s_presetSelectedName, warning);
+		}
+		if (!canDelete) ImGui::EndDisabled();
 	}
 
 	ImGui::Separator();
