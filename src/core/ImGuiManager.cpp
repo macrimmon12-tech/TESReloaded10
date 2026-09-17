@@ -1343,9 +1343,32 @@ static void** GetMouseVTable() {
 }
 
 static void PatchMouseVTable() {
+	// Patch once, ever -- not "if slot 9 isn't already my hook". The COM
+	// vtable doesn't change across an overlay open or a D3D9 device
+	// reset/reacquire (it belongs to the concrete class implementation, not
+	// the instance), so re-patching on those events was never actually
+	// necessary. Worse, it's actively unsafe with a second mod in the mix
+	// (e.g. CacheUI) also hooking this same slot: if it hooks in AFTER us, it
+	// correctly chains under our hook (saves our hook as its own "original").
+	// Our OLD per-call guard only checked "is slot 9 currently my hook" --
+	// once the other mod re-hooks over us, that check fails, so our next
+	// call here (overlay open, device reset, ...) sees "not patched" and
+	// re-patches: it captures the OTHER mod's hook into OriginalGetDeviceState
+	// (clobbering the true original we'd already saved) and reinstalls our
+	// own hook -- the same static function, so the vtable slot doesn't
+	// visibly change, but our hook now calls the other mod's hook, which
+	// calls what IT saved as its original (our hook, from before we
+	// clobbered ourselves) -- unbounded mutual recursion, stack overflow.
+	// Confirmed root cause of a crash on opening the NVR menu with CacheUI
+	// installed: ntdll.dll/0xC0000005, no NVR-side crash log (a stack-
+	// overflow guard-page fault blows past the normal SEH-based logger).
+	// Patching exactly once means OriginalGetDeviceState, once set, always
+	// points at whatever was genuinely there at that moment -- correct
+	// regardless of what any other mod does to the slot afterward.
+	if (OriginalGetDeviceState) return;
+
 	void** vtable = GetMouseVTable();
-	if (!vtable) return;
-	if (vtable[9] == reinterpret_cast<void*>(HookedGetDeviceState)) return;
+	if (!vtable) return; // input not ready yet -- OriginalGetDeviceState stays null, a later call site gets a real attempt
 	OriginalGetDeviceState = reinterpret_cast<GetDeviceState_t>(vtable[9]);
 	DWORD old;
 	VirtualProtect(&vtable[9], sizeof(void*), PAGE_READWRITE, &old);
