@@ -247,13 +247,17 @@ cost from "scales with overdraw" to "scales with blade vertex count."
 - In the VS: after computing `worldPos`, call the shadow-sampling
   functions there (they need `SHADOW_INVPROJ_REG`/`SHADOW_INVVIEW_REG` and
   the shadow map sampler — VS-side shadow map sampling requires
-  `tex2Dlod`/vertex-texture-fetch support; SM3.0 supports this on
-  vs_3_0 profile with `D3DUSAGE_DMAP`-style caveats — confirm the
-  existing shadow map texture is created with vertex-texture-fetch
-  compatible format/filtering. If VTF is unavailable in practice, fall
-  back to computing shadow at coarse per-vertex granularity via a
-  precomputed lower-res shadow term instead — this is the one open risk
-  in this item, resolve before implementing (see Risks).
+  `tex2Dlod`/vertex-texture-fetch support; SM3.0 supports this on the
+  vs_3_0 profile, but availability under DXVK's D3D9 layer is unverified.
+  Check this in-process, not with an external graphics debugger (RenderDoc
+  does not work with this game under DXVK): call
+  `IDirect3DDevice9::GetDeviceCaps` and inspect the VTF-related caps, or
+  call `CheckDeviceFormat` with `D3DUSAGE_QUERY_VERTEXTEXTURE` against the
+  shadow map's actual format, and log the result through the existing
+  `Logger` at startup. If VTF is unavailable in practice, fall back to
+  computing shadow at coarse per-vertex granularity via a precomputed
+  lower-res shadow term instead — this is the one open risk in this item,
+  resolve before implementing (see Risks).
 - Output a single `float sunShadow : TEXCOORD6` from VS to PS instead of
   `shadowWorldPos`.
 - PS: replace `GetShadowGeometricNormal`/`GetSunShadow` calls with the
@@ -268,10 +272,24 @@ cost from "scales with overdraw" to "scales with blade vertex count."
 
 **Files:** grass render-state setup (wherever vanilla currently sets
 `D3DRS_ALPHABLENDENABLE`/`D3DRS_ALPHATESTENABLE` for the grass pass — not
-found in NVR's own code, meaning it's native engine state; confirm exact
-call site via a RenderDoc/PIX state capture before writing this item,
-**do this first** since it determines whether this item is a state-value
-change or a bigger pixel-shader-output change).
+found in NVR's own code, meaning it's native engine state; confirm the
+actual values before writing this item, **do this first** since it
+determines whether this item is a state-value change or a bigger
+pixel-shader-output change).
+
+Confirm in-process, not with a graphics debugger — RenderDoc does not
+work with this game under DXVK, and PIX is Direct3D-native tooling that's
+equally unusable through the Vulkan translation layer. `Device.cpp:242`
+(`TESRDirect3DDevice9::SetRenderState`) is already a transparent
+pass-through, and `Logger.cpp:33` already has a `RENDERSTATETYPE` name
+table mapping state enums to readable strings (built for exactly this
+kind of diagnostic). Add a temporary log line in `SetRenderState`, gated
+on `grassShaderBound` (from GI-1) and filtered to the alpha/z-related
+states (`D3DRS_ALPHABLENDENABLE`, `D3DRS_ALPHATESTENABLE`,
+`D3DRS_ALPHAREF`, `D3DRS_ALPHAFUNC`, `D3DRS_ZWRITEENABLE`), dump to
+NVR's own log file during a play session near grass, then remove the
+instrumentation once the values are known. This runs entirely inside
+NVR's own DLL, so DXVK's translation is irrelevant to it.
 
 If grass currently blends: switch to `D3DRS_ALPHATESTENABLE = TRUE`,
 `D3DRS_ALPHABLENDENABLE = FALSE`, `D3DRS_ZWRITEENABLE = TRUE`, pick an
@@ -343,10 +361,13 @@ this is the concrete payoff of doing instancing first.
   matrix this project targets, particularly under DXVK (per this
   project's `CLAUDE.md` — DXVK translation quirks have already bitten
   input handling; verify they don't also affect VTF format/filter
-  support before committing to GO-1's design).
-- **GO-2 current render state unknown.** Must be captured via
-  RenderDoc/PIX before writing code — plan assumes blend-based grass but
-  this is unverified.
+  support before committing to GO-1's design). Check via
+  `GetDeviceCaps`/`CheckDeviceFormat` in-process, not a graphics debugger —
+  RenderDoc is not usable with this game under DXVK.
+- **GO-2 current render state unknown.** Must be established before
+  writing code — plan assumes blend-based grass but this is unverified.
+  Use the temporary `SetRenderState` logging described in GO-2, not
+  RenderDoc/PIX (neither works with this game under DXVK).
 - **Instance data key stability.** `GrassBatchKey` uses raw D3D9 resource
   pointers (mesh/index/texture). Need to confirm the engine doesn't
   reuse/recreate these pointers across cell loads in a way that would
