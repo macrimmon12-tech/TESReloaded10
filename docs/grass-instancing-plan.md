@@ -1,4 +1,4 @@
-# Grass Rendering: True Instancing + Overdraw Reduction — Plan & Spec
+# Grass Rendering: True Instancing + Distance/Angle Thinning — Plan & Spec
 
 ## Background
 
@@ -21,25 +21,34 @@ this doc's companion analysis) found two independent cost buckets:
    (`GetSunShadow`/`GetShadowGeometricNormal`, with `ddx`/`ddy`) and
    lighting math run once per overlapping blade layer per screen pixel.
 
-This plan attacks both, in order: real GPU instancing removes the 228 cap
-and collapses per-cell batch count (bucket 1), then three overdraw
-mitigations (bucket 2) ride on top of the same pipeline, and two further
-tricks (distance decimation, grazing-angle thinning) become nearly free
-once we own the per-frame instance list.
+This plan attacks bucket 1 directly: real GPU instancing removes the 228
+cap and collapses per-cell batch count. Two further tricks (distance
+decimation, grazing-angle thinning) become nearly free once we own the
+per-frame instance list, and both help with bucket 2 (overdraw) as a
+side effect — fewer rendered blades at range/grazing angles means less
+overlapping alpha work — without touching shaders or render state.
 
-**Explicitly out of scope for this plan:** LOD extension (rendering grass
-beyond the engine's own cutoff distance). That requires independently
-reproducing/approximating the engine's placement algorithm and is a
-separate, larger effort — see prior discussion. Nothing here blocks it,
-and the instance-buffer-ownership work in Phase 1 is a prerequisite for it,
-but it is not attempted here.
+**Explicitly out of scope for this plan:**
+- LOD extension (rendering grass beyond the engine's own cutoff
+  distance). That requires independently reproducing/approximating the
+  engine's placement algorithm and is a separate, larger effort — see
+  prior discussion. Nothing here blocks it, and the
+  instance-buffer-ownership work in Phase 1 is a prerequisite for it, but
+  it is not attempted here.
+- **Shader/render-state-level overdraw work** (moving shadow sampling to
+  the vertex shader, switching grass to alpha-test + depth-write, and the
+  front-to-back batch sort that only pays off once alpha-test is in
+  place). Dropped: the sort has no effect without the alpha-test switch,
+  and the alpha-test switch and the VS shadow move both need runtime
+  facts (current blend state, vertex-texture-fetch support) confirmed
+  before either is worth writing code for — that verification step is
+  being skipped for now. Revisit if bucket 2 turns out to matter more
+  than bucket 1 in practice (see the earlier profiling discussion — this
+  hasn't been measured yet either).
 
-**Sequencing:** Phase 1 (instancing) → Phase 2 (overdraw: shadow-to-vertex,
-alpha-test + ordering, front-to-back sort) → Phase 3 (distance decimation,
-grazing-angle thinning). Phase 2 items 2.1–2.3 do not strictly require
-Phase 1, but Phase 3 does, and validating Phase 2 against a real instanced
-draw path (rather than the soon-to-be-replaced constant-array path) avoids
-throwaway work. Build in this order.
+**Sequencing:** Phase 1 (instancing) → Phase 2 (distance decimation,
+grazing-angle thinning), which needs Phase 1's CPU-owned instance list to
+exist first. Build in this order.
 
 ---
 
@@ -194,8 +203,8 @@ the two-stream layout with `SetStreamSourceFreq` semantics — build once at
 init, reused for all four variants (same stream-1 layout across all of
 them).
 
-Pixel shaders (`GRASS23x000TMS.pso.hlsl` etc.) are unchanged in this
-phase — Phase 2's GI-2.1 touches them.
+Pixel shaders (`GRASS23x000TMS.pso.hlsl` etc.) are unchanged by this
+plan.
 
 ### GI-4 — Settings and fallback
 
@@ -226,103 +235,7 @@ and troubleshooting user reports.
 
 ---
 
-## Phase 2 — Overdraw Reduction (GO-1..GO-3)
-
-Builds on the streamed shaders from GI-3.
-
-### GO-1 — Move shadow sampling from pixel to vertex shader
-
-**Files:** `GRASS23x000S..003S.vso.hlsl`, `GRASS23x000TMS.pso.hlsl` (and
-the `002`/`003`-shared PS variant)
-
-Currently (per-fragment, in the PS): `GetShadowGeometricNormal` (uses
-`ddx`/`ddy`) and `GetSunShadow` (filtered shadow-map sample) run once per
-overlapping blade layer per pixel — the exact cost overdraw multiplies.
-
-Change: compute the shadow term per-vertex instead. Grass blade quads are
-low-poly (a handful of vertices per blade); per-vertex shadow evaluation
-is visually indistinguishable on thin foliage geometry and moves this
-cost from "scales with overdraw" to "scales with blade vertex count."
-
-- In the VS: after computing `worldPos`, call the shadow-sampling
-  functions there (they need `SHADOW_INVPROJ_REG`/`SHADOW_INVVIEW_REG` and
-  the shadow map sampler — VS-side shadow map sampling requires
-  `tex2Dlod`/vertex-texture-fetch support; SM3.0 supports this on the
-  vs_3_0 profile, but availability under DXVK's D3D9 layer is unverified.
-  Check this in-process, not with an external graphics debugger (RenderDoc
-  does not work with this game under DXVK): call
-  `IDirect3DDevice9::GetDeviceCaps` and inspect the VTF-related caps, or
-  call `CheckDeviceFormat` with `D3DUSAGE_QUERY_VERTEXTEXTURE` against the
-  shadow map's actual format, and log the result through the existing
-  `Logger` at startup. If VTF is unavailable in practice, fall back to
-  computing shadow at coarse per-vertex granularity via a precomputed
-  lower-res shadow term instead — this is the one open risk in this item,
-  resolve before implementing (see Risks).
-- Output a single `float sunShadow : TEXCOORD6` from VS to PS instead of
-  `shadowWorldPos`.
-- PS: replace `GetShadowGeometricNormal`/`GetSunShadow` calls with the
-  interpolated `IN.sunShadow` scalar multiply — removes both the
-  `ddx`/`ddy` call and the texture fetch from the pixel shader entirely.
-- Keep `SkyAmbient`'s per-pixel normal input working off the same
-  `shadowNormal` — if that also needs the geometric normal, compute it in
-  VS too and pass it interpolated (cheap, no derivatives needed once
-  computed per-vertex-in-VS instead of per-pixel-via-ddx).
-
-### GO-2 — Alpha-test instead of alpha-blend, opaque depth write
-
-**Files:** grass render-state setup (wherever vanilla currently sets
-`D3DRS_ALPHABLENDENABLE`/`D3DRS_ALPHATESTENABLE` for the grass pass — not
-found in NVR's own code, meaning it's native engine state; confirm the
-actual values before writing this item, **do this first** since it
-determines whether this item is a state-value change or a bigger
-pixel-shader-output change).
-
-Confirm in-process, not with a graphics debugger — RenderDoc does not
-work with this game under DXVK, and PIX is Direct3D-native tooling that's
-equally unusable through the Vulkan translation layer. `Device.cpp:242`
-(`TESRDirect3DDevice9::SetRenderState`) is already a transparent
-pass-through, and `Logger.cpp:33` already has a `RENDERSTATETYPE` name
-table mapping state enums to readable strings (built for exactly this
-kind of diagnostic). Add a temporary log line in `SetRenderState`, gated
-on `grassShaderBound` (from GI-1) and filtered to the alpha/z-related
-states (`D3DRS_ALPHABLENDENABLE`, `D3DRS_ALPHATESTENABLE`,
-`D3DRS_ALPHAREF`, `D3DRS_ALPHAFUNC`, `D3DRS_ZWRITEENABLE`), dump to
-NVR's own log file during a play session near grass, then remove the
-instrumentation once the values are known. This runs entirely inside
-NVR's own DLL, so DXVK's translation is irrelevant to it.
-
-If grass currently blends: switch to `D3DRS_ALPHATESTENABLE = TRUE`,
-`D3DRS_ALPHABLENDENABLE = FALSE`, `D3DRS_ZWRITEENABLE = TRUE`, pick an
-`D3DRS_ALPHAREF`/`D3DRS_ALPHAFUNC` (e.g. `D3DCMP_GREATEREQUAL`, ref
-~128) tuned against the current `OUT.color.a = saturate(albedo.a * 1.75f)
-* IN.sun.w` output in the PS (`GRASS23x000TMS.pso.hlsl`). This lets
-early-Z/hierarchical-Z reject fragments behind terrain or already-drawn
-opaque grass before the pixel shader runs — the direct fix for
-occluded-fragment overdraw. Requires grass to render after opaque
-terrain/object depth is already written (confirm current pass ordering;
-expected to already be true since grass sits visually on top of terrain).
-
-Visual risk: alpha-test edges are harder-cut than blended edges. Compare
-against current look; existing AA (SMAA, per `docs/` and prior branch
-work) should soften the transition. Flag as a visual regression risk to
-validate, not assume away.
-
-### GO-3 — Front-to-back batch sort
-
-**File:** `src/core/GrassInstancer.cpp` (`Flush()`, GI-2)
-
-Before issuing the per-key instanced draws in `Flush()`, sort the
-`frameAccumulator` keys by approximate camera distance (cheap: distance
-from camera to the centroid or first instance's `posScale.xyz` per key)
-and issue nearest-first. Maximizes how much of GO-2's early-Z rejection is
-actually realized — nearer opaque-tested grass occludes farther grass in
-the depth buffer before the farther batches are even shaded. Depends on
-GO-2 (alpha-test + depth-write) to have any effect; no benefit while
-still alpha-blending.
-
----
-
-## Phase 3 — Distance/Angle Thinning (GT-1..GT-2)
+## Phase 2 — Distance/Angle Thinning (GT-1..GT-2)
 
 Both are pure additions to `GrassInstancer::Flush()` (GI-2) — filtering
 the instance list before upload, no shader changes.
@@ -356,18 +269,6 @@ this is the concrete payoff of doing instancing first.
 
 ## Risks / Open Questions
 
-- **GO-1 vertex-texture-fetch availability.** Needs confirmation that the
-  shadow map is sampleable from `vs_3_0` (VTF) on the hardware/driver
-  matrix this project targets, particularly under DXVK (per this
-  project's `CLAUDE.md` — DXVK translation quirks have already bitten
-  input handling; verify they don't also affect VTF format/filter
-  support before committing to GO-1's design). Check via
-  `GetDeviceCaps`/`CheckDeviceFormat` in-process, not a graphics debugger —
-  RenderDoc is not usable with this game under DXVK.
-- **GO-2 current render state unknown.** Must be established before
-  writing code — plan assumes blend-based grass but this is unverified.
-  Use the temporary `SetRenderState` logging described in GO-2, not
-  RenderDoc/PIX (neither works with this game under DXVK).
 - **Instance data key stability.** `GrassBatchKey` uses raw D3D9 resource
   pointers (mesh/index/texture). Need to confirm the engine doesn't
   reuse/recreate these pointers across cell loads in a way that would
@@ -390,8 +291,5 @@ this is the concrete payoff of doing instancing first.
 - [ ] GI-3 — Streamed VS variants (000S–003S) + vertex declaration
 - [ ] GI-4 — `Instancing` setting + vanilla fallback path
 - [ ] GI-5 — Validation (visual parity, instance-count parity, draw-call/perf capture)
-- [ ] GO-1 — Shadow sampling moved VS-side (resolve VTF risk first)
-- [ ] GO-2 — Alpha-test + depth-write (capture current state first)
-- [ ] GO-3 — Front-to-back batch sort in `Flush()`
 - [ ] GT-1 — Distance-based decimation
 - [ ] GT-2 — Grazing-angle thinning
