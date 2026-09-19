@@ -165,8 +165,10 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.color_0.rgb = result;
     OUT.color_0.a = baseTex.a * MatAlpha.x;
 
-    // texkill.
-    clip(baseTex.a - MatAlpha.y);
+    // TEMP DIAGNOSTIC -- texkill disabled to test whether the hard alpha-test discard itself is
+    // what's producing the hard-cutoff strand edges (as opposed to a soft alpha BLEND vanilla
+    // may actually rely on). Reverted once answered.
+    // clip(baseTex.a - MatAlpha.y);
 
     return OUT;
 };
