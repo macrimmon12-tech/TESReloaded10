@@ -1,4 +1,11 @@
 
+// Must match [_Shaders.ShadowsExteriors.ShadowMaps] Mode, and SHADOW_FIXED_MODE in
+// Shaders/Includes/Shadow.hlsl which decodes what this writes.
+//   0 = VSM, 1 = EVSM2, 2 = EVSM4 (toml default)
+#ifndef SHADOW_FIXED_MODE
+    #define SHADOW_FIXED_MODE 2
+#endif
+
 float4 TESR_ShadowData : register(c0);
 float4 TESR_ShadowFormatData : register(c1);
 
@@ -44,35 +51,34 @@ PS_OUTPUT main(VS_OUTPUT IN) {
 	
 	float depth = IN.texcoord_0.z / IN.texcoord_0.w;
 
-	// TESR_ShadowFormatData.x : shadow mode
-	// 0: VSM
-	// 1: EVSM2
-	// 2: EVSM4
-    if (TESR_ShadowFormatData.x == 0.0f && !TESR_ShadowData.z) {
-		// VSM
-		// Cheat to reduce shadow acne in variance maps.
-        float dx = ddx(depth);
-        float dy = ddy(depth);
-        float moment2 = depth * depth + 0.25 * (dx * dx + dy * dy);
-        OUT.color_0 = float4(depth, moment2, 0.0f, 1.0f);
-    }
-    else if (TESR_ShadowFormatData.x == 1.0f && !TESR_ShadowData.z) {
-		// EVSM2
-		// Cheat to reduce shadow acne in variance maps.
-        float2 exponents = GetEVSMExponents(40.0f, 5.0f);
-        float2 evsm2 = WarpDepth(depth, exponents);
-        OUT.color_0 = float4(evsm2, 0.0f, 1.0f);
-    }
-    else if (TESR_ShadowFormatData.x == 2.0f && !TESR_ShadowData.z) {
-		// EVSM4
-		// Cheat to reduce shadow acne in variance maps.
-        float2 exponents = GetEVSMExponents(40.0f, 5.0f);
-        float2 evsm2 = WarpDepth(depth, exponents);
-        OUT.color_0 = float4(evsm2, evsm2 * evsm2);
-    }
-    else {
-		// Only depth.
+	// Mode is a session-wide setting, so it is resolved at COMPILE time. As a runtime branch
+	// ps_3_0 flattened it, and every shadow-map texel evaluated VSM, EVSM2 and EVSM4 before
+	// discarding two of them -- 40 instruction slots, down to 24 once folded.
+	//
+	// TESR_ShadowData.z stays a runtime test: it marks the ortho map, which is rendered in the
+	// same frame as the cascades and wants plain depth.
+	if (TESR_ShadowData.z) {
+		// Ortho map: only depth.
 		OUT.color_0 = float4(depth, 0.0f, 0.0f, 1.0f);
+	}
+	else {
+#if SHADOW_FIXED_MODE == 0
+		// VSM. Cheat to reduce shadow acne in variance maps.
+		float dx = ddx(depth);
+		float dy = ddy(depth);
+		float moment2 = depth * depth + 0.25 * (dx * dx + dy * dy);
+		OUT.color_0 = float4(depth, moment2, 0.0f, 1.0f);
+#elif SHADOW_FIXED_MODE == 1
+		// EVSM2
+		float2 exponents = GetEVSMExponents(40.0f, 5.0f);
+		float2 evsm2 = WarpDepth(depth, exponents);
+		OUT.color_0 = float4(evsm2, 0.0f, 1.0f);
+#else
+		// EVSM4
+		float2 exponents = GetEVSMExponents(40.0f, 5.0f);
+		float2 evsm2 = WarpDepth(depth, exponents);
+		OUT.color_0 = float4(evsm2, evsm2 * evsm2);
+#endif
 	}
 
 	return OUT;	

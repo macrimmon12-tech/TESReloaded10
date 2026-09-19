@@ -179,6 +179,34 @@ template <typename T> void ShaderManager::RegisterShaderCollection(T** Pointer)
 }
 
 
+/*
+ * Drops the cached texture pointer for a named sampler across EVERY loaded game shader.
+ *
+ * Counterpart to EffectRecord's per-effect ClearSampler. Call both whenever a TESR_ texture
+ * is released and recreated (see ShadowsExteriorEffect::RecreateTextures): each shader owns
+ * a private TextureRecord holding a raw IDirect3DTexture9*, which SetCT only re-resolves
+ * when it is null. Miss one and it keeps sampling the released texture -- which the D3D9
+ * device is usually still holding a reference to, so instead of failing it quietly returns
+ * the last contents that were rendered into it.
+ */
+void ShaderManager::ClearShaderSamplers(const char* TextureName, size_t Length)
+{
+	for (const auto& Entry : ShaderNames) {
+		ShaderCollection* Collection = Entry.second ? *Entry.second : nullptr;
+		if (!Collection) continue;
+
+		for (auto& VertexShader : Collection->VertexShaderList) {
+			for (int i = 0; i < 3; i++)  // Default / Exterior / Interior
+				if (VertexShader->ShaderProg[i]) VertexShader->ShaderProg[i]->ClearSampler(TextureName, Length);
+		}
+		for (auto& PixelShader : Collection->PixelShaderList) {
+			for (int i = 0; i < 3; i++)
+				if (PixelShader->ShaderProg[i]) PixelShader->ShaderProg[i]->ClearSampler(TextureName, Length);
+		}
+	}
+}
+
+
 void ShaderManager::RegisterConstant(const char* Name, D3DXVECTOR4* FloatValue)
 {
 	ConstantsTable[Name] = FloatValue;
@@ -246,7 +274,27 @@ void ShaderManager::UpdateConstants() {
 	GameState.isExterior = !currentCell->IsInterior();// || Player->parentCell->flags0 & TESObjectCELL::kFlags0_BehaveLikeExterior; // < use exterior flag, broken for now
 	GameState.isCellChanged = currentCell != PreviousCell;
 	PreviousCell = currentCell;
-	if (GameState.isCellChanged) TheSettingManager->SettingsChanged = true; // force update constants during cell transition
+	if (GameState.isCellChanged) {
+		TheSettingManager->SettingsChanged = true; // force update constants during cell transition
+		// Preset resolve+apply as early in this function as possible -- before
+		// anything below reads SettingsMain, so nothing this frame observes a
+		// stale value (docs/preset-manager-design.md § "Application mechanism").
+		//
+		// Gated on the master toggle and on ShouldReResolve, not on isCellChanged
+		// alone: Override presets are assigned per-worldspace outdoors (no
+		// per-cell keyword tier exists for exteriors), so re-resolving on every
+		// exterior cell border within the same worldspace was a no-op at best
+		// and, at worst, silently clobbered any live tweak that hadn't been
+		// saved yet the moment the player happened to cross one. ShouldReResolve
+		// keeps interiors at today's per-cell granularity and always re-resolves
+		// across an interior<->exterior boundary. The short-circuit order
+		// matters: ShouldReResolve has side effects (updates its cached "last
+		// resolved identity"), so it must not run while the master toggle is
+		// off, or re-enabling it later would see a stale-but-matching cache and
+		// skip the immediate resolve it needs to do.
+		if (TheSettingManager->SettingsMain.Main.PresetManagerEnabled && PresetManager::ShouldReResolve(currentCell))
+			PresetManager::ResolveAndApply(currentCell);
+	}
 
 	GameState.isUnderwater = Tes->sky->GetIsUnderWater();
 	GameState.isRainy = currentWeather?currentWeather->GetWeatherType() == TESWeather::WeatherType::kType_Rainy : false;
@@ -287,7 +335,21 @@ void ShaderManager::UpdateConstants() {
 
 	ShaderConst.SunPosition = SunRoot->m_localTransform.pos.toD3DXVEC4();
 	ShaderConst.SunPosition.w = 0.0f;
-	D3DXVec4Normalize(&ShaderConst.SunPosition, &ShaderConst.SunPosition);
+	// SunRoot (the sun disc's NiNode) is only positioned by the game's own sky-dome rendering,
+	// which only runs while an exterior sky is actually drawn. On a fresh process load straight
+	// into an interior save, before the player has ever seen an exterior sky this session, it
+	// sits at its post-load default -- a zero vector -- and D3DXVec4Normalize of a zero-length
+	// vector divides by zero, producing NaN. That NaN then poisons every downstream consumer of
+	// SunPosition, notably EvalSky's per-sample radiance in SkyShaders::UpdateConstants (Sky.cpp)
+	// -- every one of its 512 integration samples comes out NaN, so all 9 SH sky-irradiance
+	// coefficients do too, and PBR Skylighting goes dark (indoors AND out) until the player
+	// visits an exterior cell once and the sun disc gets a real position, matching the "only
+	// works after having been outdoors" symptom exactly -- and matches SkyDebug's logged
+	// Irradiance[0]=(nan,nan,nan) on a cold interior load.
+	if (D3DXVec4LengthSq(&ShaderConst.SunPosition) > 0.0001f)
+		D3DXVec4Normalize(&ShaderConst.SunPosition, &ShaderConst.SunPosition);
+	else
+		ShaderConst.SunPosition = D3DXVECTOR4(0.0f, 0.0f, 1.0f, 0.0f); // straight up: a safe, neutral default
 	ShaderConst.SunPosition.w = 1.0f;
 
 	ShaderConst.SunDir = Tes->directionalLight->direction.toD3DXVEC4() * -1.0f;
@@ -411,6 +473,11 @@ void ShaderManager::UpdateConstants() {
 		}
 	}
 
+	// The skin, hair and grass shaders route their light and ambient terms through
+	// TESR_PBRData (see Shaders/Includes/PBRScale.hlsl) and render black at a zero scale, so
+	// these constants stay current whether or not the PBR collection is enabled.
+	if (!Shaders.PBR->Enabled) Shaders.PBR->UpdateConstants();
+
 	// Underwater effect uses constants from the water shader
 	if (Effects.Underwater->Enabled && !Shaders.Water->Enabled) Shaders.Water->UpdateConstants();
 	if (!Effects.ShadowsExteriors->Enabled && Effects.ShadowsInteriors->Enabled) Effects.ShadowsExteriors->UpdateConstants(); // Interior and exterior shadows share settings
@@ -436,7 +503,13 @@ ShaderCollection* ShaderManager::GetShaderCollection(const char* Name) {
 	if (!memcmp(Name, "GRASS", 5)) return Shaders.Grass;
 	if (!memcmp(Name, "ISHDR", 5) || !memcmp(Name, "HDR", 3)) return Shaders.Tonemapping; // tonemapping shaders have different names between New vegas and Oblivion
 	if (!memcmp(Name, "PAR", 3)) return Shaders.POM;
-	//if (!memcmp(Name, "SKIN", 4)) return Shaders.Skin; // temporarily disabled, the shaders are half broken
+	if (!memcmp(Name, "SKIN", 4)) return Shaders.Skin;
+	// Hair (BSSM_3XLIGHTING_*) lives in the SM3 family, not HAIR*. Only SM3003 has a
+	// replacement on disk; the rest resolve to no file and fall through to vanilla.
+	if (!memcmp(Name, "SM3", 3)) return Shaders.PBR;
+	// SpeedTree leaves. STLEAF001/003.vso are vs_3_0 replacements, so every leaf PS must have
+	// a ps_3_0 replacement too: D3D9 rejects a 2.x VS paired with a 3.0 PS.
+	if (!memcmp(Name, "STLEAF", 6)) return Shaders.PBR;
 	if (!memcmp(Name, "SKY", 3)) return Shaders.Sky;
 	if (strstr(BloodShaders, Name)) return Shaders.Blood;
 
@@ -569,8 +642,17 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 
 	// save only the n first lights (based on #define TrackedLightsMax)
 	memset(&TheShaderManager->LightPosition, 0, TrackedLightsMax * sizeof(D3DXVECTOR4)); // clear previous lights from array
-	//memset(&ShadowsConstants->ShadowLightPosition, 0, ShadowCubeMapsMax * sizeof(D3DXVECTOR4)); // clear previous lights from array
+	// Must be cleared. The fill loop below only zeroes trailing slots once it runs out of scene
+	// lights; with more lights than slots it never reaches that branch, and a slot left holding
+	// last frame's position keeps GetPointLightAmount sampling a cubemap nobody redraws.
+	memset(&ShadowsConstants->ShadowLightPosition, 0, ShadowCubeMapsMax * sizeof(D3DXVECTOR4));
 	memset(&TheShaderManager->LightColor, 0, (TrackedLightsMax + ShadowCubeMapsMax) * sizeof(D3DXVECTOR4)); // clear previous lights from array
+
+	// ShadowManager::RenderShadowMaps only renders cubemaps for the first LightPoints slots.
+	// Filling past that gives the shader a live position and colour for a face that is never
+	// redrawn, so it samples whatever that cubemap last held -- a shadow frozen from an earlier
+	// frame or cell. Lights beyond the cap fall through to the non-shadowing tracked list.
+	const int ShadowLightsMax = min(Settings->LightPoints, (int)ShadowCubeMapsMax);
 
 	// get the data for all tracked lights
 	int ShadowIndex = 0;
@@ -638,7 +720,7 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 			D3DXVECTOR4 LightPos = Light->m_worldTransform.pos.toD3DXVEC4();
 			LightPos.w = radius;
 
-			if (CastShadow && ShadowIndex < ShadowCubeMapsMax && radius > 10) {
+			if (CastShadow && ShadowIndex < ShadowLightsMax && radius > 10) {
 				// add found light to list of lights that cast shadows
 				ShadowLightsList[ShadowIndex] = v->second;
 				ShadowsConstants->ShadowLightPosition[ShadowIndex] = LightPos;
@@ -708,6 +790,16 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 		RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.PointShadows, true);
 		if (Effects.ShadowsExteriors->Settings.Interiors.LightPoints > 6) RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.PointShadows2, false);
 		if (GameState.isExterior) RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.SunShadows, false);
+	}
+	else {
+		// Nothing above ran this frame, so ShadowPassSurface keeps whatever it last
+		// held -- e.g. an exterior sun-shadow composite, walked in from outdoors,
+		// frozen here for as long as this branch keeps being skipped (interior with
+		// Interior point-shadows off is the common case). It's still sampled
+		// unconditionally by other independently-enabled effects (Specular and
+		// others), so reset it to the neutral "no shadow" value rather than leaving
+		// stale exterior data for them to read.
+		Effects.ShadowsExteriors->clearShadowsBuffer();
 	}
 
 	Device->SetRenderTarget(0, RenderTarget);

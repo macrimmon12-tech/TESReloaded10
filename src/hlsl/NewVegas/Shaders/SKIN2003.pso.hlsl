@@ -41,6 +41,8 @@ float4 TESR_DebugVar;
 
 // Structures:
 
+#include "Includes/PBRScale.hlsl"
+
 struct VS_INPUT {
     float2 BaseUV : TEXCOORD0;			
     float3 color_0 : COLOR0;                        // vertex color?
@@ -80,14 +82,13 @@ VS_OUTPUT main(VS_INPUT IN) {
     float3 pointLightDirection = normalize(IN.texcoord_2);
     float atten1 = tex2D(AttenuationMap, IN.texcoord_4.xy).x;
     float atten2 = tex2D(AttenuationMap, IN.texcoord_4.zw).x;
-    float3 pointLightLighting = getPointLight(pointLightDirection, eyeDirection, PSLightColor[2].rgb, glowTexture, normal, atten1, atten2);
+    float3 pointLightLighting = getPointLight(pointLightDirection, eyeDirection, PBRLight(PSLightColor[2]).rgb, glowTexture, normal, atten1, atten2);
 
     // calculate lighting components
-    float3 lighting = GetLighting(lightDirection, eyeDirection, normal, PSLightColor[1].rgb);
-    float spec = GetSpecular(lightDirection, eyeDirection, normal, PSLightColor[1].rgb);
-    float3 sss = GetSSS(lightDirection, normal) * float3(0.5, 0.2, 0.3) * AmbientColor.rgb;
+    float3 lighting = GetLighting(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[1]).rgb);
+    float spec = GetSpecular(lightDirection, eyeDirection, normal, PBRLight(PSLightColor[1]).rgb);
 
-    lighting += sss + spec + pointLightLighting + AmbientColor.rgb;
+    lighting += spec + pointLightLighting + PBRAmbient(AmbientColor.rgb);
     float4 finalColor = float4(lighting * baseColor.rgb, baseColor.a * AmbientColor.a);
     finalColor.rgb = ApplyFog(finalColor.rgb, IN.color_1, Toggles);
 

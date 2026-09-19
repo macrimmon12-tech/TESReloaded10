@@ -55,11 +55,11 @@ void ShadowManager::Initialize() {
 NiNode* ShadowManager::GetRefNode(TESObjectREFR* Ref, ShadowsExteriorEffect::FormsStruct* Forms) {
 	
 	if (!Ref) return NULL;
-	NiNode* Node = Ref->GetNode();
-
-	if (!Node) return NULL;
 	if (Ref->flags & TESForm::FormFlags::kFormFlags_NotCastShadows) return NULL;
 
+	// The form filter runs before GetNode() and the extra-data walk below, both of which are the
+	// expensive part of this function. Called once per reference per cascade, so a reference the
+	// filter rejects should cost only the flag test and the switch.
 	TESForm* Form = Ref->baseForm;
 	UInt8 TypeID = Form->formType;
 	switch (TypeID) {
@@ -105,11 +105,18 @@ NiNode* ShadowManager::GetRefNode(TESObjectREFR* Ref, ShadowsExteriorEffect::For
 		break;
 	}
 
+	// GetNode() is a plain pointer read, so it stays here. The refraction test is NOT: it calls
+	// into the engine to walk the reference's extra-data list. Callers apply IsRefracting()
+	// after the cascade test instead, where only the references that survive it pay the cost --
+	// measured at roughly 2 acceptances per 3400 references for the Near cascade.
+	return Ref->GetNode();
+}
+
+// Split out of GetRefNode. Walks the extra-data list, so call it as late as possible.
+bool ShadowManager::IsRefracting(TESObjectREFR* Ref) {
 	ExtraRefractionProperty* RefractionExtraProperty = (ExtraRefractionProperty*)Ref->extraDataList.GetExtraData(BSExtraData::ExtraDataType::kExtraData_RefractionProperty);
 	float Refraction = RefractionExtraProperty ? (1 - RefractionExtraProperty->refractionAmount) : 0.0f;
-	if (Refraction >= 0.5) return NULL;
-
-	return Node;
+	return Refraction >= 0.5;
 }
 
 
@@ -128,9 +135,7 @@ bool ShadowManager::CheckShaderFlags(NiGeometry* Geometry) {
 
 
 // Detect which pass the object must be added to
-void ShadowManager::AccumObject(std::stack<NiAVObject*>* containersAccum, NiAVObject* NiObject, ShadowsExteriorEffect::FormsStruct* Forms, bool isLODLand) {
-	auto timelog = TimeLogger();
-
+void ShadowManager::AccumObject(NiAVObject* NiObject, ShadowsExteriorEffect::FormsStruct* Forms, bool isLODLand) {
 	NiGeometry* geo = static_cast<NiGeometry*>(NiObject);
 	if (!geo->shader) return; // skip Geometry without a shader
 
@@ -146,8 +151,6 @@ void ShadowManager::AccumObject(std::stack<NiAVObject*>* containersAccum, NiAVOb
 	else if (Forms->Lod && isLODLand && terrainLODPass->AccumObject(geo)) {}
 	else if (Forms->AlphaEnabled && alphaPass->AccumObject(geo)) {}
 	else geometryPass->AccumObject(geo);
-
-	//timelog.LogTime("ShadowManager::AccumObject");
 }
 
 
@@ -155,22 +158,24 @@ void ShadowManager::AccumObject(std::stack<NiAVObject*>* containersAccum, NiAVOb
 void ShadowManager::AccumChildren(NiAVObject* NiObject, ShadowsExteriorEffect::FormsStruct* Forms, bool isLand, bool isLOD, NiFrustumPlanes *arPlanes) {
 	if (!NiObject) return;
 
-	std::stack<NiAVObject*> containers;
+	std::vector<NiAVObject*>& containers = containersScratch;
+	containers.clear();
+
 	NiAVObject* child;
 	NiAVObject* object;
 	NiNode* Node;
 
 	//list all objects contained, or sort the object if not a container
 	if (!NiObject->IsGeometry())
-		containers.push(NiObject);
+		containers.push_back(NiObject);
 	else
-		AccumObject(&containers, NiObject, Forms, isLand && isLOD);
+		AccumObject(NiObject, Forms, isLand && isLOD);
 		
 
 	// Gather geometry
 	while (!containers.empty()) {
-    	object = containers.top();
-    	containers.pop();
+    	object = containers.back();
+    	containers.pop_back();
 
 		if (!object) continue;
 
@@ -186,9 +191,9 @@ void ShadowManager::AccumChildren(NiAVObject* NiObject, ShadowsExteriorEffect::F
 
 			child = Node->m_children.data[SwitchNode->m_iIndex];
 			if (!child->IsGeometry())
-				containers.push(child);
+				containers.push_back(child);
 			else
-				AccumObject(&containers, child, Forms, false);
+				AccumObject(child, Forms, false);
 			continue;
 		}
 
@@ -207,9 +212,9 @@ void ShadowManager::AccumChildren(NiAVObject* NiObject, ShadowsExteriorEffect::F
 
 			if (child->IsFadeNode() && static_cast<BSFadeNode*>(child)->FadeAlpha < 0.75f) continue; // stop rendering fadenodes below a certain opacity
 			if (!child->IsGeometry())
-				containers.push(child);
+				containers.push_back(child);
 			else
-				AccumObject(&containers, child, Forms, isLand && isLOD);
+				AccumObject(child, Forms, isLand && isLOD);
 		}
 	}
 }
@@ -275,7 +280,7 @@ void ShadowManager::RenderShadowMap(ShadowsExteriorEffect::ShadowMapSettings* Sh
 void ShadowManager::AccumExteriorCell(TESObjectCELL* Cell, ShadowsExteriorEffect::ShadowMapSettings* ShadowMap) {
 	if (!Cell || Cell->IsInterior())
 		return;
-	
+
 	if (ShadowMap->Forms.Terrain)
 		AccumChildren(Cell->GetChildNode(TESObjectCELL::kCellNode_Land), &ShadowMap->Forms, true, false, &ShadowMap->ShadowMapFrustumPlanes);
 
@@ -288,7 +293,7 @@ void ShadowManager::AccumExteriorCell(TESObjectCELL* Cell, ShadowsExteriorEffect
 			continue;
 		}
 
-		if (RefNode && RefNode->WithinFrustum(&ShadowMap->ShadowMapFrustumPlanes))
+		if (RefNode->WithinFrustum(&ShadowMap->ShadowMapFrustumPlanes) && !IsRefracting(Entry->item))
 			AccumChildren(RefNode, &ShadowMap->Forms, false, false, &ShadowMap->ShadowMapFrustumPlanes);
 
 		Entry = Entry->next;
@@ -492,7 +497,8 @@ void ShadowManager::RenderShadowCubeMap(ShadowSceneLight** Lights, UInt32 LightI
 
 					D3DXVec3Normalize(&ObjectToLight, &ObjectToLight);
 					bool inFront = D3DXVec3Dot(&ObjectToLight, &CameraDirection) > 0;
-					if (RefNode->GetDistance(LightPos) <= Radius + RefNode->GetWorldBoundRadius()) AccumChildren(RefNode, &Settings->Forms, false, false);
+					if (RefNode->GetDistance(LightPos) <= Radius + RefNode->GetWorldBoundRadius() && !IsRefracting(Entry->item))
+						AccumChildren(RefNode, &Settings->Forms, false, false);
 				}
 				Entry = Entry->next;
 			}
@@ -887,8 +893,15 @@ void ShadowManager::BlurShadowAtlas() {
 	
 	IDirect3DDevice9* Device = TheRenderManager->device;
     NiDX9RenderState* RenderState = TheRenderManager->renderState;
-    IDirect3DTexture9* SourceShadowMap = Shadows->ShadowAtlasTexture;
-    IDirect3DSurface9* TargetShadowMap = Shadows->ShadowAtlasSurface;
+
+	// Ping-pong: horizontal pass atlas -> scratch, vertical pass scratch -> atlas.
+	//
+	// Neither pass may sample the atlas while ShadowAtlasSurface -- level 0 of that same
+	// texture -- is the bound render target. Reading a bound render target is undefined in
+	// D3D9 and a read/write feedback loop on Vulkan under DXVK. This Gaussian is the only
+	// filtering the shadow maps get (the cascade lookup is a single tap), so anything that
+	// compromises it shows up directly as hard, unfiltered texels along every shadow edge.
+	if (!Shadows->ShadowAtlasBlurTexture || !Shadows->ShadowAtlasBlurSurface) return;
 
     Device->SetDepthStencilSurface(NULL);
     RenderState->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE, RenderStateArgs);
@@ -897,25 +910,32 @@ void ShadowManager::BlurShadowAtlas() {
     RenderState->SetPixelShader(ShadowMapBlurPixel->ShaderHandle, false);
 	RenderState->SetFVF(FrameFVF, false);
 	Device->SetStreamSource(0, Shadows->ShadowAtlasVertexBuffer, 0, sizeof(FrameVS));
-	Device->SetRenderTarget(0, TargetShadowMap);
-	
+
 	// Pass map resolution to shader as a constant
 	ShadowMapBlurPixel->SetShaderConstantF(0, &Shadows->Constants.ShadowBlur, 1);
-	RenderState->SetTexture(0, SourceShadowMap);
 
-	// blur in two passes, vertically and horizontally
+	// blur in two passes, horizontally then vertically
 	D3DXVECTOR4 Blur[2] = {
 		D3DXVECTOR4(1.0f, 0.0f, 0.0f, 0.0f),
 		D3DXVECTOR4(0.0f, 1.0f, 0.0f, 0.0f),
 	};
+	IDirect3DTexture9* Source[2] = { Shadows->ShadowAtlasTexture, Shadows->ShadowAtlasBlurTexture };
+	IDirect3DSurface9* Target[2] = { Shadows->ShadowAtlasBlurSurface, Shadows->ShadowAtlasSurface };
 
 	for (int i = 0; i < 2; i++) {
+		// Unbind the previous pass's target before it becomes this pass's source, so the
+		// two are never bound as texture and render target at the same time.
+		RenderState->SetTexture(0, nullptr);
+		Device->SetRenderTarget(0, Target[i]);
+		RenderState->SetTexture(0, Source[i]);
+
 		// set blur direction shader constants
 		ShadowMapBlurPixel->SetShaderConstantF(1, &Blur[i], 1);
 
 		Device->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2); // draw call to execute the shader
 	}
 
+	RenderState->SetTexture(0, nullptr);
 	RenderState->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE, RenderStateArgs);
     RenderState->SetRenderState(D3DRS_ZWRITEENABLE, D3DZB_TRUE, RenderStateArgs);
 }

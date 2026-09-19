@@ -4,9 +4,7 @@
 
 sampler2D AttenuationMap : register(s3);
 sampler2D NormalMap : register(s0);
-float4 PSLightColor[10];
-
-
+float4 PSLightColor[10] : register(c3);
 // Registers:
 //
 //   Name           Reg   Size
@@ -17,7 +15,18 @@ float4 PSLightColor[10];
 //
 
 
+// --- register aliases --------------------------------------------------------
+// const_N names a raw register cN. Engine constants are aliased to their declared names
+// below; def immediates are recovered from the vanilla bytecode. A register the shader
+// defs takes the literal, NOT the engine constant that shares its number.
+static const float4 const_2 = float4(0.3, 0, 0, 0);
+#define const_3 PBRLight(PSLightColor[0])
+#define const_4 PBRLight(PSLightColor[1])
+// -----------------------------------------------------------------------------
+
 // Structures:
+
+#include "Includes/PBRScale.hlsl"
 
 struct VS_INPUT {
     float3 texcoord_1 : TEXCOORD1_centroid;			// partial precision
@@ -91,7 +100,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     r3.xyz = const_2.xyz;			// partial precision
     r3.w = -0.5;
     q14.xyz = (q7.x * const_4.xyz) + ((q12.x * shades(q10.xyz, -q5.xyz)) * lerp(const_4.xyz, r3.xyz, -r3.w));			// partial precision
-    r1.yzw = (const_3.wzyx * q17.x) + ((q12.x * shades(q10.xyz, -q15.xyz)) * lerp(const_3.wzyx, r3.wzyx, -r3.w));			// partial precision
+    r1.yzw = (const_3.zyx * q17.x) + ((q12.x * shades(q10.xyz, -q15.xyz)) * lerp(const_3.zyx, r3.zyx, -r3.w));			// partial precision
     q258.xyz = (saturate(((3 - (q18.x * 2)) * sqr(q18.x)) - ((3 - (q17.x * 2)) * sqr(q17.x))) * const_2.xyz) + r1.wzy;			// partial precision
     q44.xyz = (r0.w * q258.xyz) + (((q9.x * const_2.xyz) + q14.xyz) * saturate((1 - att1.x) - att13.x));			// partial precision
     OUT.color_0.a = 1;			// partial precision

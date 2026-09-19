@@ -16,7 +16,8 @@ public:
 
 	NiNode*					GetRefNode(TESObjectREFR* Ref, ShadowsExteriorEffect::FormsStruct* Forms);
 	void					AccumChildren(NiAVObject* NiObject, ShadowsExteriorEffect::FormsStruct* Forms, bool isLand, bool isLOD, NiFrustumPlanes* arPlanes = nullptr);
-	void					AccumObject(std::stack<NiAVObject*>* containersAccum, NiAVObject* NiObject, ShadowsExteriorEffect::FormsStruct* Forms, bool isLODLand);
+	bool					IsRefracting(TESObjectREFR* Ref);
+	void					AccumObject(NiAVObject* NiObject, ShadowsExteriorEffect::FormsStruct* Forms, bool isLODLand);
 	void					RenderAccums();
 	void					RenderShadowMap(ShadowsExteriorEffect::ShadowMapSettings* ShadowMap, D3DXMATRIX* ViewProj);
 	void					AccumExteriorCell(TESObjectCELL* Cell, ShadowsExteriorEffect::ShadowMapSettings* ShadowMap);
@@ -45,6 +46,9 @@ public:
 	ShaderRecordVertex*		CurrentVertex;
 	ShaderRecordPixel*		CurrentPixel;
 	bool					AlphaEnabled;
+	// Reused by AccumChildren. That runs per reference, per cell, per cascade, and a fresh
+	// std::stack allocated a deque block on every call; clear() keeps the capacity.
+	std::vector<NiAVObject*>	containersScratch;
 	int						PointLightsNum;
 	float					shadowMapsRenderTime;
 	bool					ShadowShadersLoaded;

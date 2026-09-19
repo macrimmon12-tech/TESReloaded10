@@ -8,6 +8,8 @@
 
 #include "includes/Helpers.hlsl"
 #include "includes/Terrain.hlsl"
+#include "includes/Shadow.hlsl"
+
 
 struct VS_INPUT {
     float4 position : POSITION;
@@ -22,6 +24,7 @@ struct VS_OUTPUT {
     float3 sunDirection : TEXCOORD1;
     float3 lPosition : TEXCOORD2;
     float3 eyePosition : TEXCOORD3;
+    float3 shadowWorldPos : TEXCOORD4;   // TEXCOORD4-7 unused by this template
 };
 
 #ifdef VS
@@ -64,6 +67,7 @@ VS_OUTPUT main(VS_INPUT IN) {
 
     OUT.lPosition.xyz = posLS.xyz;
     OUT.eyePosition.xyz = EyePosition.xyz;
+    OUT.shadowWorldPos = GetShadowWorldPos(posPS);
 
     return OUT;
 };
@@ -78,6 +82,7 @@ struct PS_INPUT
     float3 sunDirection : TEXCOORD1_centroid;
     float3 lPosition : TEXCOORD2_centroid;
     float3 eyePosition : TEXCOORD3_centroid;
+    float3 shadowWorldPos : TEXCOORD4_centroid;
 };
 
 struct PS_OUTPUT {
@@ -97,6 +102,7 @@ float4 PSLightColor : register(c3);
 float4 LODTexParams : register(c31);
 
 float4 LandLODSpec : register(c38);
+
 
 static const float fUVScale = 1.f / 128.f;
 static const float fUVScaleQuant = 127.f / 128.f;
@@ -125,7 +131,13 @@ PS_OUTPUT main(PS_INPUT IN) {
     
     float3 eyeDir = normalize(IN.eyePosition.xyz - IN.lPosition.xyz);
     
-    float3 lighting = getSunLighting(IN.sunDirection.xyz, PSLightColor.rgb, eyeDir, normal.xyz, AmbientColor.rgb, baseColor, normal.a, LandLODSpec.x);
+    // Forward sun shadows. Passed as parallaxMultiplier, which getSunLighting applies to
+    // the sun colour only; ambient is added afterwards and stays untouched.
+    // ddx/ddy must stay at top level, outside dynamic flow control.
+    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos);
+    float sunShadow = FORWARD_SHADOWS ? GetSunShadow(IN.shadowWorldPos, shadowNormal) : 1.0f;
+
+    float3 lighting = getSunLighting(IN.sunDirection.xyz, PSLightColor.rgb, eyeDir, normal.xyz, AmbientColor.rgb, baseColor, normal.a, LandLODSpec.x, 1.0, sunShadow, shadowNormal);
 
     float3 final = lighting;
     final = lerp(final, final * (0.8 * noise + 0.55), saturate(TESR_TerrainExtraData.z)); // Apply noise.

@@ -6,9 +6,17 @@
 // Geometric specular AA
 // http://www.jp.square-enix.com/tech/library/pdf/ImprovedGeometricSpecularAA.pdf
 // https://www.jcgt.org/published/0010/02/02/paper.pdf
-float SpecularAA(float3 normal, float roughness, float sigma, float kappa) {
-    float SIGMA2 = 0.15915494;
-    float KAPPA = 0.18;
+//
+// Widens roughness where the NORMAL varies fast across a pixel's screen-space footprint --
+// exactly what a high-frequency normal map (hair, being the sharpest example NVR ships) does.
+// Without this, a GGX peak scales roughly as 1/roughness^4: two adjacent texels whose gloss
+// differs by 10 points (0.85 vs 0.95) put out about an 80x difference in peak brightness, pure
+// per-texel noise the material texture never intended anyone to resolve. In ObjectTemplate.hlsl
+// that noise is the HAIR (ONLY_SPECULAR) pass's own alpha-blend weight, so it showed up as a
+// splotchy, moth-eaten alpha pattern rather than as a shimmer in the highlight itself.
+float SpecularAA(float3 normal, float roughness) {
+    const float SIGMA2 = 0.15915494;
+    const float KAPPA = 0.18;
     float3 dndu = ddx(normal);
     float3 dndv = ddy(normal);
     float variance = SIGMA2 * (dot(dndu, dndu) + dot(dndv, dndv));
@@ -74,20 +82,18 @@ float3 BRDF(float roughness, float3 fresnel, float NdotV, float NdotL, float Ndo
 }
 
 float3 PBRDiffuse(float metallicness, float roughness, float3 albedo, float3 normal, float3 eyeDir, float3 lightDir, float3 lightColor) {
-    const float3 reflectance = lerp(float(0.04).rrr, albedo, metallicness);
-    
     normal = normalize(normal);
-    eyeDir = normalize(eyeDir);
     lightDir = normalize(lightDir);
-    
-    const float3 halfway = normalize(eyeDir + lightDir);
+
     const float NdotL = shades(normal, lightDir);
-    const float LdotH = shades(lightDir, halfway);
-    
-    const float3 fresnel = Fresnel(reflectance, (1.0).xxx, LdotH);
-    
-    const float3 diffuse = (1 - metallicness) * LambertianDiffuse(albedo, fresnel);
-    
+
+    // No Fresnel. These permutations render no specular lobe, so energy taken out of diffuse
+    // has nowhere to reappear -- PBRSun returns it as spec * NdotS, this path just loses it.
+    // (1 - LdotH)^5 then drives the surface to black as eyeDir approaches -lightDir, where
+    // normalize(eyeDir + lightDir) is singular besides. Dropping the term removes the last
+    // view dependence, which is what a purely Lambertian material should have.
+    const float3 diffuse = (1 - metallicness) * albedo / PI;
+
     return diffuse * NdotL * lightColor * PI;
 }
 

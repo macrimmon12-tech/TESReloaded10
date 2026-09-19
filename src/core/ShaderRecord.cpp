@@ -24,6 +24,28 @@ ShaderRecord::ShaderRecord() {
 }
 ShaderRecord::~ShaderRecord() {}
 
+/*
+ * Unbinds a named sampler's cached texture so it is re-resolved on the next SetCT.
+ *
+ * TextureRecord caches a raw IDirect3DTexture9* and SetCT only calls BindTexture when that
+ * pointer is null, so a texture that gets Release()d and recreated leaves every consumer
+ * holding a dangling pointer. Each ShaderTextureValue owns its own TextureRecord (see
+ * ShaderTextureValue::GetTextureRecord), so there is no shared record to invalidate -- every
+ * consumer has to be cleared individually.
+ */
+void ShaderProgram::ClearSampler(const char* TextureName, size_t Length) {
+	ShaderTextureValue* Sampler;
+	for (UInt32 c = 0; c < TextureShaderValuesCount; c++) {
+		Sampler = &TextureShaderValues[c];
+		// GetTextureRecord bails without assigning Texture when the sampler type is
+		// unrecognised, so this can legitimately be null.
+		if (!Sampler->Texture) continue;
+		if (!memcmp(Sampler->Name, TextureName, Length) && Sampler->Texture->Texture) {
+			Sampler->Texture->Texture = nullptr;
+		}
+	}
+}
+
 void ShaderProgram::ReportError(HRESULT result) {
 	if (result == E_ABORT) Logger::Log("Operation aborted");
 	if (result == E_ACCESSDENIED) Logger::Log("Access Denied");
@@ -133,15 +155,70 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	strcat(ShaderCompiledPath, Name);
 
 	D3DXMACRO* Macros = &(Template.Defines[0]);
-	if (TheRenderManager->IsReversedDepth()) {
+
+	// Append a define to the template, keeping the array null-terminated.
+	auto AppendDefine = [&Template](const char* Name, const char* Definition) {
 		int i = 0;
-		bool nullFound = false;
-		while (!nullFound && i < 28) {
-			nullFound = Template.Defines[i].Name == NULL;
-			if (!nullFound) i++;
+		while (i < 28 && Template.Defines[i].Name != NULL) i++;
+		if (i >= 28) return;  // out of room; silently skip rather than overrun
+		Template.Defines[i] = { Name, Definition };
+		Template.Defines[i + 1] = { NULL, NULL };
+	};
+
+	if (TheRenderManager->IsReversedDepth())
+		AppendDefine("REVERSED_DEPTH", "");
+
+	// Forward sun shadows. Read straight from the setting manager rather than from the
+	// ShadowsExteriors effect, because shaders can be loaded before that effect is built.
+	//
+	// This governs whether the forward path is compiled in at all, so that builds which do not
+	// want it pay nothing for it. Whether it RUNS is a separate, runtime decision made by
+	// TESR_ShadowForwardData -- see ShadowsExteriorEffect::UpdateSettings. Changing the setting
+	// alters the preprocessed source, so CheckPreprocessResult recompiles on next load.
+	AppendDefine("FORWARD_SHADOWS",
+		TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows") ? "1" : "0");
+
+	// Which skylighting model is compiled in. 0 = spherical harmonic irradiance, 1 = the older
+	// single directional sample. Compile time rather than a runtime branch: ps_3_0 flattens
+	// branches like this, so a runtime switch would make every lit pixel pay for BOTH paths.
+	// Changing the setting alters the preprocessed source, so the cache recompiles on next load.
+	AppendDefine("SKYLIGHTING_MODE",
+		TheSettingManager->GetSettingI("Shaders.PBR.Main", "SkylightingMode") ? "1" : "0");
+
+	// Shadow atlas encoding: 0 = VSM, 1 = EVSM2, 2 = EVSM4. Compile time for the same reason as
+	// above -- Shadow.hlsl's GetSunShadow and ShadowMap.pso both branch on it with #if, not a
+	// runtime read, since ps_3_0 would otherwise flatten all three variants into every shadowed
+	// pixel. Read straight from the setting manager rather than from the ShadowsExteriors
+	// effect, same reasoning as FORWARD_SHADOWS above.
+	//
+	// Must mirror ShadowsExteriorEffect::UpdateSettingsFromQuality's Quality -> Mode mapping:
+	// Quality 0/1 -> VSM, 2 -> EVSM2, 3 -> EVSM4. Quality 4 (Custom) reads Mode directly, same
+	// as UpdateSettingsFromQuality does for that case. Previously this was never defined, so it
+	// silently fell back to Shadow.hlsl's own "#ifndef SHADOW_FIXED_MODE -> 2" default: every
+	// shader was compiled assuming EVSM4 regardless of Quality, so GetSunShadow's
+	// "TESR_ShadowFormatData.x != SHADOW_FIXED_MODE" check only ever matched at Quality 3/Full,
+	// and forward shadows silently no-op'd (return unshadowed) at every other quality level.
+	{
+		int quality = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Quality");
+		int shadowMode;
+		switch (quality) {
+		case 0:
+		case 1:
+			shadowMode = 0; // VSM
+			break;
+		case 2:
+			shadowMode = 1; // EVSM2
+			break;
+		case 3:
+			shadowMode = 2; // EVSM4
+			break;
+		default: // 4 (Custom), or an out-of-range value -- fall back to the raw setting.
+			shadowMode = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.ShadowMaps", "Mode");
+			if (shadowMode < 0) shadowMode = 0;
+			if (shadowMode > 2) shadowMode = 2;
+			break;
 		}
-		Template.Defines[i] = { "REVERSED_DEPTH", "" };
-		Template.Defines[i + 1] = { NULL, NULL }; // Ensure null termination
+		AppendDefine("SHADOW_FIXED_MODE", shadowMode == 0 ? "0" : shadowMode == 1 ? "1" : "2");
 	}
 
 	HRESULT prepass = D3DXPreprocessShaderFromFileA(ShaderSourcePath, Macros, NULL, &ShaderSource, &Errors);

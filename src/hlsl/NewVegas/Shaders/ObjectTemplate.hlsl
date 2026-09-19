@@ -150,6 +150,10 @@
 
 #include "includes/Helpers.hlsl"
 #include "includes/Object.hlsl"
+#include "includes/Shadow.hlsl"
+
+// Forward sun shadows. Enabled at COMPILE TIME via FORWARD_SHADOWS in Includes/Shadow.hlsl,
+// deliberately not via a runtime constant -- see the note there.
 
 #ifdef SKIN
     #include "includes/SkinHelpers.hlsl"
@@ -198,7 +202,16 @@ struct VS_OUTPUT {
 #endif
     
     float3 viewDir : TEXCOORD6;
-    
+
+    // Object-space squared distances for point-light attenuation (vanillaAttSq), bypassing
+    // lightDir/light2Dir/light3Dir above -- those are tangent-space (TBN-transformed) and their
+    // length is only correct if the TBN basis is orthonormal. .x = light0 (DIFFUSE/POINT only,
+    // where light0 is itself a point light rather than the sun), .y = light2, .z = light3.
+    float3 lightDistSq : TEXCOORD5;
+
+    // TEXCOORD4 is free at LIGHTS < 4. .w carries SHADOW_VS_SENTINEL.
+    float4 shadowWorldPos : TEXCOORD4;
+
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
@@ -226,11 +239,16 @@ float4 EyePosition : register(c16);
     float4 ShadowProjTransform : register(c23);
 #endif
 
-float4 TESR_DebugVar : register(c40);
 
 VS_OUTPUT main(VS_INPUT IN) {
     VS_OUTPUT OUT;
-    
+
+    // Zeroed unconditionally: the DIFFUSE/POINT (.x) and LIGHTS>1/LIGHTS>2 (.y/.z) blocks below
+    // only overwrite the components they actually use, and vs_3_0 requires every component of
+    // OUT to be written before return -- a component that stays at this default is simply never
+    // read by the PS either (same macro guards on both sides).
+    OUT.lightDistSq = 0;
+
     OUT.uv = IN.uv.xy;
     
     float4 position = IN.position.xyzw;
@@ -253,25 +271,28 @@ VS_OUTPUT main(VS_INPUT IN) {
     
     #if defined(DIFFUSE) || defined(POINT)
         float3 light = LightData[0].xyz - position.xyz;
+        OUT.lightDistSq.x = dot(light, light);
     #else
         float3 light = LightData[0].xyz;
     #endif
-    
+
     OUT.lightDir.w = LightData[0].w;
     OUT.lightDir.xyz = mul(tbn, light);
-    
+
     OUT.viewDir.xyz = mul(tbn, EyePosition.xyz - position.xyz);
-    
+
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
         light = LightData[1].xyz - position.xyz;
         OUT.light2Dir.w = LightData[1].w;
         OUT.light2Dir.xyz = mul(tbn, light);
+        OUT.lightDistSq.y = dot(light, light);
     #endif
-    
+
     #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
         light = LightData[2].xyz - position.xyz;
         OUT.light3Dir.w = LightData[2].w;
         OUT.light3Dir.xyz = mul(tbn, light);
+        OUT.lightDistSq.z = dot(light, light);
     #endif
     
     #ifndef NO_VERTEX_COLOR
@@ -300,6 +321,10 @@ VS_OUTPUT main(VS_INPUT IN) {
         OUT.shadowUVs.zw = ((shadowUV.xy - ShadowProjData.xy) / ShadowProjData.w) * float2(1, -1) + float2(0, 1);
     #endif
 
+    // Model-space shaders: recover a camera-relative world position from the clip position.
+    // Written unconditionally, or the interpolator is left undefined.
+    OUT.shadowWorldPos = float4(GetShadowWorldPos(OUT.sPosition), SHADOW_VS_SENTINEL);
+
     return OUT;
 };
 
@@ -311,6 +336,22 @@ VS_OUTPUT main(VS_INPUT IN) {
     #define MAX_LIGHTS 4
 #else
     #define MAX_LIGHTS 3
+#endif
+
+// Camera-relative world position carrier. At MAX_LIGHTS 6 every TEXCOORD is taken, so it
+// rides in light4/5/6's .w -- a light radius the PS never reads, since attenuation uses
+// PSLightPosition[i].w. Below that, a free interpolator.
+#if MAX_LIGHTS > 4
+    // No fourth channel spare here, so the sentinel rides in lPosition.w. The vertex shader
+    // normally puts LightData[0].w there and this pixel shader never reads it.
+    #define SHADOW_WP_STORE(O, v) O.light4.w = (v).x; O.light5.w = (v).y; O.light6.w = (v).z; O.lPosition.w = SHADOW_VS_SENTINEL
+    #define SHADOW_WP_LOAD(I)     float3((I).light4.w, (I).light5.w, (I).light6.w)
+    #define SHADOW_WP_VALID(I)    SHADOW_VS_PRESENT((I).lPosition.w)
+#else
+    #define SHADOW_WP_DEDICATED
+    #define SHADOW_WP_STORE(O, v) O.shadowWorldPos = float4((v), SHADOW_VS_SENTINEL)
+    #define SHADOW_WP_LOAD(I)     (I).shadowWorldPos.xyz
+    #define SHADOW_WP_VALID(I)    SHADOW_VS_PRESENT((I).shadowWorldPos.w)
 #endif
 
 struct VS_OUTPUT {
@@ -328,6 +369,13 @@ struct VS_OUTPUT {
 #if MAX_LIGHTS > 4
     float4 light5 : TEXCOORD6;
     float4 light6 : TEXCOORD7;
+#endif
+#ifdef SHADOW_WP_DEDICATED
+    #if MAX_LIGHTS > 3
+        float4 shadowWorldPos : TEXCOORD6;
+    #else
+        float4 shadowWorldPos : TEXCOORD5;
+    #endif
 #endif
 };
 
@@ -431,6 +479,11 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.fogColor.a = exp2(fogStrength * FogParam.z);
     OUT.fogColor.rgb = FogColor.rgb;
 
+    // Through SHADOW_WP_STORE: at MAX_LIGHTS 6 this overwrites light4/5/6's .w, which the PS
+    // ignores.
+    float3 shadowWorldPos = GetShadowWorldPos(OUT.sPosition);
+    SHADOW_WP_STORE(OUT, shadowWorldPos);
+
     return OUT;
 };
 #endif // Vertex shaders.
@@ -453,6 +506,8 @@ struct PS_INPUT {
     float4 light3Dir : TEXCOORD3_centroid;
 #endif
     float3 viewDir : TEXCOORD6_centroid;
+    float3 lightDistSq : TEXCOORD5;
+    float4 shadowWorldPos : TEXCOORD4;
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
@@ -501,7 +556,6 @@ float4 PSLightColor[10] : register(c3);
     float4 Toggles : register(c27);
 #endif
 
-float4 TESR_DebugVar : register(c40);
 
 PS_OUTPUT main(PS_INPUT IN) {
     PS_OUTPUT OUT;
@@ -524,10 +578,12 @@ PS_OUTPUT main(PS_INPUT IN) {
     normal.xyz = normalize(expand(normal.xyz));
     
     float roughness = getRoughness(normal.a);
-    
-    //if (TESR_DebugVar.x > 0.0)
-    //    roughness = SpecularAA(normal.xyz, roughness, TESR_DebugVar.z, TESR_DebugVar.w);
-    
+
+    // Geometric specular AA -- see the comment on SpecularAA itself. Unconditional: this is a
+    // quality fix for high-frequency normal maps (hair chief among them), not a debug toggle,
+    // and ddx/ddy have to run here at top level regardless of anything below.
+    roughness = SpecularAA(normal.xyz, roughness);
+
     //if (TESR_DebugVar.y > 0.0) {
     //    OUT.color.a = 1;
     //    if (TESR_DebugVar.y > 0.1)
@@ -558,11 +614,35 @@ PS_OUTPUT main(PS_INPUT IN) {
         shadowMultiplier = lerp(1, shadow, shadowMask);
     #endif
     
+    // Applied to PSLightColor[0], the sun, only: ambient, emittance and point lights are
+    // untouched. ddx/ddy must stay at top level, outside any dynamic branch.
+    //
+    // Computed once here and reused by the ambient block further down (that block's condition,
+    // !DIFFUSE && !ONLY_SPECULAR, is a strict subset of this one, since POINT implies
+    // ONLY_SPECULAR) -- two separate ddx/ddy evaluations of the identical
+    // GetShadowGeometricNormal(IN.shadowWorldPos.xyz) call previously coexisted in the same
+    // pixel shader whenever FORWARD_SHADOWS was compiled in, which is fragile enough on its own
+    // to corrupt unrelated interpolator reads placed nearby.
+    #if !defined(DIFFUSE) && !defined(POINT)
+        float3 shadowGeometricNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+        // Decline to shadow if a vanilla vertex shader ran: the interpolator is undefined.
+        float sunShadow = 1.0f;
+        #if FORWARD_SHADOWS
+        sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
+                  ? GetSunShadow(IN.shadowWorldPos.xyz, shadowGeometricNormal)
+                  : 1.0f;
+        #endif
+        shadowMultiplier *= sunShadow;
+    #endif
+
     #if !defined(DIFFUSE) && !defined(POINT)
         float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #else
-        // Pointlights only.
-        float3 lighting = getPointLightLighting(IN.lightDir.xyz, IN.lightDir.w, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        // Pointlights only. Attenuate from the object-space lightDistSq.x carried from the VS,
+        // not length(IN.lightDir.xyz) -- that vector is tangent-space (TBN-transformed) and its
+        // length is only correct if the TBN basis is orthonormal.
+        float att0 = vanillaAttSq(IN.lightDistSq.x, IN.lightDir.w);
+        float3 lighting = getPointLightLightingAtt(IN.lightDir.xyz, att0, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
     // Self emmitance.
@@ -572,16 +652,21 @@ PS_OUTPUT main(PS_INPUT IN) {
     #endif
     
     #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
-        lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb);
+        // Reuses shadowGeometricNormal computed above -- see the comment there. Always in scope
+        // here: POINT implies ONLY_SPECULAR, so !ONLY_SPECULAR implies !POINT.
+        lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, shadowGeometricNormal,
+                                       SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
     #endif
-    
-    // Other light sources.
+
+    // Other light sources. Same object-space attenuation fix as light0 above.
     #if LIGHTS > 1 || NUM_PT_LIGHTS > 1
-        lighting += getPointLightLighting(IN.light2Dir.xyz, IN.light2Dir.w, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        float att2 = vanillaAttSq(IN.lightDistSq.y, IN.light2Dir.w);
+        lighting += getPointLightLightingAtt(IN.light2Dir.xyz, att2, PSLightColor[1].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
-    
+
     #if LIGHTS > 2 || NUM_PT_LIGHTS > 2
-        lighting += getPointLightLighting(IN.light3Dir.xyz, IN.light3Dir.w, PSLightColor[2].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        float att3 = vanillaAttSq(IN.lightDistSq.z, IN.light3Dir.w);
+        lighting += getPointLightLightingAtt(IN.light3Dir.xyz, att3, PSLightColor[2].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
     float3 finalColor = lighting.rgb;
@@ -595,12 +680,32 @@ PS_OUTPUT main(PS_INPUT IN) {
         #endif
     #endif
     
+
+#if SHADOW_FORCE_MARKER
+    finalColor.rgb = float3(1.0f, 0.0f, 1.0f);   // unconditional: proves this shader ran
+#endif
+
     OUT.color.rgb = finalColor.rgb;
     
     #if defined(DIFFUSE)
         OUT.color.a = 1;
     #elif defined(ONLY_SPECULAR)
-        OUT.color.a = weight(finalColor.rgb);
+        #if !defined(DIFFUSE) && !defined(POINT)
+            // Alpha here is a blend WEIGHT (this pass's own brightness, used to fade
+            // its additive specular/sheen layer smoothly), not a darkness value --
+            // unlike the colour output, it must not shrink with sun shadow, or the
+            // whole layer fades toward invisible in shadow instead of just going
+            // dark. That read as "alpha blending broken" under Forward Shadows
+            // specifically, because sunShadow is the one new factor it added to
+            // shadowMultiplier here (STBB/PROJ_SHADOW's own contribution predates
+            // this and is left alone). Dividing it back out recovers the weight
+            // this pass would have produced without Forward Shadows; harmless and
+            // exact when Forward Shadows is compiled out, since sunShadow is then
+            // fixed at 1.0.
+            OUT.color.a = weight(finalColor.rgb) / max(sunShadow, 0.05f);
+        #else
+            OUT.color.a = weight(finalColor.rgb);
+        #endif
     #elif defined(ONLY_LIGHT)
         OUT.color.a = baseColor.a;
     #else
@@ -620,6 +725,22 @@ PS_OUTPUT main(PS_INPUT IN) {
     #define MAX_LIGHTS 3
 #endif
 
+// Camera-relative world position carrier. At MAX_LIGHTS 6 every TEXCOORD is taken, so it
+// rides in light4/5/6's .w -- a light radius the PS never reads, since attenuation uses
+// PSLightPosition[i].w. Below that, a free interpolator.
+#if MAX_LIGHTS > 4
+    // No fourth channel spare here, so the sentinel rides in lPosition.w. The vertex shader
+    // normally puts LightData[0].w there and this pixel shader never reads it.
+    #define SHADOW_WP_STORE(O, v) O.light4.w = (v).x; O.light5.w = (v).y; O.light6.w = (v).z; O.lPosition.w = SHADOW_VS_SENTINEL
+    #define SHADOW_WP_LOAD(I)     float3((I).light4.w, (I).light5.w, (I).light6.w)
+    #define SHADOW_WP_VALID(I)    SHADOW_VS_PRESENT((I).lPosition.w)
+#else
+    #define SHADOW_WP_DEDICATED
+    #define SHADOW_WP_STORE(O, v) O.shadowWorldPos = float4((v), SHADOW_VS_SENTINEL)
+    #define SHADOW_WP_LOAD(I)     (I).shadowWorldPos.xyz
+    #define SHADOW_WP_VALID(I)    SHADOW_VS_PRESENT((I).shadowWorldPos.w)
+#endif
+
 struct PS_INPUT {
     float4 vertexColor : COLOR0;
     float4 fogColor : COLOR1;
@@ -636,6 +757,13 @@ struct PS_INPUT {
     float4 light5 : TEXCOORD6_centroid;
     float4 light6 : TEXCOORD7_centroid;
 #endif
+#ifdef SHADOW_WP_DEDICATED
+    #if MAX_LIGHTS > 3
+        float4 shadowWorldPos : TEXCOORD6;
+    #else
+        float4 shadowWorldPos : TEXCOORD5;
+    #endif
+#endif
 };
 
 struct PS_OUTPUT {
@@ -649,6 +777,7 @@ float4 AmbientColor : register(c1);
 
 float4 PSLightColor[10] : register(c3);
 float4 PSLightPosition[8] : register(c19);
+
 
 #ifndef OPT
     float4 EmittanceColor : register(c2);
@@ -689,8 +818,19 @@ PS_OUTPUT main(PS_INPUT IN) {
     
     float att;
     
+    // Forward sun shadows -- see the LIGHTS < 4 variant. Only the OPT-off path has a sun
+    // term; with OPT the first slot is a point light and must not be shadowed by the sun.
     #ifndef OPT
-        float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+        float3 sunShadowWorldPos = SHADOW_WP_LOAD(IN);
+        float3 sunShadowNormal = GetShadowGeometricNormal(sunShadowWorldPos);
+        // Decline to shadow if a vanilla vertex shader ran: the interpolator is undefined.
+        float sunShadow = 1.0f;
+        #if FORWARD_SHADOWS
+        sunShadow = SHADOW_WP_VALID(IN)
+                  ? GetSunShadow(sunShadowWorldPos, sunShadowNormal)
+                  : 1.0f;
+        #endif
+        float3 lighting = getSunLighting(IN.lightDir.xyz, PSLightColor[0].rgb * sunShadow, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #else
         att = vanillaAtt(PSLightPosition[0].xyz - IN.lPosition.xyz, PSLightPosition[0].w);
         float3 lighting = getPointLightLightingAtt(IN.lightDir.xyz, att, PSLightColor[0].rgb, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
@@ -715,8 +855,11 @@ PS_OUTPUT main(PS_INPUT IN) {
         lighting += (5 > lightsUsed ? 0.0 : 1.0) * getPointLightLightingAtt(IN.light6.xyz, att, PSLightColor[5].rgb, viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
     #endif
     
-    lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb);
-    
+    // ddx/ddy must stay at pixel-shader top level.
+    float3 ambNormal = GetShadowGeometricNormal(SHADOW_WP_LOAD(IN));
+    lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
+                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f);
+
     // TODO: Vanilla attenuates the full specular term by IN.lPosition.w for some reason. Is this a problem?
     float3 finalColor = lighting;
     
@@ -726,6 +869,11 @@ PS_OUTPUT main(PS_INPUT IN) {
         finalColor.rgb = lerp(finalColor.rgb, IN.fogColor.rgb, IN.fogColor.a);
     #endif
     
+
+#if SHADOW_FORCE_MARKER
+    finalColor.rgb = float3(1.0f, 0.0f, 1.0f);   // unconditional: proves this shader ran
+#endif
+
     OUT.color.rgb = finalColor.rgb;
     OUT.color.a = baseColor.a * AmbientColor.a;
 

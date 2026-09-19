@@ -111,6 +111,7 @@ extern "C" {
 
 			SettingManager::Initialize();
 			TheSettingManager->LoadSettings();
+			PresetManager::Initialize();
 			AttachHooks();
 		}
 		return true;

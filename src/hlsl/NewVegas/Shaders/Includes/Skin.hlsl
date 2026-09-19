@@ -1,3 +1,12 @@
+// Skin lighting helpers.
+// Must not reference TESR_DebugVar: it carries whatever the Debug effect is set to.
+#ifndef SKIN_FACEGEN_BLEND
+    #define SKIN_FACEGEN_BLEND 1.0f      // 0 = raw base texture, 1 = full FaceGen complexion
+#endif
+#ifndef SKIN_SPECULAR_STRENGTH
+    #define SKIN_SPECULAR_STRENGTH 0.0f   // 0 = vanilla (vanilla skin has no specular term)
+#endif
+
 float HalfLambert(float3 Vector1, float3 Vector2) {
 	
 	float product = dot(Vector1, Vector2);
@@ -50,7 +59,7 @@ float3 GetLighting(float3 lightDirection, float3 eyeDirection, float3 normal, fl
 }
 
 float GetSpecular(float3 lightDirection, float3 eyeDirection, float3 normal, float3 lightColor){
-    return  pow(shades(normal, normalize(lightDirection + eyeDirection)), TESR_DebugVar.z) * luma(lightColor) * TESR_DebugVar.y;
+    return  pow(shades(normal, normalize(lightDirection + eyeDirection)), TESR_SkinData.y) * luma(lightColor) * SKIN_SPECULAR_STRENGTH;
 }
 
 float GetSSS(float3 lightDirection, float3 normal){
@@ -75,13 +84,13 @@ float3 ApplyFog(float3 baseColor, float4 fogColor, float4 toggles){
 }
 
 float4 getBaseColor(float2 uv, sampler2D FaceGenMap0Buffer, sampler2D FaceGenMap1Buffer, sampler2D BaseColorBuffer){
-    // sample color textures
+
     float3 faceGenMap0 = tex2D(FaceGenMap0Buffer, uv).rgb;
     float3 faceGenMap1 = tex2D(FaceGenMap1Buffer, uv).rgb;
     float4 baseTexture = tex2D(BaseColorBuffer, uv);
     float4 baseColor = float4(2 * ((expand(faceGenMap0) + baseTexture.rgb) * (2 * faceGenMap1)), baseTexture.a);
 
-	baseColor = lerp(baseTexture, baseColor, saturate(TESR_DebugVar.w));
+	baseColor = lerp(baseTexture, baseColor, SKIN_FACEGEN_BLEND);
     return baseColor;
 }
 

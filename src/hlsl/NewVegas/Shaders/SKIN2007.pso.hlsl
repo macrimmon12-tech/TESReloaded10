@@ -7,7 +7,7 @@ sampler2D AttenuationMap : register(s4);
 sampler2D BaseMap : register(s0);
 sampler2D GlowMap : register(s3);
 sampler2D NormalMap : register(s1);
-float4 PSLightColor[10];
+float4 PSLightColor[10] : register(c3);
 sampler2D ShadowMap : register(s5);
 sampler2D ShadowMaskMap : register(s6);
 
@@ -27,7 +27,19 @@ sampler2D ShadowMaskMap : register(s6);
 //
 
 
+// --- register aliases --------------------------------------------------------
+// const_N names a raw register cN. Engine constants are aliased to their declared names
+// below; def immediates are recovered from the vanilla bytecode. A register the shader
+// defs takes the literal, NOT the engine constant that shares its number.
+#define const_1 AmbientColor
+#define const_3 PBRLight(PSLightColor[0])
+#define const_4 PBRLight(PSLightColor[1])
+#define const_5 PBRLight(PSLightColor[2])
+// -----------------------------------------------------------------------------
+
 // Structures:
+
+#include "Includes/PBRScale.hlsl"
 
 struct VS_INPUT {
     float3 texcoord_1 : TEXCOORD1_centroid;			// partial precision
@@ -94,7 +106,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     att1.x = tex2D(AttenuationMap, IN.texcoord_5.xy);			// partial precision
     att46.x = tex2D(AttenuationMap, IN.texcoord_5.zw);			// partial precision
     att3.x = tex2D(AttenuationMap, IN.texcoord_4.xy);			// partial precision
-    r0.yzw = r3.wzyx - 1;			// partial precision
+    r0.yzw = r3.zyx - 1;   // was .zyx: masked write only reads z,y,x			// partial precision
     q6.xyz = normalize(expand(noxel2.xyz));			// partial precision
     q5.xyz = normalize(IN.texcoord_7.xyz);			// partial precision
     q13.x = sqr(1 - shades(q6.xyz, q5.xyz));			// partial precision
@@ -113,8 +125,11 @@ VS_OUTPUT main(VS_INPUT IN) {
     q39.xyz = (r0.w * const_3.xyz) + (((q13.x * shades(q5.xyz, -IN.texcoord_1)) * const_3.xyz) * 0.5);			// partial precision
     q14.xyz = (q9.x * const_4.xyz) + ((shades(q5.xyz, -q7.xyz) * q13.x) * lerp(const_4.xyz, r6.xyz, 0.5));			// partial precision
     q16.xyz = (r0.xyz * q39.xyz) + saturate((1 - att3.x) - att4.x) * ((q11.x * r6.xyz) + q14.xyz);			// partial precision
-    r1.yzw = (const_5.wzyx * q19.x) + (r6.w * lerp(const_5.wzyx, r6.wzyx, 0.5));			// partial precision
-    r8.xyz = ((saturate((1 - att1.x) - att46.x) * ((q21.x * r6.xyz) + r1.wzy)) + q16.xyz) + AmbientColor.rgb;			// partial precision
+    r1.yzw = (const_5.zyx * q19.x) + (r6.w * lerp(const_5.zyx, r6.zyx, 0.5));			// partial precision
+    // Vanilla ends: texld_pp r8, t0, s0 / add_pp r8.xyz, r0, c1 / mov_pp oC0, r8 -- one
+    // register carries the base texture's alpha and then has .xyz overwritten by the lighting
+    // sum, so .a comes from texel0 above. This pass applies no albedo.
+    OUT.color_0.rgb = ((saturate((1 - att1.x) - att46.x) * ((q21.x * r6.xyz) + r1.wzy)) + q16.xyz) + PBRAmbient(AmbientColor.rgb);			// partial precision
 
     return OUT;
 };

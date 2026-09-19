@@ -17,20 +17,6 @@ EffectRecord::~EffectRecord() {
 }
 
 /*
- * Unbinds all textures for samplers.
- * Useful when recreating textures on the fly.
- */
-void EffectRecord::ClearSampler(const char* TextureName, size_t Length) {
-	ShaderTextureValue* Sampler;
-	for (UInt32 c = 0; c < TextureShaderValuesCount; c++) {
-		Sampler = &TextureShaderValues[c];
-		if (!memcmp(Sampler->Name, TextureName, Length) && Sampler->Texture->Texture) {
-			Sampler->Texture->Texture = nullptr;
-		}
-	}
-}
-
-/*
  * Unload effects, allowing it to be reloaded from  a blank state.
  */
 void EffectRecord::DisposeEffect() {
@@ -88,7 +74,18 @@ bool EffectRecord::LoadEffect() {
 	strcat(EffectCompiledPath, Name);
 	strcat(EffectCompiledPath, ".fx");
 
-	HRESULT prepass = D3DXPreprocessShaderFromFileA(EffectSourcePath, NULL, NULL, &EffectSource, &Errors);
+	// Effects get the same compile-time defines the game shaders do. Only the PREPROCESS call
+	// needs them -- D3DXCreateEffectCompiler below is handed the already-preprocessed source.
+	// Toggling any of these changes that source, so CheckPreprocessResult forces a recompile.
+	D3DXMACRO EffectMacros[3];
+	int macroCount = 0;
+	EffectMacros[macroCount++] = { "FORWARD_SHADOWS",
+		TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows") ? "1" : "0" };
+	if (TheRenderManager->IsReversedDepth())
+		EffectMacros[macroCount++] = { "REVERSED_DEPTH", "" };
+	EffectMacros[macroCount] = { NULL, NULL };
+
+	HRESULT prepass = D3DXPreprocessShaderFromFileA(EffectSourcePath, EffectMacros, NULL, &EffectSource, &Errors);
 	if (prepass == D3D_OK) {
 		bool Compile = !CheckPreprocessResult(EffectPreprocessedPath, EffectSource);
 		bool CompiledExists = FileExists(EffectCompiledPath);

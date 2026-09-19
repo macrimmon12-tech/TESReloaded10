@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <ctime>
 #include <unordered_set>
+#include <deque>
+#include <algorithm>
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -109,6 +111,31 @@ static float s_savedTimeScale = -1.0f; // session snapshot; -1 = not yet taken
 static bool  s_devFreecamOn   = false;
 static bool  s_devMenusHidden = false;
 static bool  s_screenshotMode = false;
+
+// ---- Preset Manager panel ------------------------------------------------
+// Session 2: minimal read-only skeleton. Session 5 (current): promoted into
+// the real status-indicator/save-button UI (docs/preset-manager-design.md
+// § "In-game UI -- location assignment").
+static bool  s_presetManagerOpen = false;
+
+// ---- Lighting panel -------------------------------------------------------
+// QOL panel added after re-adding forward shadows changed the lighting model:
+// a linkable-slider view over PBR/Terrain intensity, grouped by the condition
+// a tester actually thinks in (Day/Night/Rain/Interiors) instead of by
+// effect. Each condition row can be Unlinked (every slider independent),
+// ByEffect (PBR's 3 link together, Terrain's 3 link together, separately),
+// or AllLinked (all 6 move together) -- see RenderLightingConditionRow.
+static bool s_lightingPanelOpen = false;
+
+enum class LightLinkMode { Unlinked, ByEffect, AllLinked };
+
+// Rain and Night+Rain both live under the same "Rain" toolbar condition
+// (there's no separate NightRain button), each keeping its own link mode.
+static LightLinkMode s_lightLinkDay       = LightLinkMode::Unlinked;
+static LightLinkMode s_lightLinkNight     = LightLinkMode::Unlinked;
+static LightLinkMode s_lightLinkRain      = LightLinkMode::Unlinked;
+static LightLinkMode s_lightLinkNightRain = LightLinkMode::Unlinked;
+static LightLinkMode s_lightLinkInteriors = LightLinkMode::Unlinked;
 
 static void CfabSaveBaselines() {
 	if (!TheSettingManager || s_cfabBase.loaded) return;
@@ -440,10 +467,635 @@ static void RenderConfabulator() {
 	ImGui::End();
 }
 
+// ---- Preset Manager debug window (Session 2) --------------------------
+
+static const char* PresetTierName(PresetManager::ResolvedTier tier) {
+	switch (tier) {
+	case PresetManager::ResolvedTier::Keyword:  return "Keyword";
+	case PresetManager::ResolvedTier::Override: return "Override";
+	default:                                    return "Default";
+	}
+}
+
+// ---- Session 5: Save/Reload confirmation --------------------------------
+// docs/preset-manager-design.md § "In-game UI -- location assignment"
+
+enum class PresetPendingAction { None, Save, Reload, Load, RefreshAll, SaveVariant, Delete };
+static PresetPendingAction s_presetPendingAction = PresetPendingAction::None;
+static std::string         s_presetPendingTarget;  // preset/Variant name a pending action targets
+static std::string         s_presetPendingWarning;
+// Set by RequestPresetAction, consumed by RenderPresetConfirmPopup. The
+// actual ImGui::OpenPopup() call is deferred to RenderPresetConfirmPopup
+// (called from BuildUI()'s top level) rather than fired immediately from
+// inside the "NVR Preset Manager" window's button handler -- see the long
+// comment on RenderPresetConfirmPopup for why that distinction matters.
+static bool s_presetPopupRequested = false;
+
+// ---- Session 6: Preset browser / Load -----------------------------------
+// docs § "In-game UI -- Preset browser / Load", § "Unsaved/previewing state"
+static std::string s_presetSelectedName;    // row selected in the browser list, if any
+static bool        s_previewActive = false; // true while a Load preview hasn't been saved/discarded yet
+static std::string s_previewSourceName;     // name of the preset currently being previewed
+static UInt32      s_previewStartGeneration = 0; // PresetManager::GetResolveGeneration() when the preview started
+
+static void PresetManagerPerformSave(const std::string& TargetName) {
+	PresetManager::PresetData live;
+	if (!PresetManager::CaptureLiveState(live)) {
+		Logger::Log("PresetManager: [Preset] Save to '%s' failed -- couldn't capture live state", TargetName.c_str());
+		return;
+	}
+	if (!PresetManager::WritePreset(TargetName, live)) {
+		Logger::Log("PresetManager: [Preset] Save to '%s' failed -- couldn't write file", TargetName.c_str());
+		return;
+	}
+	Logger::Log("PresetManager: [Preset] Saved current settings to '%s'", TargetName.c_str());
+	// Refresh the resolved tier immediately -- otherwise the status
+	// indicators wouldn't reflect the new file until the next cell change.
+	if (Player && Player->parentCell)
+		PresetManager::ResolveAndApply(Player->parentCell);
+}
+
+static void PresetManagerPerformReload() {
+	if (Player && Player->parentCell)
+		PresetManager::ResolveAndApply(Player->parentCell);
+	Logger::Log("PresetManager: [Preset] Reloaded current preset, discarding unsaved edits");
+}
+
+static void PresetManagerPerformLoad(const std::string& Name) {
+	PresetManager::PresetData data;
+	if (!PresetManager::ReadPreset(Name, data)) {
+		Logger::Log("PresetManager: [Preset] Load '%s' failed -- couldn't read file", Name.c_str());
+		return;
+	}
+	// Wholesale replace, not stacked with the current tier's contents or the
+	// enabled Variants -- docs: "replaces the live editing state wholesale
+	// with that preset's full contents." Nothing is written to disk; the
+	// current location's actual resolved assignment is untouched until an
+	// explicit Save.
+	PresetManager::ApplyPreviewPreset(data);
+	s_previewActive = true;
+	s_previewSourceName = Name;
+	s_previewStartGeneration = PresetManager::GetResolveGeneration();
+	Logger::Log("PresetManager: [Preset] Loaded '%s' as an unsaved preview", Name.c_str());
+}
+
+static void PresetManagerPerformDelete(const std::string& Name) {
+	if (!PresetManager::DeletePreset(Name)) {
+		Logger::Log("PresetManager: [Preset] Delete '%s' failed -- reserved name, missing file, or filesystem error", Name.c_str());
+		return;
+	}
+	Logger::Log("PresetManager: [Preset] Deleted '%s'", Name.c_str());
+
+	if (s_presetSelectedName == Name) s_presetSelectedName.clear();
+	// The file backing an in-progress preview is gone -- the already-applied
+	// live values are unaffected (preview doesn't re-read the file), but drop
+	// the "previewing X" state so the UI doesn't keep pointing at it.
+	if (s_previewActive && s_previewSourceName == Name) s_previewActive = false;
+
+	// Refresh the resolved tier immediately, same reasoning as Save/Reload --
+	// otherwise the status indicators wouldn't reflect the deletion until the
+	// next real location change, and if the deleted preset was the one
+	// actually active here, they'd keep showing it as live.
+	if (Player && Player->parentCell)
+		PresetManager::ResolveAndApply(Player->parentCell);
+}
+
+// ---- Session 7: Refresh All Presets, Save Variant ------------------------
+// docs § "Refresh all presets", § "Variants" authoring flow
+
+static void PresetManagerPerformRefreshAll() {
+	auto summaries = PresetManager::RefreshAllPresets();
+	for (const auto& summary : summaries) {
+		Logger::Log("PresetManager: [Preset] Refresh backfilled %u key(s) into '%s':",
+			(UInt32)summary.AddedKeys.size(), summary.PresetName.c_str());
+		for (const auto& line : summary.AddedKeys)
+			Logger::Log("PresetManager: [Preset]   %s", line.c_str());
+	}
+	Logger::Log("PresetManager: [Preset] Refresh All Presets done -- %u file(s) touched", (UInt32)summaries.size());
+}
+
+static void PresetManagerPerformSaveVariant(const std::string& Name) {
+	PresetManager::PresetData diff;
+	PresetManager::CaptureVariantDiff(diff);
+	if (diff.empty()) {
+		Logger::Log("PresetManager: [Preset] Save Variant '%s' skipped -- no live changes since the base preset loaded", Name.c_str());
+		return;
+	}
+	if (!PresetManager::WriteVariant(Name, diff)) {
+		Logger::Log("PresetManager: [Preset] Save Variant '%s' failed -- couldn't write file", Name.c_str());
+		return;
+	}
+	UInt32 keyCount = 0;
+	for (const auto& [section, keys] : diff) keyCount += (UInt32)keys.size();
+	Logger::Log("PresetManager: [Preset] Saved Variant '%s' (%u changed key(s))", Name.c_str(), keyCount);
+}
+
+// Requests a Save or Reload confirmation. Call exactly once, from the
+// triggering button's click handler. Does NOT call ImGui::OpenPopup itself --
+// see RenderPresetConfirmPopup for why that has to happen elsewhere.
+static void RequestPresetAction(PresetPendingAction Kind, const std::string& TargetName, const std::string& Warning) {
+	s_presetPendingAction = Kind;
+	s_presetPendingTarget = TargetName;
+	s_presetPendingWarning = Warning;
+	Logger::Log("PresetManager: [Preset] Confirmation requested for '%s' (kind=%d)", TargetName.c_str(), (int)Kind);
+	s_presetPopupRequested = true;
+}
+
+// Call unconditionally, once per frame, from BuildUI()'s own top level (NOT
+// from inside another window's Begin/End, and NOT from inside the button
+// handler that requests the popup).
+//
+// Why: ImGui::GetID(str_id) -- used internally by both OpenPopup and
+// BeginPopupModal -- hashes str_id against whatever window is current on the
+// ID stack *at the moment of the call*. The original code called OpenPopup()
+// immediately from inside RenderPresetManagerPanel()'s Begin/End (so it
+// hashed against the "NVR Preset Manager" window's ID), then called
+// BeginPopupModal() separately from BuildUI()'s top level, outside any
+// window (a different ID context). The two IDs never matched, so the modal
+// could never actually open -- RequestPresetAction's log line fired every
+// time, but "Confirm OK clicked" never did, and no popup ever appeared.
+// Deferring the OpenPopup() call itself to this function (called from the
+// same top-level context as BeginPopupModal, every frame) keeps both calls
+// on the same ID stack, and also means the popup keeps working even if the
+// "NVR Preset Manager" window is closed mid-confirm.
+static void RenderPresetConfirmPopup() {
+	if (s_presetPopupRequested) {
+		ImGui::OpenPopup("Confirm##presetaction");
+		s_presetPopupRequested = false;
+	}
+
+	ImGui::SetNextWindowSize(ImVec2(340.0f, 0.0f), ImGuiCond_Always);
+	if (!ImGui::BeginPopupModal("Confirm##presetaction", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize))
+		return;
+
+	ImGui::TextWrapped("%s", s_presetPendingWarning.c_str());
+	ImGui::Spacing();
+
+	if (ImGui::Button("OK", ImVec2(120.0f, 0.0f))) {
+		Logger::Log("PresetManager: [Preset] Confirm OK clicked for '%s' (kind=%d)",
+			s_presetPendingTarget.c_str(), (int)s_presetPendingAction);
+		if (s_presetPendingAction == PresetPendingAction::Reload)
+			PresetManagerPerformReload();
+		else if (s_presetPendingAction == PresetPendingAction::Load)
+			PresetManagerPerformLoad(s_presetPendingTarget);
+		else if (s_presetPendingAction == PresetPendingAction::RefreshAll)
+			PresetManagerPerformRefreshAll();
+		else if (s_presetPendingAction == PresetPendingAction::SaveVariant)
+			PresetManagerPerformSaveVariant(s_presetPendingTarget);
+		else if (s_presetPendingAction == PresetPendingAction::Delete)
+			PresetManagerPerformDelete(s_presetPendingTarget);
+		else
+			PresetManagerPerformSave(s_presetPendingTarget);
+		s_presetPendingAction = PresetPendingAction::None;
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+		s_presetPendingAction = PresetPendingAction::None;
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::EndPopup();
+}
+
+static void RenderPresetManagerPanel() {
+	if (!s_presetManagerOpen) return;
+
+	ImGui::SetNextWindowSize(ImVec2(460.0f, 640.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(540.0f, 380.0f), ImGuiCond_FirstUseEver);
+
+	if (!ImGui::Begin("NVR Preset Manager", &s_presetManagerOpen)) {
+		ImGui::End();
+		return;
+	}
+
+	// A smidge bigger throughout this window -- purely a render-time scale,
+	// applied before any CalcTextSize call below so the label-column math
+	// that follows already accounts for it.
+	ImGui::SetWindowFontScale(1.1f);
+
+	// ---- Master on/off toggle -------------------------------------------
+	// Off: the automatic per-location resolve (ShaderManager::UpdateConstants's
+	// gate) never fires, so whatever's currently live stays live as you move
+	// around -- your own settings are authoritative. Everything below (Save/
+	// Load/Delete/Reload, Variants) still works regardless -- this only stops
+	// the automatic switching, not deliberate authoring. Persisted through the
+	// normal TOML settings (Main.Main.Misc, blacklisted from preset capture
+	// the same way RenderEffects itself already is), not the ImGui ini --
+	// consistent with how every other persistent preference in this mod is
+	// stored, and it rides along with the existing Save/Save Copy/Disk reload
+	// machinery for free.
+	{
+		bool enabled = TheSettingManager->SettingsMain.Main.PresetManagerEnabled;
+		if (ImGui::Checkbox("Preset Manager enabled", &enabled)) {
+			TheSettingManager->SetSetting("Main.Main.Misc", "PresetManagerEnabled", enabled);
+			TheSettingManager->LoadSettings();
+			Logger::Log("PresetManager: [Preset] Master toggle set to %s", enabled ? "enabled" : "disabled");
+			// Re-enabling: resolve immediately rather than waiting for the next
+			// location change to notice -- same immediate-refresh pattern Save/
+			// Reload/Delete already use.
+			if (enabled && Player && Player->parentCell)
+				PresetManager::ResolveAndApply(Player->parentCell);
+		}
+		if (!enabled)
+			ImGui::TextDisabled("Automatic switching is off -- your own settings are authoritative. Save/Load/Delete below still work.");
+	}
+	ImGui::Separator();
+
+	// Walking to a different location without saving silently discards an
+	// in-progress Load preview (docs § "Unsaved/previewing state") -- the
+	// generation counter bumps on every real ResolveAndApply, i.e. every
+	// actual cell transition, so a mismatch here means exactly that happened.
+	if (s_previewActive && PresetManager::GetResolveGeneration() != s_previewStartGeneration) {
+		Logger::Log("PresetManager: [Preset] Unsaved preview of '%s' discarded -- location changed", s_previewSourceName.c_str());
+		s_previewActive = false;
+	}
+
+	const auto& r = PresetManager::GetLastResolveResult();
+	const ImVec4 kHighlight(0.4f, 1.0f, 0.7f, 1.0f);
+	const ImVec4 kWarning(1.0f, 0.8f, 0.2f, 1.0f);
+
+	ImGui::Text("Cell EditorID:       %s", r.CellEditorID.empty() ? "(none)" : r.CellEditorID.c_str());
+	ImGui::Text("Worldspace EditorID: %s", r.WorldspaceEditorID.empty() ? "(none)" : r.WorldspaceEditorID.c_str());
+	ImGui::Text("IsInterior:          %s", r.IsInterior ? "true" : "false");
+
+	// While previewing, the three status indicators below switch to this one
+	// distinct "Unsaved" banner in place of their normal shown/highlighted
+	// display -- the location's actually-resolved tier hasn't changed, only
+	// the live editing state has (docs § "Unsaved/previewing state").
+	if (s_previewActive)
+		ImGui::TextColored(kWarning, "Unsaved -- previewing '%s'", s_previewSourceName.c_str());
+
+	ImGui::Separator();
+
+	// Label column width is measured, not guessed -- a fixed SameLine offset
+	// (the previous "140.0f") clips as soon as a keyword name is long enough
+	// to run into the button (e.g. "[Keyword: DCHouse]"). Measure whichever
+	// of the three labels will actually render this frame and align the
+	// button column just past the widest one, so it can never overlap
+	// regardless of how long a keyword name gets.
+	bool showKeywordRow = r.IsInterior && !r.Keyword.empty();
+	char keywordLabel[160];
+	snprintf(keywordLabel, sizeof(keywordLabel), "[Keyword: %s]", r.Keyword.c_str());
+	// Parenthesized calls (std::max)(...) -- windows.h's max/min macros
+	// (absent NOMINMAX) would otherwise mangle a bare std::max(a, b) here.
+	float labelColumnW = ImGui::CalcTextSize("[Default]").x;
+	labelColumnW = (std::max)(labelColumnW, ImGui::CalcTextSize("[Override]").x);
+	if (showKeywordRow)
+		labelColumnW = (std::max)(labelColumnW, ImGui::CalcTextSize(keywordLabel).x);
+	const float buttonColumnX = labelColumnW + 24.0f; // breathing room past the longest label
+
+	// ---- Default -- always shown, highlighted when nothing more specific applies.
+	{
+		bool highlighted = !s_previewActive && (r.Tier == PresetManager::ResolvedTier::Default);
+		if (highlighted) ImGui::TextColored(kHighlight, "[Default]"); else ImGui::Text("[Default]");
+		ImGui::SameLine(buttonColumnX);
+		if (ImGui::SmallButton("Save to Default")) {
+			std::string targetName = r.IsInterior ? PresetManager::kDefaultInteriorName : PresetManager::kDefaultExteriorName;
+			const char* scope = r.IsInterior ? "every interior" : "every exterior";
+			char warning[192];
+			snprintf(warning, sizeof(warning), "This will rewrite the floor for %s in the game. Continue?", scope);
+			Logger::Log("PresetManager: [Preset] Save to Default clicked, target='%s'", targetName.c_str());
+			RequestPresetAction(PresetPendingAction::Save, targetName, warning);
+		}
+	}
+
+	ImGui::Spacing();
+
+	// ---- Keyword -- interior only, shown whenever the cell has a tag at all,
+	// even with no preset authored for it yet (docs' shown-vs-highlighted table).
+	if (showKeywordRow) {
+		bool highlighted = !s_previewActive && (r.Tier == PresetManager::ResolvedTier::Keyword);
+		if (highlighted) ImGui::TextColored(kHighlight, "%s", keywordLabel);
+		else ImGui::Text("%s", keywordLabel);
+		ImGui::SameLine(buttonColumnX);
+		if (ImGui::SmallButton("Save to Keyword")) {
+			UInt32 count = PresetManager::CountCellsForKeyword(r.Keyword);
+			char warning[192];
+			snprintf(warning, sizeof(warning), "This affects %u cell(s) using keyword '%s'. Continue?", count, r.Keyword.c_str());
+			RequestPresetAction(PresetPendingAction::Save, r.Keyword, warning);
+		}
+	}
+	// Save-to-Keyword is deliberately absent, not just disabled, when the
+	// cell has no tag -- keyword membership is strictly offline (docs
+	// "Keyword files"), no in-game path exists to unlock this button.
+
+	ImGui::Spacing();
+
+	// ---- Override -- if one exists it's always the active tier (resolution
+	// checks it first), so "shown" and "highlighted" collapse to the same test.
+	{
+		bool overrideExists = (r.Tier == PresetManager::ResolvedTier::Override);
+		bool highlighted = !s_previewActive && overrideExists;
+		std::string identity = r.IsInterior ? r.CellEditorID : r.WorldspaceEditorID;
+		if (highlighted) ImGui::TextColored(kHighlight, "[Override]"); else ImGui::Text("[Override]");
+		ImGui::SameLine(buttonColumnX);
+		bool canSave = !identity.empty();
+		if (!canSave) ImGui::BeginDisabled();
+		if (ImGui::SmallButton("Save to Override")) {
+			if (overrideExists)
+				RequestPresetAction(PresetPendingAction::Save, identity,
+					"An override for this location already exists and will be overwritten. Continue?");
+			else
+				PresetManagerPerformSave(identity); // nothing to overwrite -- no warning needed
+		}
+		if (!canSave) ImGui::EndDisabled();
+	}
+
+	ImGui::Separator();
+
+	if (ImGui::Button("Reload current preset"))
+		RequestPresetAction(PresetPendingAction::Reload, "",
+			"This will discard any unsaved live edits and reload what's actually assigned to this location. Continue?");
+
+	ImGui::Separator();
+
+	// ---- Session 6: Preset browser / Load -- a persistent, always-visible
+	// list of every existing Default/Keyword/Override preset (docs § "In-game
+	// UI -- Preset browser / Load"). Re-enumerated fresh off disk every
+	// frame the window's open, same never-cached philosophy as the rest of
+	// this panel -- a preset saved a moment ago via the buttons above shows
+	// up immediately, with no separate refresh step.
+	ImGui::TextUnformatted("Preset browser");
+	{
+		auto presets = PresetManager::ListAllPresets();
+
+		ImGui::BeginChild("##presetBrowser", ImVec2(0.0f, 130.0f), true);
+		for (const auto& entry : presets) {
+			const char* kindTag =
+				entry.Kind == PresetManager::PresetKind::Keyword  ? "[Keyword] " :
+				entry.Kind == PresetManager::PresetKind::Default  ? "[Default] " :
+				                                                     "[Override] ";
+			char label[256];
+			snprintf(label, sizeof(label), "%s%s", kindTag, entry.Name.c_str());
+			if (ImGui::Selectable(label, s_presetSelectedName == entry.Name))
+				s_presetSelectedName = entry.Name;
+		}
+		if (presets.empty())
+			ImGui::TextDisabled("(no presets on disk yet)");
+		ImGui::EndChild();
+
+		bool canLoad = !s_presetSelectedName.empty();
+		if (!canLoad) ImGui::BeginDisabled();
+		if (ImGui::Button("Load")) {
+			Logger::Log("PresetManager: [Preset] Load clicked, target='%s'", s_presetSelectedName.c_str());
+			RequestPresetAction(PresetPendingAction::Load, s_presetSelectedName,
+				"This will override your current unsaved settings. Continue?");
+		}
+		if (!canLoad) ImGui::EndDisabled();
+
+		// DefaultInterior/DefaultExterior are protected -- disable rather than
+		// let the click through and rely on DeletePreset's own refusal, so the
+		// button honestly reflects what's about to happen.
+		bool canDelete = canLoad && !PresetManager::IsReservedName(s_presetSelectedName);
+		ImGui::SameLine();
+		if (!canDelete) ImGui::BeginDisabled();
+		if (ImGui::Button("Delete")) {
+			Logger::Log("PresetManager: [Preset] Delete clicked, target='%s'", s_presetSelectedName.c_str());
+			char warning[288];
+			snprintf(warning, sizeof(warning), "Permanently delete '%s'? This cannot be undone.", s_presetSelectedName.c_str());
+			RequestPresetAction(PresetPendingAction::Delete, s_presetSelectedName, warning);
+		}
+		if (!canDelete) ImGui::EndDisabled();
+	}
+
+	ImGui::Separator();
+
+	// ---- Session 7: Variants -- a panel of checkboxes reflecting which
+	// Variants are currently enabled (docs § "In-game UI -- Variants"),
+	// global toggles independent of the current location.
+	ImGui::TextUnformatted("Variants");
+	{
+		auto variantNames = PresetManager::ListAllVariants();
+		const auto& enabled = PresetManager::GetEnabledVariants();
+
+		if (variantNames.empty()) {
+			ImGui::TextDisabled("(no Variants on disk yet)");
+		} else {
+			for (const auto& name : variantNames) {
+				bool isEnabled = std::find(enabled.begin(), enabled.end(), name) != enabled.end();
+				if (ImGui::Checkbox(name.c_str(), &isEnabled))
+					PresetManager::SetVariantEnabled(name, isEnabled);
+			}
+		}
+
+		if (!enabled.empty()) {
+			std::string joined;
+			for (size_t i = 0; i < enabled.size(); i++) {
+				if (i) joined += " -> ";
+				joined += enabled[i];
+			}
+			ImGui::TextDisabled("Priority: %s (left lowest, right highest)", joined.c_str());
+		}
+	}
+
+	ImGui::Spacing();
+
+	// ---- Save Variant -- captures exactly the key(s) changed since the
+	// current base preset became live (docs § "Variants" authoring flow):
+	// load any base preset, tweak only the intended setting(s), name and
+	// save. Reuses the same confirm-popup machinery as Save/Load when it
+	// would overwrite an existing Variant of the same name.
+	static char s_variantNameBuf[64] = "";
+	ImGui::SetNextItemWidth(180.0f);
+	ImGui::InputText("##variantname", s_variantNameBuf, sizeof(s_variantNameBuf));
+	ImGui::SameLine();
+	if (ImGui::Button("Save Variant")) {
+		std::string name = s_variantNameBuf;
+		if (name.empty()) {
+			Logger::Log("PresetManager: [Preset] Save Variant clicked with an empty name -- ignored");
+		} else if (PresetManager::IsReservedName(name)) {
+			Logger::Log("PresetManager: [Preset] Save Variant '%s' rejected -- reserved name", name.c_str());
+		} else if (PresetManager::VariantExists(name)) {
+			RequestPresetAction(PresetPendingAction::SaveVariant, name,
+				"A Variant with this name already exists and will be overwritten. Continue?");
+		} else {
+			PresetManagerPerformSaveVariant(name);
+		}
+	}
+
+	ImGui::End();
+}
+
 // ---- Dev Tools panel -------------------------------------------------------
 
 static void RunConsoleCommand(const char* cmd) {
 	if (g_ConsoleInterface) g_ConsoleInterface->RunScriptLine(cmd, nullptr);
+}
+
+// Custom message used to defer a console command off the render thread --
+// see RunConsoleCommandDeferred's comment. Minted via RegisterWindowMessage
+// rather than a hardcoded WM_APP + offset: WM_APP's collision-free private
+// range only covers WM_APP..WM_APP+0x3FFF (0x8000-0xBFFF); anything past
+// that lands in 0xC000-0xFFFF, the range RegisterWindowMessage hands out,
+// where some other component in-process could legitimately own that exact
+// value for its own signaling and collide with this one. RegisterWindowMessage
+// is guaranteed unique system-wide for a given name, which is what this
+// needs. Cached in a function-local static so every caller gets the same
+// value without re-registering.
+static UINT GetDeferredConsoleCommandMessage() {
+	static UINT message = RegisterWindowMessageA("NVR_DeferredConsoleCommand");
+	return message;
+}
+
+// coc (and any other command that triggers a multi-frame loading screen)
+// cannot be run synchronously via RunConsoleCommand from a button handler --
+// every button handler in this file executes inside RenderInterfaceHook,
+// itself part of the game's own D3D9 render call chain for the CURRENT
+// frame (see NewVegas/Hooks/Render.cpp: ImGuiManager::NewFrame()/Render()
+// are both called from directly inside it). A command that needs to
+// Present() further frames to show loading progress can never get past the
+// frame we're still inside of -- confirmed root cause of "CoC freezes the
+// game completely." Posting a message defers the actual RunConsoleCommand
+// call to the next time the game's message pump processes its queue, which
+// happens outside of any render call.
+static void RunConsoleCommandDeferred(const char* cmd) {
+	HWND window = ImGuiManager::GetWindow();
+	if (!window) { RunConsoleCommand(cmd); return; } // no window yet -- best effort
+	PostMessage(window, GetDeferredConsoleCommandMessage(), 0, (LPARAM)_strdup(cmd));
+}
+
+// Unlike worldspaces, interior TESObjectCELL records are NOT preloaded into
+// a stable "every cell in the load order" list -- the DataHandler's own cell
+// array is a runtime cache of cells actually instantiated so far, not a
+// static catalog, and there's no xNVSE API here for a true engine-level
+// enumerator (deliberately out of scope for the preset manager itself, see
+// docs § "Scope"). So this list is honest about being partial: every
+// interior cell mentioned in a keyword file (already cached at boot) plus
+// every interior cell the player has actually stood in this session, most
+// recent first. It grows as you play instead of claiming completeness it
+// can't back up.
+static std::vector<std::string> s_visitedInteriorCells; // MRU, most-recent first
+static std::string              s_lastTrackedCellID;
+
+static void TrackVisitedInteriorCell() {
+	if (!Player || !Player->parentCell || !Player->parentCell->IsInterior()) return;
+	const char* name = Player->parentCell->GetEditorName();
+	if (!name || !name[0] || s_lastTrackedCellID == name) return;
+	s_lastTrackedCellID = name;
+
+	auto it = std::find(s_visitedInteriorCells.begin(), s_visitedInteriorCells.end(), name);
+	if (it != s_visitedInteriorCells.end()) s_visitedInteriorCells.erase(it);
+	s_visitedInteriorCells.insert(s_visitedInteriorCells.begin(), name);
+	if (s_visitedInteriorCells.size() > 50) s_visitedInteriorCells.resize(50);
+}
+
+// Renders up to 6 DragFloats (PBR's 3, then Terrain's 3 when TotalCount ==
+// 6) and, on any single edit, multiplies every other value currently
+// *grouped* with it by the same before/after ratio -- which values that is
+// depends on Mode: AllLinked groups everything passed in, ByEffect groups
+// PBR's 3 and Terrain's 3 separately, Unlinked groups nothing (plain
+// independent drag). Returns true if anything changed, so the caller knows
+// to write the whole row back.
+static bool RenderLightingCells(LightLinkMode Mode, const char* const* Labels, float** Values, int PbrCount, int TotalCount) {
+	bool anyChanged = false;
+	for (int i = 0; i < TotalCount; i++) {
+		float before = *Values[i];
+		ImGui::PushID(i);
+		bool changed = ImGui::DragFloat(Labels[i], Values[i], 0.005f, 0.0f, 0.0f, "%.3f");
+		ImGui::PopID();
+		if (!changed) continue;
+		anyChanged = true;
+		if (before == 0.0f) continue; // no ratio to infer from a zero baseline -- leave siblings alone
+
+		float ratio = *Values[i] / before;
+		int lo = i, hi = i + 1; // Unlinked: nothing else moves
+		if (Mode == LightLinkMode::AllLinked) { lo = 0; hi = TotalCount; }
+		else if (Mode == LightLinkMode::ByEffect) { lo = (i < PbrCount) ? 0 : PbrCount; hi = (i < PbrCount) ? PbrCount : TotalCount; }
+
+		for (int j = lo; j < hi; j++) {
+			if (j == i) continue;
+			*Values[j] *= ratio;
+		}
+	}
+	return anyChanged;
+}
+
+// HasTerrain == false (Interiors) hides "All Linked" rather than offering it
+// as a confusing no-op identical to "By Effect" when there's no Terrain group.
+static void RenderLightLinkModeSelector(LightLinkMode& Mode, bool HasTerrain) {
+	int mode = (int)Mode;
+	ImGui::RadioButton("Unlinked", &mode, (int)LightLinkMode::Unlinked); ImGui::SameLine();
+	ImGui::RadioButton("By Effect", &mode, (int)LightLinkMode::ByEffect);
+	if (HasTerrain) {
+		ImGui::SameLine();
+		ImGui::RadioButton("All Linked", &mode, (int)LightLinkMode::AllLinked);
+	}
+	Mode = (LightLinkMode)mode;
+}
+
+// Renders one condition row (e.g. "Night") and writes back whatever changed.
+// PbrSection/TerrainSection are the exact section strings each effect's own
+// UpdateSettings() reads (see PBRShaders::UpdateSettings / TerrainShaders::
+// UpdateSettings) -- TerrainSection == nullptr for Interiors, which never
+// renders terrain. Returns true if anything was written, so the panel can
+// call LoadSettings() once for the whole frame instead of once per row.
+static bool RenderLightingConditionRow(const char* RowLabel, const char* PbrSection, const char* TerrainSection, LightLinkMode& Mode) {
+	ImGui::PushID(RowLabel);
+	ImGui::TextUnformatted(RowLabel);
+	ImGui::Separator();
+	RenderLightLinkModeSelector(Mode, TerrainSection != nullptr);
+
+	float pbr[3] = {
+		TheSettingManager->GetSettingF(PbrSection, "LightingScale"),
+		TheSettingManager->GetSettingF(PbrSection, "AmbientScale"),
+		TheSettingManager->GetSettingF(PbrSection, "SkylightingScale"),
+	};
+	float terrain[3] = {};
+	if (TerrainSection) {
+		terrain[0] = TheSettingManager->GetSettingF(TerrainSection, "LightingScale");
+		terrain[1] = TheSettingManager->GetSettingF(TerrainSection, "AmbientScale");
+		terrain[2] = TheSettingManager->GetSettingF(TerrainSection, "SkylightingScale");
+	}
+
+	static const char* kLabels[6] = { "PBR Light", "PBR Ambient", "PBR Sky", "Terrain Light", "Terrain Ambient", "Terrain Sky" };
+	float* values[6] = { &pbr[0], &pbr[1], &pbr[2], &terrain[0], &terrain[1], &terrain[2] };
+	int total = TerrainSection ? 6 : 3;
+
+	bool changed = RenderLightingCells(Mode, kLabels, values, 3, total);
+	if (changed) {
+		TheSettingManager->SetSettingF(PbrSection, "LightingScale", pbr[0]);
+		TheSettingManager->SetSettingF(PbrSection, "AmbientScale", pbr[1]);
+		TheSettingManager->SetSettingF(PbrSection, "SkylightingScale", pbr[2]);
+		if (TerrainSection) {
+			TheSettingManager->SetSettingF(TerrainSection, "LightingScale", terrain[0]);
+			TheSettingManager->SetSettingF(TerrainSection, "AmbientScale", terrain[1]);
+			TheSettingManager->SetSettingF(TerrainSection, "SkylightingScale", terrain[2]);
+		}
+	}
+	ImGui::PopID();
+	return changed;
+}
+
+static void RenderLightingPanel() {
+	if (!s_lightingPanelOpen) return;
+
+	ImGui::SetNextWindowSize(ImVec2(440.0f, 560.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(620.0f, 200.0f),  ImGuiCond_FirstUseEver);
+
+	if (!ImGui::Begin("NVR Lighting", &s_lightingPanelOpen)) {
+		ImGui::End();
+		return;
+	}
+
+	ImGui::TextWrapped("Intensity-only view over the same PBR/Terrain settings the "
+		"main menu already edits, grouped by condition, with an optional "
+		"proportional link per group.");
+
+	bool anyChanged = false;
+	if (ImGui::CollapsingHeader("Day", ImGuiTreeNodeFlags_DefaultOpen))
+		anyChanged |= RenderLightingConditionRow("Day", "Shaders.PBR.Main", "Shaders.Terrain.Main", s_lightLinkDay);
+	if (ImGui::CollapsingHeader("Night", ImGuiTreeNodeFlags_DefaultOpen))
+		anyChanged |= RenderLightingConditionRow("Night", "Shaders.PBR.Night", "Shaders.Terrain.Night", s_lightLinkNight);
+	if (ImGui::CollapsingHeader("Rain", ImGuiTreeNodeFlags_DefaultOpen)) {
+		anyChanged |= RenderLightingConditionRow("Rain", "Shaders.PBR.Rain", "Shaders.Terrain.Rain", s_lightLinkRain);
+		anyChanged |= RenderLightingConditionRow("Night + Rain", "Shaders.PBR.NightRain", "Shaders.Terrain.NightRain", s_lightLinkNightRain);
+	}
+	if (ImGui::CollapsingHeader("Interiors", ImGuiTreeNodeFlags_DefaultOpen))
+		anyChanged |= RenderLightingConditionRow("Interiors", "Shaders.PBR.Interiors", nullptr, s_lightLinkInteriors);
+
+	if (anyChanged) TheSettingManager->LoadSettings();
+
+	ImGui::End();
 }
 
 static void DevPanelCleanup() {
@@ -466,8 +1118,8 @@ static void RenderDevPanel() {
 	if (s_savedTimeScale < 0.0f && tg && tg->TimeScale)
 		s_savedTimeScale = tg->TimeScale->data;
 
-	ImGui::SetNextWindowSize(ImVec2(420.0f, 270.0f), ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowPos(ImVec2(100.0f, 380.0f),  ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(420.0f, 460.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(100.0f, 200.0f),  ImGuiCond_FirstUseEver);
 
 	if (!ImGui::Begin("NVR Dev Tools", &s_devOpen)) {
 		ImGui::End();
@@ -562,6 +1214,115 @@ static void RenderDevPanel() {
 		ImGui::TextDisabled("(Press NVR key to restore)");
 	}
 
+	ImGui::Spacing();
+
+	// ---- Session 7: Cell coc picker ---------------------------------------
+	// docs § "Scope" -- explicitly out of scope for the preset manager
+	// itself (assignment is always done by physically standing in a
+	// location), but a genuinely useful utility on its own merits, so it
+	// lives here in Dev Tools instead, independent of and unrelated to
+	// presets. cow was dropped -- nobody used it, and exterior worldspaces
+	// are reachable by walking anyway.
+	if (ImGui::CollapsingHeader("Location (coc)")) {
+		static char s_devLocationBuf[64] = "";
+		static ImGuiTextFilter s_cellFilter;
+
+		ImGui::SetNextItemWidth(220.0f);
+		ImGui::InputText("Interior cell EditorID", s_devLocationBuf, sizeof(s_devLocationBuf));
+		ImGui::TextDisabled("(type freely, or pick from a list below)");
+
+		ImGui::Spacing();
+
+		// Keyword-tagged cells plus whatever's actually been visited this
+		// session (see s_visitedInteriorCells's comment for why this, not a
+		// complete engine-level list).
+		ImGui::TextUnformatted("Interior cells (keyword-tagged + visited this session)");
+		s_cellFilter.Draw("##cellfilter", 200.0f);
+		ImGui::BeginChild("##celllist", ImVec2(0.0f, 90.0f), true);
+		for (const auto& name : s_visitedInteriorCells) {
+			if (!s_cellFilter.PassFilter(name.c_str())) continue;
+			char label[96];
+			snprintf(label, sizeof(label), "[Visited] %s", name.c_str());
+			if (ImGui::Selectable(label))
+				strncpy_s(s_devLocationBuf, name.c_str(), _TRUNCATE);
+		}
+		for (const auto& name : PresetManager::GetKnownKeywordCells()) {
+			if (!s_cellFilter.PassFilter(name.c_str())) continue;
+			char label[96];
+			snprintf(label, sizeof(label), "[Keyword] %s", name.c_str());
+			if (ImGui::Selectable(label))
+				strncpy_s(s_devLocationBuf, name.c_str(), _TRUNCATE);
+		}
+		ImGui::EndChild();
+
+		ImGui::Spacing();
+
+		bool canGo = s_devLocationBuf[0] != '\0';
+		if (!canGo) ImGui::BeginDisabled();
+
+		if (ImGui::Button("COC")) {
+			char cmd[96];
+			snprintf(cmd, sizeof(cmd), "coc %s", s_devLocationBuf);
+			// coc triggers a multi-frame loading screen that needs to Present()
+			// new frames -- calling it synchronously here would deadlock, since
+			// this button handler runs inside RenderInterfaceHook, itself part
+			// of the game's own D3D9 render call chain for the CURRENT frame
+			// (confirmed root cause of "CoC freezes the game completely").
+			// Deferred via a posted window message instead, so it actually
+			// runs once we're back out on the next message-pump cycle.
+			RunConsoleCommandDeferred(cmd);
+		}
+
+		if (!canGo) ImGui::EndDisabled();
+	}
+
+	ImGui::Spacing();
+
+	// ---- Session 7: Refresh All Presets ----------------------------------
+	// docs § "Refresh all presets" -- global, infrequent, not tied to the
+	// player's current location, so it lives here rather than in the
+	// per-location NVR Preset Manager panel. Shares the same confirm-popup
+	// machinery as the Save buttons there (RequestPresetAction works from
+	// any window -- see RenderPresetConfirmPopup's own comment for why).
+	if (ImGui::CollapsingHeader("Presets")) {
+		if (ImGui::Button("Refresh All Presets")) {
+			UInt32 fileCount = (UInt32)PresetManager::ListAllPresets().size();
+			char warning[192];
+			snprintf(warning, sizeof(warning),
+				"This will check %u preset file(s) and backfill any settings missing from current defaults. Continue?", fileCount);
+			RequestPresetAction(PresetPendingAction::RefreshAll, "", warning);
+		}
+		ImGui::TextDisabled("Backfills missing settings only -- never overwrites an existing value, never prunes.");
+	}
+
+	ImGui::Spacing();
+
+	// ---- Log (Session 3; filter added Session 7) -------------------------
+	// docs/preset-manager-design.md § "Debug/authoring tooling".
+	if (ImGui::CollapsingHeader("Log", ImGuiTreeNodeFlags_DefaultOpen)) {
+		static ImGuiTextFilter s_logFilter;
+		static bool s_logPresetOnly = false;
+
+		s_logFilter.Draw("Filter", 180.0f);
+		ImGui::SameLine();
+		ImGui::Checkbox("Preset only", &s_logPresetOnly);
+
+		std::deque<std::string> lines;
+		Logger::GetRecentLines(lines);
+
+		ImGui::BeginChild("##logscroll", ImVec2(0.0f, 180.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+		for (const auto& line : lines) {
+			if (s_logPresetOnly && line.find("[Preset]") == std::string::npos) continue;
+			if (!s_logFilter.PassFilter(line.c_str())) continue;
+			ImGui::TextUnformatted(line.c_str());
+		}
+		// Auto-scroll to bottom, but only if the user was already at the
+		// bottom -- don't yank them back down if they scrolled up to read.
+		if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+			ImGui::SetScrollHereY(1.0f);
+		ImGui::EndChild();
+	}
+
 	ImGui::End();
 }
 
@@ -582,9 +1343,32 @@ static void** GetMouseVTable() {
 }
 
 static void PatchMouseVTable() {
+	// Patch once, ever -- not "if slot 9 isn't already my hook". The COM
+	// vtable doesn't change across an overlay open or a D3D9 device
+	// reset/reacquire (it belongs to the concrete class implementation, not
+	// the instance), so re-patching on those events was never actually
+	// necessary. Worse, it's actively unsafe with a second mod in the mix
+	// (e.g. CacheUI) also hooking this same slot: if it hooks in AFTER us, it
+	// correctly chains under our hook (saves our hook as its own "original").
+	// Our OLD per-call guard only checked "is slot 9 currently my hook" --
+	// once the other mod re-hooks over us, that check fails, so our next
+	// call here (overlay open, device reset, ...) sees "not patched" and
+	// re-patches: it captures the OTHER mod's hook into OriginalGetDeviceState
+	// (clobbering the true original we'd already saved) and reinstalls our
+	// own hook -- the same static function, so the vtable slot doesn't
+	// visibly change, but our hook now calls the other mod's hook, which
+	// calls what IT saved as its original (our hook, from before we
+	// clobbered ourselves) -- unbounded mutual recursion, stack overflow.
+	// Confirmed root cause of a crash on opening the NVR menu with CacheUI
+	// installed: ntdll.dll/0xC0000005, no NVR-side crash log (a stack-
+	// overflow guard-page fault blows past the normal SEH-based logger).
+	// Patching exactly once means OriginalGetDeviceState, once set, always
+	// points at whatever was genuinely there at that moment -- correct
+	// regardless of what any other mod does to the slot afterward.
+	if (OriginalGetDeviceState) return;
+
 	void** vtable = GetMouseVTable();
-	if (!vtable) return;
-	if (vtable[9] == reinterpret_cast<void*>(HookedGetDeviceState)) return;
+	if (!vtable) return; // input not ready yet -- OriginalGetDeviceState stays null, a later call site gets a real attempt
 	OriginalGetDeviceState = reinterpret_cast<GetDeviceState_t>(vtable[9]);
 	DWORD old;
 	VirtualProtect(&vtable[9], sizeof(void*), PAGE_READWRITE, &old);
@@ -694,6 +1478,18 @@ static void RevertToSnapshot() {
 // ---- WndProc -----------------------------------------------------------------
 
 LRESULT CALLBACK ImGuiManager::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+	// Deferred console command (see RunConsoleCommandDeferred) -- processed
+	// here because message-pump dispatch happens outside any render call,
+	// unlike the button handler that posted this.
+	if (msg == GetDeferredConsoleCommandMessage()) {
+		char* cmd = (char*)lParam;
+		if (cmd) {
+			RunConsoleCommand(cmd);
+			free(cmd);
+		}
+		return 0;
+	}
+
 	if (msg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE)
 		SetOverlayVisible(false);
 
@@ -1392,7 +2188,7 @@ static const char* kShadowOrthoResolutionNames[] = {
 	"0 - 128", "1 - 256", "2 - 512", "3 - 1024", "4 - 2048",
 };
 static const char* kEdgeDetectionNames[] = {
-	"0 - Luma", "1 - Color", "2 - Depth",
+	"0 - Luma", "1 - Color", "2 - Depth", "3 - Luma + Depth",
 };
 
 #define ENUM_OPT(names) EnumOptions{ names, (int)(sizeof(names) / sizeof(names[0])) }
@@ -1865,6 +2661,11 @@ void ImGuiManager::BuildUI() {
 	CfabUpdate();
 	if (s_screenshotMode) return;
 
+	// Dev Tools coc/cow picker's "visited this session" list -- see
+	// TrackVisitedInteriorCell's own comment for why this, not an engine
+	// enumerator, is what backs the interior-cell side of that picker.
+	TrackVisitedInteriorCell();
+
 	// Wait for Escape or Alt release before closing so the game doesn't see them held.
 	static bool escapePending = false;
 	static bool altPending    = false;
@@ -2077,6 +2878,10 @@ void ImGuiManager::BuildUI() {
 			s_devOpen = !s_devOpen;
 			if (!s_devOpen) DevPanelCleanup();
 		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Presets")) s_presetManagerOpen = !s_presetManagerOpen;
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Lighting")) s_lightingPanelOpen = !s_lightingPanelOpen;
 		if (s_devFreecamOn) {
 			ImGui::SameLine();
 			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[freecam]");
@@ -2102,4 +2907,7 @@ void ImGuiManager::BuildUI() {
 	ImGui::End();
 	RenderConfabulator();
 	RenderDevPanel();
+	RenderPresetManagerPanel();
+	RenderLightingPanel();
+	RenderPresetConfirmPopup(); // unconditional -- stays functional even if the panel above gets closed mid-confirm
 }

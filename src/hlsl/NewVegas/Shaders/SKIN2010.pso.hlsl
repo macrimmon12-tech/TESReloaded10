@@ -8,7 +8,7 @@ float4 EmittanceColor : register(c2);
 sampler2D FaceGenMap0 : register(s2);
 sampler2D FaceGenMap1 : register(s3);
 sampler2D NormalMap : register(s1);
-float4 PSLightColor[10];
+float4 PSLightColor[10] : register(c3);
 float4 PSLightPosition[8] : register(c19);
 float4 Toggles : register(c27);
 
@@ -29,7 +29,30 @@ float4 Toggles : register(c27);
 //
 
 
+// --- register aliases --------------------------------------------------------
+// const_N names a raw register cN. Engine constants are aliased to their declared names
+// below; def immediates are recovered from the vanilla bytecode. A register the shader
+// defs takes the literal, NOT the engine constant that shares its number.
+static const float4 const_0 = float4(-0.5, 2, 1, 0.3);
+#define const_1 AmbientColor
+#define const_2 EmittanceColor
+#define const_3 PBRLight(PSLightColor[0])
+#define const_4 PBRLight(PSLightColor[1])
+#define const_5 PBRLight(PSLightColor[2])
+#define const_6 PBRLight(PSLightColor[3])
+#define const_7 PBRLight(PSLightColor[4])
+static const float4 const_8 = float4(0.769230783, -2, 3, 4);
+static const float4 const_9 = float4(0.3, 0, 0, 1);
+#define const_19 PSLightPosition[0]
+#define const_20 PSLightPosition[1]
+#define const_21 PSLightPosition[2]
+#define const_22 PSLightPosition[3]
+#define const_27 Toggles
+// -----------------------------------------------------------------------------
+
 // Structures:
+
+#include "Includes/PBRScale.hlsl"
 
 struct VS_INPUT {
     float3 texcoord_3 : TEXCOORD3;
@@ -158,13 +181,13 @@ VS_OUTPUT main(VS_INPUT IN) {
     r5.xyzw = 1 - r5.xyzw;			// partial precision
     r6.xyz = (r1.z >= EmittanceColor.a ? q15.xyz : ((r5.x * ((q11.x * const_9.xyz) + q14.xyz)) + q15.xyz));			// partial precision
     r8.xyz = (r5.y * ((q20.x * const_9.xyz) + q18.xyz)) + r6.xyz;			// partial precision
-    r1.yzw = (r1.y >= EmittanceColor.a ? r6.wzyx : r8.wzyx);			// partial precision
+    r1.yzw = (r1.y >= EmittanceColor.a ? r6.zyx : r8.zyx);   // was .zyx; r8 is float3			// partial precision
     r6.zw = const_8.zw;
     r5.xyz = (r5.z * ((q26.x * const_9.xyz) + q24.xyz)) + r1.wzy;			// partial precision
-    r1.yzw = (r6.z >= EmittanceColor.a ? r1.yzw : r5.wzyx);			// partial precision
+    r1.yzw = (r6.z >= EmittanceColor.a ? r1.yzw : r5.zyx);			// partial precision
     q68.xyz = (r6.w >= EmittanceColor.a ? r1.wzyx : ((r5.w * ((q32.x * const_9.xyz) + q30.xyz)) + r1.wzy));			// partial precision
     r1.w = r0.w * AmbientColor.a;			// partial precision
-    q69.xyz = max(q68.xyz + AmbientColor.rgb, 0);			// partial precision
+    q69.xyz = max(q68.xyz + PBRAmbient(AmbientColor.rgb), 0);			// partial precision
     q72.xyz = q69.xyz * q34.xyz;			// partial precision
     r1.xyz = (Toggles.y <= 0.0 ? q72.xyz : ((IN.color_1.a * (IN.color_1.rgb - (q34.xyz * q69.xyz))) + q72.xyz));			// partial precision
     OUT.color_0.rgba = r1.xyzw;			// partial precision

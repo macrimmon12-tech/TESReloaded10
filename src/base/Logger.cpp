@@ -8,8 +8,10 @@ FILE*	Logger::LogFile;
 //#define logperf
 
 TimeLogger::TimeLogger() {
+	// One clock read, not two. system_clock::now() is a real cost on Windows and these are
+	// constructed in hot paths; end is only a scratch value until LogTime overwrites it.
 	start = std::chrono::system_clock::now();
-	end = std::chrono::system_clock::now();
+	end = start;
 };
 
 
@@ -24,7 +26,7 @@ float TimeLogger::LogTime(const char* Name) {
 	end = std::chrono::system_clock::now();
 	std::chrono::duration<double> elapsed_seconds = (end - start) * 1000;
 #ifdef logperf
-	Logger::Log("%s ran in %f ms", Name, elapsed_seconds);
+	Logger::Log("%s ran in %f ms", Name, elapsed_seconds.count());
 #endif
 	start = end; // reset counter
 	return (float)elapsed_seconds.count();
@@ -142,6 +144,21 @@ void Logger::Initialize(const char* FileName) {
 	RENDERSTATETYPE["D3DRS_FORCE_DWORD"] = 0x7fffffff;
 }
 
+std::deque<std::string>	Logger::s_ringBuffer;
+std::mutex					Logger::s_ringBufferMutex;
+
+void Logger::PushRingBuffer(const char* Line) {
+	std::lock_guard<std::mutex> lock(s_ringBufferMutex);
+	s_ringBuffer.emplace_back(Line);
+	if (s_ringBuffer.size() > kRingBufferCap)
+		s_ringBuffer.pop_front();
+}
+
+void Logger::GetRecentLines(std::deque<std::string>& OutLines) {
+	std::lock_guard<std::mutex> lock(s_ringBufferMutex);
+	OutLines = s_ringBuffer; // copy out -- caller never renders while holding the lock
+}
+
 void Logger::Log(char* Message, ...) {
 
 	va_list Args;
@@ -154,6 +171,15 @@ void Logger::Log(char* Message, ...) {
 		fputc('\n', LogFile);
 		fflush(LogFile);
 	}
+
+	// Mirror into the in-memory ring buffer for the in-game log window
+	// (docs/preset-manager-design.md § "Debug/authoring tooling") -- a
+	// separate formatting pass, since a va_list can only be consumed once.
+	char formatted[1024];
+	va_start(Args, Message);
+	_vsnprintf_s(formatted, sizeof(formatted), _TRUNCATE, Message, Args);
+	va_end(Args);
+	PushRingBuffer(formatted);
 
 }
 
@@ -169,6 +195,12 @@ void Logger::Log(const char* Message, ...) {
 		fputc('\n', LogFile);
 		fflush(LogFile);
 	}
+
+	char formatted[1024];
+	va_start(Args, Message);
+	_vsnprintf_s(formatted, sizeof(formatted), _TRUNCATE, Message, Args);
+	va_end(Args);
+	PushRingBuffer(formatted);
 
 }
 

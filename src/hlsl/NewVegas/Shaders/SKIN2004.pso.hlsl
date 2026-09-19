@@ -7,9 +7,7 @@ sampler2D AttenuationMap : register(s4);
 sampler2D BaseMap : register(s0);
 sampler2D GlowMap : register(s3);
 sampler2D NormalMap : register(s1);
-float4 PSLightColor[10];
-
-
+float4 PSLightColor[10] : register(c3);
 // Registers:
 //
 //   Name           Reg   Size
@@ -23,7 +21,18 @@ float4 PSLightColor[10];
 //
 
 
+// --- register aliases --------------------------------------------------------
+// const_N names a raw register cN. Engine constants are aliased to their declared names
+// below; def immediates are recovered from the vanilla bytecode. A register the shader
+// defs takes the literal, NOT the engine constant that shares its number.
+#define const_1 AmbientColor
+#define const_3 PBRLight(PSLightColor[0])
+#define const_4 PBRLight(PSLightColor[1])
+// -----------------------------------------------------------------------------
+
 // Structures:
+
+#include "Includes/PBRScale.hlsl"
 
 struct VS_INPUT {
     float3 texcoord_1 : TEXCOORD1_centroid;			// partial precision
@@ -84,7 +93,11 @@ VS_OUTPUT main(VS_INPUT IN) {
     r0.xyz = (q7.x * r1.xyz) + ((q5.x * const_4.xyz) + q76.xyz);			// partial precision
     r2.xyz = ((q10.x * shades(q8.xyz, -IN.texcoord_1)) * const_3.xyz) * 0.5;			// partial precision
     q14.xyz = (saturate((1 - att11.x) - att12.x) * r0.xyz) + ((shades(q2.xyz, IN.texcoord_1.xyz) * const_3.xyz) + r2.xyz);			// partial precision
-    r4.xyz = q14.xyz + AmbientColor.rgb;			// partial precision
+    // Vanilla ends: texld_pp r4, t0, s0 / add_pp r4.xyz, r0, c1 / mov_pp oC0, r4 -- one
+    // register carries the base texture's alpha and then has .xyz overwritten by the lighting
+    // sum, so .a comes from texel0 above. The lighting sum is the output; this pass applies
+    // no albedo.
+    OUT.color_0.rgb = q14.xyz + PBRAmbient(AmbientColor.rgb);			// partial precision
 
     return OUT;
 };

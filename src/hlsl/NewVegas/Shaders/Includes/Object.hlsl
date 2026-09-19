@@ -6,6 +6,12 @@
     #include "includes/PBR.hlsl"
 #endif
 
+#if defined(__INTELLISENSE__)
+    #include "SkyAmbient.hlsl"
+#else
+    #include "includes/SkyAmbient.hlsl"
+#endif
+
 float4 TESR_PBRData : register(c32);
 float4 TESR_PBRExtraData : register(c33);
 
@@ -110,6 +116,30 @@ float3 getSunLighting(float3 lightDir, float3 lightColor, float3 viewDir, float3
     #endif
 }
 
+
+
+// [_Main.Develop.Main], via Debug.cpp UpdateSettings. c135: c132 is TESR_ShadowBlur.
+// Populated even with Shaders.Debug disabled -- Debug has no per-frame UpdateConstants.
+float4 TESR_DebugVar : register(c135);
+
+// --- Hemisphere skylight ------------------------------------------------------------------
+// Additive upper-sky term on top of the weather ambient, weighted by w = (1 + N.up) / 2.
+// w must stay linear in the dot product: that is the exact cosine-weighted form factor.
+// [Shaders.PBR.*] SkylightingScale. No separate toggle: 0 disables the term.
+#define SKY_AMBIENT_STRENGTH  (TESR_PBRExtraData.y)      // scale on skyUpper at w = 1
+
 float3 getAmbientLighting(float3 ambient, float3 albedo) {
     return ambient * TESR_PBRData.w * albedo;
+}
+
+float3 getAmbientLighting(float3 ambient, float3 albedo, float3 worldNormal, float worldNormalValid) {
+    float3 flatAmbient = ambient * TESR_PBRData.w;
+
+    // AmbientScale (TESR_PBRData.w) scales the weather ambient above but not this: the sky is a
+    // second, independent light source, so SkylightingScale is its only strength knob and it
+    // survives AmbientScale = 0.
+    float3 skyTerm = SkyAmbientRadiance(worldNormal, TESR_PBRExtraData.z) * SKY_AMBIENT_STRENGTH;
+
+    // worldNormalValid is 0 under a vanilla VS, where the carried world position is undefined.
+    return (flatAmbient + skyTerm * worldNormalValid) * albedo;
 }

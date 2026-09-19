@@ -15,6 +15,9 @@ public:
 		D3DXVECTOR4		SkyData;
 		D3DXVECTOR4		SunsetColor;
 		D3DXVECTOR4		CloudData;
+		// Order-2 spherical harmonic irradiance for the sky, for the ambient in the lighting
+		// shaders. 9 coefficients, already convolved with the clamped-cosine kernel.
+		D3DXVECTOR4		Irradiance[9];
 	};
 	SkyStruct Constants;
 	bool useSunDiskColor;
