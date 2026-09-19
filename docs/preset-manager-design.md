@@ -710,3 +710,11 @@ Delete, master on/off toggle.** ✅ Done.
   existing Save/Save Copy/Disk reload machinery for free instead of needing
   a second, parallel persistence path. Re-enabling resolves immediately
   rather than waiting for the next location change.
+
+  **Defaults off.** See "Deliberate departures from Cartographer" above:
+  running both at once means two systems racing to set the same NVR
+  settings on every cell transition, and it silently wins that race for
+  anything -- like LUT selection -- that only reloads through this
+  feature's own apply path. Defaulting off means installing this build
+  alongside an existing Cartographer setup doesn't change anything until
+  the player deliberately turns it on.
