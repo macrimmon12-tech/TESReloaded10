@@ -79,10 +79,15 @@ VS_OUTPUT main(VS_INPUT IN) {
     // Applied once to the summed highlight. LightData[1].w: sun specular strength.
     float specScale = normalTex.w * LightData[1].w * IN.color.y;
 
-    // ddx/ddy must stay at top level.
-    // Outside the guard: the skylight needs this normal whether or not forward shadows
-    // are compiled in, and ForwardShadows is a live setting that can switch them off.
-    float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    // Hair strands are thin, alpha-tested and often near-edge-on or overlapping within a
+    // pixel quad, so GetShadowGeometricNormal's ddx/ddy reconstruction reads a different (or
+    // near-degenerate) normal every couple of pixels. The self-shadow bias below offsets the
+    // shadow-map sample ALONG this normal, so that noise turns directly into per-pixel
+    // light/dark jitter -- the splotching. Substitute the view direction instead: it is
+    // smooth (no derivatives), still points outward from the strand toward the camera, which
+    // is enough to suppress self-shadow acne and give SkyAmbient a stable hemisphere split.
+    // worldPos is camera-relative, so -worldPos already points from the surface to the camera.
+    float3 shadowNormal = normalize(-IN.shadowWorldPos.xyz);
 #if FORWARD_SHADOWS
     float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
                     ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
