@@ -99,6 +99,11 @@ VS_OUTPUT main(VS_INPUT IN) {
     // no albedo.
     OUT.color_0.rgb = q14.xyz + PBRAmbient(AmbientColor.rgb);			// partial precision
 
+    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
+#if SHADOW_FORCE_MARKER
+    OUT.color_0.rgb = float3(1.0f, 0.0f, 1.0f);
+#endif
+
     return OUT;
 };
 

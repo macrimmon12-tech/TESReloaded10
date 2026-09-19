@@ -45,5 +45,10 @@ PS_OUTPUT main(PS_INPUT IN) {
     OUT.color.rgb = lerp(litColor, IN.fog.rgb, IN.fog.w);
     OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
 
+    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
+#if SHADOW_FORCE_MARKER
+    OUT.color.rgb = float3(1.0f, 0.0f, 1.0f);
+#endif
+
     return OUT;
 };
