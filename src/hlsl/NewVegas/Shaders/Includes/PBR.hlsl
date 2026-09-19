@@ -6,9 +6,17 @@
 // Geometric specular AA
 // http://www.jp.square-enix.com/tech/library/pdf/ImprovedGeometricSpecularAA.pdf
 // https://www.jcgt.org/published/0010/02/02/paper.pdf
-float SpecularAA(float3 normal, float roughness, float sigma, float kappa) {
-    float SIGMA2 = 0.15915494;
-    float KAPPA = 0.18;
+//
+// Widens roughness where the NORMAL varies fast across a pixel's screen-space footprint --
+// exactly what a high-frequency normal map (hair, being the sharpest example NVR ships) does.
+// Without this, a GGX peak scales roughly as 1/roughness^4: two adjacent texels whose gloss
+// differs by 10 points (0.85 vs 0.95) put out about an 80x difference in peak brightness, pure
+// per-texel noise the material texture never intended anyone to resolve. In ObjectTemplate.hlsl
+// that noise is the HAIR (ONLY_SPECULAR) pass's own alpha-blend weight, so it showed up as a
+// splotchy, moth-eaten alpha pattern rather than as a shimmer in the highlight itself.
+float SpecularAA(float3 normal, float roughness) {
+    const float SIGMA2 = 0.15915494;
+    const float KAPPA = 0.18;
     float3 dndu = ddx(normal);
     float3 dndv = ddy(normal);
     float variance = SIGMA2 * (dot(dndu, dndu) + dot(dndv, dndv));

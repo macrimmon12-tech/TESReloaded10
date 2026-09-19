@@ -578,10 +578,12 @@ PS_OUTPUT main(PS_INPUT IN) {
     normal.xyz = normalize(expand(normal.xyz));
     
     float roughness = getRoughness(normal.a);
-    
-    //if (TESR_DebugVar.x > 0.0)
-    //    roughness = SpecularAA(normal.xyz, roughness, TESR_DebugVar.z);
-    
+
+    // Geometric specular AA -- see the comment on SpecularAA itself. Unconditional: this is a
+    // quality fix for high-frequency normal maps (hair chief among them), not a debug toggle,
+    // and ddx/ddy have to run here at top level regardless of anything below.
+    roughness = SpecularAA(normal.xyz, roughness);
+
     //if (TESR_DebugVar.y > 0.0) {
     //    OUT.color.a = 1;
     //    if (TESR_DebugVar.y > 0.1)
