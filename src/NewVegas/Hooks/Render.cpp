@@ -212,7 +212,11 @@ void __cdecl ProcessImageSpaceShadersHook(NiDX9Renderer* Renderer, BSRenderedTex
 		RenderState->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE, RenderStateArgs);
 		RenderState->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE, RenderStateArgs);
 		RenderState->SetRenderState(D3DRS_NORMALIZENORMALS, D3DZB_FALSE, RenderStateArgs);
-		RenderState->SetRenderState(D3DRS_POINTSIZE, 810365505, RenderStateArgs); // fix flickering linked to alpha somehow
+		// TEMP DIAGNOSTIC -- was 810365505 (FourCC 'A2M0', disables Alpha-to-Coverage). Flipped to
+		// 810365506 ('A2M1', enable) globally to confirm/rule out ATOC as the cause of the hard-
+		// cutoff hair-alpha bug before committing to a scoped fix. Revert once answered -- this
+		// line's original value was a deliberate fix for a different alpha-flicker bug.
+		RenderState->SetRenderState(D3DRS_POINTSIZE, 810365506, RenderStateArgs);
 
 		TheShaderManager->RenderEffectsPreTonemapping(GameSurface);
 	
