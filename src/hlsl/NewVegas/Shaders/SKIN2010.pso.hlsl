@@ -192,11 +192,6 @@ VS_OUTPUT main(VS_INPUT IN) {
     r1.xyz = (Toggles.y <= 0.0 ? q72.xyz : ((IN.color_1.a * (IN.color_1.rgb - (q34.xyz * q69.xyz))) + q72.xyz));			// partial precision
     OUT.color_0.rgba = r1.xyzw;			// partial precision
 
-    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
-#if SHADOW_FORCE_MARKER
-    OUT.color_0.rgb = float3(1.0f, 0.0f, 1.0f);
-#endif
-
     return OUT;
 };
 

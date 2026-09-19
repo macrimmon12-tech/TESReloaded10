@@ -131,12 +131,6 @@ VS_OUTPUT main(VS_INPUT IN) {
     // Was a debug override: selectColor(TESR_DebugVar.x, ...) emitted a flat light colour
     // unless the dev var was zero. Kept only the real result.
     OUT.color_0.rgba = float4(r6, 1);
-
-    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
-#if SHADOW_FORCE_MARKER
-    OUT.color_0.rgb = float3(1.0f, 0.0f, 1.0f);
-#endif
-
     return OUT;
 };
 

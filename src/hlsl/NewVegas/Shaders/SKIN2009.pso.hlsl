@@ -122,11 +122,6 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.color_0.a = 1;			// partial precision
     OUT.color_0.rgb = (saturate((1 - att1.x) - att51.x) * ((q24.x * const_2.xyz) + r1.wzy)) + r0.xyz;			// partial precision
 
-    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
-#if SHADOW_FORCE_MARKER
-    OUT.color_0.rgb = float3(1.0f, 0.0f, 1.0f);
-#endif
-
     return OUT;
 };
 
