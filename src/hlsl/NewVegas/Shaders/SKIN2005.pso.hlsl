@@ -110,12 +110,6 @@ VS_OUTPUT main(VS_INPUT IN) {
     // sum, so .a comes from texel0 above. This pass applies no albedo.
     OUT.color_0.rgb = q17.xyz + PBRAmbient(AmbientColor.rgb);			// partial precision
 
-    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
-#if HAIR_SHADER_DIAG
-    OUT.color_0.rgb = float3(0.5f, 0.0f, 1.0f);          // violet (SKIN2005)
-    OUT.color_0.a = 1.0f;
-#endif
-
     return OUT;
 };
 

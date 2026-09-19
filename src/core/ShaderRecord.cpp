@@ -168,10 +168,6 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	if (TheRenderManager->IsReversedDepth())
 		AppendDefine("REVERSED_DEPTH", "");
 
-	// TEMP DIAGNOSTIC -- one distinct debug colour per candidate shader/permutation for the
-	// splotchy-hair-alpha investigation. Revert once answered.
-	AppendDefine("HAIR_SHADER_DIAG", "1");
-
 	// Forward sun shadows. Read straight from the setting manager rather than from the
 	// ShadowsExteriors effect, because shaders can be loaded before that effect is built.
 	//

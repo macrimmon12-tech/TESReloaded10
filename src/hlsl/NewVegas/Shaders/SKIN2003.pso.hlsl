@@ -94,12 +94,6 @@ VS_OUTPUT main(VS_INPUT IN) {
 
     OUT.color_0.rgba = finalColor;
 
-    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
-#if HAIR_SHADER_DIAG
-    OUT.color_0.rgb = float3(0.0f, 0.6f, 1.0f);          // sky blue (SKIN2003)
-    OUT.color_0.a = 1.0f;
-#endif
-
     return OUT;
 };
 
