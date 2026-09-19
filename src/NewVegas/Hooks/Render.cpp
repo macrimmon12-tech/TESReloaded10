@@ -23,20 +23,9 @@ void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTe
 
 }
 
-// TEMP DIAGNOSTIC -- hair (SM3002.pso/SM3003.pso) samples a hard binary alpha cutout mask from
-// BaseMap (s0) and vanilla's soft edges don't come from ATOC (tested and ruled out) or a
-// different texture resource (confirmed identical, only the shader binary differs). Next
-// candidate: vanilla's original .fx technique may have forced higher-quality filtering
-// specifically for the hair pass, a pass-level state our shader-binary-swap approach wouldn't
-// carry over (same category of bug as the ATOC one). Force anisotropic filtering + zero LOD
-// bias on stage 0 while a hair pixel shader is bound, save/restore the real prior values around
-// it. Revert once answered.
-static bool s_HairFilterActive = false;
-static DWORD s_SavedMinFilter, s_SavedMagFilter, s_SavedMipFilter, s_SavedMaxAniso, s_SavedMipBias;
-
 void (__thiscall* SetShaders)(BSShader*, UInt32) = (void (__thiscall*)(BSShader*, UInt32))Hooks::SetShaders;
 void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
-
+	
 	NiGeometry* Geometry = *(NiGeometry**)(*(void**)0x011F91E0);
 	NiD3DPass* Pass = *(NiD3DPass**)0x0126F74C;
 	NiD3DVertexShaderEx* VertexShader = (NiD3DVertexShaderEx*)Pass->VertexShader;
@@ -52,32 +41,6 @@ void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
 	}
 	if (PixelShader) {
 		PixelShader->SetupShader(PixelShader2);
-
-		bool IsHairPixelShader = !strcmp(PixelShader->Name, "SM3002.pso") || !strcmp(PixelShader->Name, "SM3003.pso");
-		if (IsHairPixelShader != s_HairFilterActive) {
-			IDirect3DDevice9* Device = TheRenderManager->device;
-			if (IsHairPixelShader) {
-				Device->GetSamplerState(0, D3DSAMP_MINFILTER, &s_SavedMinFilter);
-				Device->GetSamplerState(0, D3DSAMP_MAGFILTER, &s_SavedMagFilter);
-				Device->GetSamplerState(0, D3DSAMP_MIPFILTER, &s_SavedMipFilter);
-				Device->GetSamplerState(0, D3DSAMP_MAXANISOTROPY, &s_SavedMaxAniso);
-				Device->GetSamplerState(0, D3DSAMP_MIPMAPLODBIAS, &s_SavedMipBias);
-
-				Device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC);
-				Device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_ANISOTROPIC);
-				Device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
-				Device->SetSamplerState(0, D3DSAMP_MAXANISOTROPY, 16);
-				Device->SetSamplerState(0, D3DSAMP_MIPMAPLODBIAS, 0);
-			}
-			else {
-				Device->SetSamplerState(0, D3DSAMP_MINFILTER, s_SavedMinFilter);
-				Device->SetSamplerState(0, D3DSAMP_MAGFILTER, s_SavedMagFilter);
-				Device->SetSamplerState(0, D3DSAMP_MIPFILTER, s_SavedMipFilter);
-				Device->SetSamplerState(0, D3DSAMP_MAXANISOTROPY, s_SavedMaxAniso);
-				Device->SetSamplerState(0, D3DSAMP_MIPMAPLODBIAS, s_SavedMipBias);
-			}
-			s_HairFilterActive = IsHairPixelShader;
-		}
 	}
 	else {
 		Logger::Log("Error getting pixel shader for pass %s", Pointers::Functions::GetPassDescription(PassIndex));
