@@ -165,10 +165,12 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.color_0.rgb = result;
     OUT.color_0.a = baseTex.a * MatAlpha.x;
 
-    // TEMP DIAGNOSTIC -- texkill disabled to test whether the hard alpha-test discard itself is
-    // what's producing the hard-cutoff strand edges (as opposed to a soft alpha BLEND vanilla
-    // may actually rely on). Reverted once answered.
-    // clip(baseTex.a - MatAlpha.y);
+    // No texkill. baseTex.a fades smoothly from opaque core to fully transparent at strand
+    // tips/edges; clip() at MatAlpha.y's mid-range threshold discarded that entire soft
+    // transition, leaving only the fully-opaque core with a hard edge at the threshold contour
+    // instead of a feathered fade. Real alpha blending (already active for this pass) handles
+    // the full gradient correctly on its own -- a near-zero-alpha pixel contributes ~nothing to
+    // the blend, so there's no correctness cost to leaving it in rather than discarding it.
 
     return OUT;
 };
