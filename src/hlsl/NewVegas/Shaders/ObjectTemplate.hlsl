@@ -712,6 +712,23 @@ PS_OUTPUT main(PS_INPUT IN) {
         OUT.color.a = baseColor.a * AmbientColor.a;
     #endif
 
+    // TEMP DIAGNOSTIC -- one colour per candidate permutation, forced fully opaque so it's
+    // visible regardless of whatever the real alpha would have been. Revert once answered.
+#if HAIR_SHADER_DIAG
+    #if defined(DIFFUSE)
+        OUT.color.rgb = float3(1.0f, 0.0f, 0.0f);        // red
+    #elif defined(ONLY_SPECULAR) && defined(HAIR)
+        OUT.color.rgb = float3(1.0f, 0.55f, 0.0f);       // orange
+    #elif defined(ONLY_SPECULAR)
+        OUT.color.rgb = float3(1.0f, 1.0f, 0.0f);        // yellow
+    #elif defined(ONLY_LIGHT)
+        OUT.color.rgb = float3(0.6f, 1.0f, 0.0f);        // chartreuse
+    #else
+        OUT.color.rgb = float3(0.0f, 1.0f, 0.0f);        // green
+    #endif
+    OUT.color.a = 1.0f;
+#endif
+
     return OUT;
 }
 
@@ -876,6 +893,13 @@ PS_OUTPUT main(PS_INPUT IN) {
 
     OUT.color.rgb = finalColor.rgb;
     OUT.color.a = baseColor.a * AmbientColor.a;
+
+    // TEMP DIAGNOSTIC -- distinct colour for this permutation family (MAX_LIGHTS > 4).
+    // Revert once answered.
+#if HAIR_SHADER_DIAG
+    OUT.color.rgb = float3(0.0f, 1.0f, 0.6f);            // spring green
+    OUT.color.a = 1.0f;
+#endif
 
     return OUT;
 }
