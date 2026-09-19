@@ -681,12 +681,16 @@ PS_OUTPUT main(PS_INPUT IN) {
     #endif
     
 
-#if SHADOW_FORCE_MARKER
-    finalColor.rgb = float3(1.0f, 0.0f, 1.0f);   // unconditional: proves this shader ran
+// TEMP DIAGNOSTIC -- scoped to HAIR only, so the rest of the scene stays normal and this is a
+// clean yes/no: hair painted solid magenta means it's going through THIS permutation of
+// ObjectTemplate.hlsl; hair NOT painted means the splotchy-PBR-alpha bug lives elsewhere. Revert
+// once answered.
+#if SHADOW_FORCE_MARKER && defined(HAIR)
+    finalColor.rgb = float3(1.0f, 0.0f, 1.0f);
 #endif
 
     OUT.color.rgb = finalColor.rgb;
-    
+
     #if defined(DIFFUSE)
         OUT.color.a = 1;
     #elif defined(ONLY_SPECULAR)
@@ -870,12 +874,16 @@ PS_OUTPUT main(PS_INPUT IN) {
     #endif
     
 
-#if SHADOW_FORCE_MARKER
-    finalColor.rgb = float3(1.0f, 0.0f, 1.0f);   // unconditional: proves this shader ran
+// TEMP DIAGNOSTIC -- scoped to HAIR only, so the rest of the scene stays normal and this is a
+// clean yes/no: hair painted solid magenta means it's going through THIS permutation of
+// ObjectTemplate.hlsl; hair NOT painted means the splotchy-PBR-alpha bug lives elsewhere. Revert
+// once answered.
+#if SHADOW_FORCE_MARKER && defined(HAIR)
+    finalColor.rgb = float3(1.0f, 0.0f, 1.0f);
 #endif
 
     OUT.color.rgb = finalColor.rgb;
-    OUT.color.a = baseColor.a * AmbientColor.a;
+OUT.color.a = baseColor.a * AmbientColor.a;
 
     return OUT;
 }
