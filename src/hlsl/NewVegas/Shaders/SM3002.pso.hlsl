@@ -133,5 +133,11 @@ VS_OUTPUT main(VS_INPUT IN) {
     // texkill.
     clip(baseTex.a - MatAlpha.y);
 
+    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
+#if HAIR_SHADER_DIAG
+    OUT.color_0.rgb = float3(0.2f, 0.2f, 0.8f);          // indigo (SM3002)
+    OUT.color_0.a = 1.0f;
+#endif
+
     return OUT;
 };

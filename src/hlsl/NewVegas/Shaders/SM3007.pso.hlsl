@@ -151,5 +151,11 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.color_0.rgb = lerp(blended, whitened, MatAlpha.w);
     OUT.color_0.a = baseTex.a * MatAlpha.x;
 
+    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
+#if HAIR_SHADER_DIAG
+    OUT.color_0.rgb = float3(0.3f, 0.1f, 0.4f);          // deep purple (SM3007)
+    OUT.color_0.a = 1.0f;
+#endif
+
     return OUT;
 };
