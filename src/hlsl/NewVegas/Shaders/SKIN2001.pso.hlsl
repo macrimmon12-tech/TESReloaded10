@@ -101,13 +101,6 @@ VS_OUTPUT main(VS_INPUT IN) {
     color.a = baseColor.a * AmbientColor.a;
 
     OUT.color_0 = color;
-
-    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
-#if HAIR_SHADER_DIAG
-    OUT.color_0.rgb = float3(0.4f, 0.8f, 0.4f);          // mint green (SKIN2001)
-    OUT.color_0.a = 1.0f;
-#endif
-
     return OUT;
 
     return OUT;

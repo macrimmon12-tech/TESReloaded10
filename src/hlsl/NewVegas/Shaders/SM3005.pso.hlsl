@@ -148,11 +148,5 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.color_0.rgb = lerp(blended, whitened, MatAlpha.w);
     OUT.color_0.a = baseTex.a * MatAlpha.x;
 
-    // TEMP DIAGNOSTIC -- reverted once the PBR-hair-alpha investigation is answered.
-#if HAIR_SHADER_DIAG
-    OUT.color_0.rgb = float3(0.6f, 0.9f, 1.0f);          // pale cyan / ice blue (SM3005)
-    OUT.color_0.a = 1.0f;
-#endif
-
     return OUT;
 };
