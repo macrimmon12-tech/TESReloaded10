@@ -46,7 +46,11 @@ extern "C" {
 
 			if (GetModuleHandle(L"VanillaPlusAO.dll")) {
 				TheShaderManager->Effects.AmbientOcclusion->bNVAOLoaded = true;
-			}			
+			}
+
+			if (GetModuleHandle(L"VanillaPlusSkin.dll")) {
+				TheShaderManager->Shaders.Skin->bVPSLoaded = true;
+			}
 
 			HMODULE hRTM = GetModuleHandle(L"RealTimeMenus.dll");
 			if (hRTM) {
