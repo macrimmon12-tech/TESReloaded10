@@ -168,6 +168,11 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	if (TheRenderManager->IsReversedDepth())
 		AppendDefine("REVERSED_DEPTH", "");
 
+	// TEMP DIAGNOSTIC -- visualize raw sampled alpha (bypassing blend mode / clip) on the hair
+	// shaders, to isolate whether PBR loses fine strand alpha detail at the texture-sample stage
+	// or further downstream. Revert once answered.
+	AppendDefine("HAIR_ALPHA_DIAG", "1");
+
 	// Forward sun shadows. Read straight from the setting manager rather than from the
 	// ShadowsExteriors effect, because shaders can be loaded before that effect is built.
 	//
