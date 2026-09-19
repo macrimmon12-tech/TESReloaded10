@@ -62,6 +62,28 @@ void ShadowsExteriorEffect::UpdateConstants() {
 		Constants.Data.y = Settings.Interiors.Darkness;
 		Constants.Data.z = 1.0f / (float)Settings.Interiors.ShadowCubeMapSize;
 	}
+
+	// Force-rebind FormatData/ForwardData directly, once per frame, bypassing the
+	// per-shader "bound by name" constant table.
+	//
+	// GetSunShadow's gates on TESR_ShadowFormatData.z (interior/exterior) and
+	// TESR_ShadowForwardData.x (forward suppressed) live inside the
+	// !DIFFUSE && !POINT block in ObjectTemplate.hlsl. A DIFFUSE- or POINT-lit
+	// permutation never reaches that code, so its own compiled constant table
+	// never lists these names -- ShaderRecord::CreateCT has nothing to bind, and
+	// SetCT() never issues the SetPixelShaderConstantF that would refresh c129/
+	// c133 for that draw call. D3D9 pixel shader constant registers persist raw
+	// values across draw calls (they are not per-shader, per-draw state), so
+	// that object silently inherits whatever an earlier, unrelated draw left in
+	// those registers -- which is how exterior shadow state was observed to
+	// stick after walking into an interior lit mostly by DIFFUSE/POINT objects.
+	//
+	// Both values are frame-invariant (same for every object drawn this frame),
+	// so one unconditional bind here, ahead of the frame's world geometry, is
+	// sufficient: any shader that DOES list these names will simply rewrite them
+	// with the identical value when it draws.
+	TheRenderManager->device->SetPixelShaderConstantF(129, (const float*)&Constants.FormatData, 1);
+	TheRenderManager->device->SetPixelShaderConstantF(133, (const float*)&Constants.ForwardData, 1);
 }
 
 bool ShadowsExteriorEffect::UpdateSettingsFromQuality(int quality) {

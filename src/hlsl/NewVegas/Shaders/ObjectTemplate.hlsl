@@ -688,7 +688,22 @@ PS_OUTPUT main(PS_INPUT IN) {
     #if defined(DIFFUSE)
         OUT.color.a = 1;
     #elif defined(ONLY_SPECULAR)
-        OUT.color.a = weight(finalColor.rgb);
+        #if !defined(DIFFUSE) && !defined(POINT)
+            // Alpha here is a blend WEIGHT (this pass's own brightness, used to fade
+            // its additive specular/sheen layer smoothly), not a darkness value --
+            // unlike the colour output, it must not shrink with sun shadow, or the
+            // whole layer fades toward invisible in shadow instead of just going
+            // dark. That read as "alpha blending broken" under Forward Shadows
+            // specifically, because sunShadow is the one new factor it added to
+            // shadowMultiplier here (STBB/PROJ_SHADOW's own contribution predates
+            // this and is left alone). Dividing it back out recovers the weight
+            // this pass would have produced without Forward Shadows; harmless and
+            // exact when Forward Shadows is compiled out, since sunShadow is then
+            // fixed at 1.0.
+            OUT.color.a = weight(finalColor.rgb) / max(sunShadow, 0.05f);
+        #else
+            OUT.color.a = weight(finalColor.rgb);
+        #endif
     #elif defined(ONLY_LIGHT)
         OUT.color.a = baseColor.a;
     #else
