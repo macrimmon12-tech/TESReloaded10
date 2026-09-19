@@ -31,15 +31,9 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
 #if FORWARD_SHADOWS
     // ddx/ddy must stay at top level, outside dynamic flow control.
-    float sunShadow = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
-                     ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
-                     : 1.0f;
-    // TEMP DIAGNOSTIC -- isolates whether GetSunShadow itself is the splotch source.
-    // Reverted once answered.
-#if SHADOW_FORCE_MARKER
-    sunShadow = 1.0f;
-#endif
-    sun *= sunShadow;
+    sun *= SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
+         ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
+         : 1.0f;
 #endif
 
     // Same split getSunLighting/getAmbientLighting apply on the object path.
