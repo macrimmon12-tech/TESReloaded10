@@ -23,19 +23,9 @@ void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTe
 
 }
 
-// AMD/ATI Alpha-to-Coverage toggle, written through D3DRS_POINTSIZE as the FourCC 'A2M1'
-// (enable) / 'A2M0' (disable). Render.cpp's own pre-tonemapping setup below disables it
-// (810365505, "fix flickering linked to alpha somehow") for the whole frame and never restores
-// it -- true on master too, so left alone here. Hair (SM3002.pso/SM3003.pso) samples a hard
-// binary alpha cutout mask and relies on ATOC to soften its edges/silhouette; bracket it back
-// on only around hair's own draw calls, tracked here so the state is touched only on a change.
-static bool s_HairAlphaToCoverage = false;
-#define D3DFOURCC_A2M0 810365505
-#define D3DFOURCC_A2M1 810365506
-
 void (__thiscall* SetShaders)(BSShader*, UInt32) = (void (__thiscall*)(BSShader*, UInt32))Hooks::SetShaders;
 void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
-
+	
 	NiGeometry* Geometry = *(NiGeometry**)(*(void**)0x011F91E0);
 	NiD3DPass* Pass = *(NiD3DPass**)0x0126F74C;
 	NiD3DVertexShaderEx* VertexShader = (NiD3DVertexShaderEx*)Pass->VertexShader;
@@ -51,12 +41,6 @@ void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
 	}
 	if (PixelShader) {
 		PixelShader->SetupShader(PixelShader2);
-
-		bool IsHairPixelShader = !strcmp(PixelShader->Name, "SM3002.pso") || !strcmp(PixelShader->Name, "SM3003.pso");
-		if (IsHairPixelShader != s_HairAlphaToCoverage) {
-			TheRenderManager->renderState->SetRenderState(D3DRS_POINTSIZE, IsHairPixelShader ? D3DFOURCC_A2M1 : D3DFOURCC_A2M0, RenderStateArgs);
-			s_HairAlphaToCoverage = IsHairPixelShader;
-		}
 	}
 	else {
 		Logger::Log("Error getting pixel shader for pass %s", Pointers::Functions::GetPassDescription(PassIndex));
