@@ -168,11 +168,6 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	if (TheRenderManager->IsReversedDepth())
 		AppendDefine("REVERSED_DEPTH", "");
 
-	// TEMP DIAGNOSTIC -- paints HAIR-permutation geometry in ObjectTemplate.hlsl solid magenta,
-	// to answer whether the splotchy-PBR-hair-alpha bug is even going through that shader. Revert
-	// once answered.
-	AppendDefine("SHADOW_FORCE_MARKER", "1");
-
 	// Forward sun shadows. Read straight from the setting manager rather than from the
 	// ShadowsExteriors effect, because shaders can be loaded before that effect is built.
 	//
