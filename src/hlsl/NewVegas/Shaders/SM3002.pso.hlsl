@@ -135,14 +135,6 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.color_0.rgb = result;
     OUT.color_0.a = baseTex.a * MatAlpha.x;
 
-    // TEMP DIAGNOSTIC -- raw sampled alpha as grayscale, blend mode and clip bypassed. Reverted
-    // once the PBR-hair-alpha investigation is answered.
-#if HAIR_ALPHA_DIAG
-    OUT.color_0.rgb = baseTex.a.xxx;
-    OUT.color_0.a = 1.0f;
-    return OUT;
-#endif
-
     // texkill.
     clip(baseTex.a - MatAlpha.y);
 
