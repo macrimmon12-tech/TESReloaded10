@@ -13,7 +13,7 @@
 // which inverted CompositeLight's blend and erased the scene under a flat wash entirely.
 //
 // So: no fog volume, no height ceiling, no animated noise, no wind. The march is just camera to
-// visible surface (or a capped distance into open sky), testing the sun shadow atlas at each
+// visible surface (or the falloff cutoff, whichever is nearer), testing the sun shadow atlas at each
 // step. The only thing that ever brightens a pixel is GetSunShadowAmount() varying along the ray
 // -- i.e. an actual occluder -- and the final output is saturated once, at the source, so it can
 // never invert the composite blend. General atmospheric haze is VolumetricFog.fx.hlsl's job, not
@@ -178,7 +178,6 @@ static const float4x4 DITHER_PATTERN = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.22
 
 static const int MARCH_NUM = 14;
 static const float NOISE_GRANULARITY = 0.5 / 255.0;
-static const float RAY_LENGTH_MAX = 20000.0f;
 
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
@@ -228,8 +227,8 @@ float ComputeScattering(float lightDotView, float ceiling) {
     return result;
 }
 
-// Low-resolution ray march: walks the view ray from the camera to the visible surface (or
-// RAY_LENGTH_MAX into open sky), sampling the sun shadow atlas at each step. The Henyey-
+// Low-resolution ray march: walks the view ray from the camera to the visible surface, or to
+// the distance-falloff cutoff, whichever is nearer -- sampling the sun shadow atlas at each step. The Henyey-
 // Greenstein term itself only depends on view/sun angle, so it's constant along the ray and
 // computed once outside the loop; the ONLY thing that varies per step, and the only thing that
 // ever brightens a pixel, is the shadow value -- so a fully-lit, unoccluded view (no occluder in
@@ -243,11 +242,28 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
 
     float3 cameraVector = toWorld(uv) * depth;
     float3 rayDirection = normalize(cameraVector);
-    float rayLength = isSky ? RAY_LENGTH_MAX : min(length(cameraVector), RAY_LENGTH_MAX);
+
+    // March only as far as the distance falloff below actually weights: every sample past
+    // accumDistance is multiplied by zero, so spending steps out there buys nothing and costs
+    // the resolution of the part that does count. Marching to the visible surface (or 20000
+    // units into open sky) instead put a sky ray's step length at 20000/14 = ~1430 units, so
+    // only its first two or three samples landed inside the falloff window at all -- the whole
+    // open-sky result was reconstructed from three samples 1430 units apart, while a ray that
+    // hit a wall 700 units out got all 14 at 50-unit spacing. That quality cliff between
+    // "ray hit something near" and "ray reached sky" is what read as soft blobs of light
+    // hanging in mid-air, untethered from any geometry.
+    float accumDistance = max(TESR_VolumetricLightData1.w, 1.0f);
+    float rayLength = isSky ? accumDistance : min(length(cameraVector), accumDistance);
     float3 step = rayDirection * (rayLength / MARCH_NUM);
 
+    // 0.5/Reciprocal, not 1/Reciprocal: TESR_ReciprocalResolution describes the full-res back
+    // buffer, but this technique renders into the half-res TESR_VolumetricLightBuffer, so uv
+    // spans the half-res target. Scaling by the full-res size advanced the index by two per
+    // pixel, so only two of the pattern's four columns (and rows) were ever reachable -- a 2x2
+    // dither doing a 4x4 dither's job, which leaves banding for the bilinear upsample to smear.
+    float2 ditherPixel = abs(uv) * 0.5f / TESR_ReciprocalResolution.xy;
     float ditherOffset = ditherEnabled
-        ? DITHER_PATTERN[int(abs(uv.x) * (1.0f / TESR_ReciprocalResolution.x)) % 4][int(abs(uv.y) * (1.0f / TESR_ReciprocalResolution.y)) % 4]
+        ? DITHER_PATTERN[int(ditherPixel.x) % 4][int(ditherPixel.y) % 4]
         : 0.5f;
     float3 currentPosition = TESR_CameraPosition.xyz + step * ditherOffset;
 
@@ -257,7 +273,6 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float3 scatterTerm = ComputeScattering(lightDotView, scatterCeiling).xxx * lightColor;
 
     float3 accumLight = 0.0f.xxx;
-    float accumDistance = max(TESR_VolumetricLightData1.w, 1.0f);
 
     [loop]
     for (int i = 0; i < MARCH_NUM; i++) {
@@ -269,7 +284,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
         // continues on to open sky far beyond it. Keying the falloff to the ray's endpoint
         // distance instead (an earlier version of this) made the effect only ever visible
         // painted onto whatever solid surface a given ray happened to hit -- since a sky-bound
-        // ray's endpoint is always RAY_LENGTH_MAX and got crushed to ~0, while a nearby object's
+        // ray's endpoint was always the far cap and got crushed to ~0, while a nearby object's
         // endpoint was always close and got the "full strength" falloff uniformly across its
         // whole silhouette -- and never as a glow genuinely hanging in open air.
         float distFalloff = 1.0f - saturate(distance(currentPosition, TESR_CameraPosition.xyz) / accumDistance);
