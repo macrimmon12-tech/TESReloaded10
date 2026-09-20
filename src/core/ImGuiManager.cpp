@@ -1932,6 +1932,24 @@ static bool IsInertSetting(const char* section, const char* key) {
 	return strcmp(key, "Mipmaps") == 0 || strcmp(key, "Anisotropy") == 0;
 }
 
+
+// Settings that cannot take effect until the next launch. Unlike the inert ones above these
+// are real and worth changing, so the menu keeps accepting and saving them - the atlas
+// encoding is compiled into both ShadowMap.pso and the forward path, and neither can be
+// rebuilt mid-session, so ShadowsExteriorEffect holds the running value until then.
+static bool IsRestartSetting(const char* section, const char* key) {
+	return strcmp(section, "Shaders.ShadowsExteriors.ShadowMaps") == 0 && strcmp(key, "Mode") == 0;
+}
+
+
+// What to show beside such a setting, or nullptr when the saved value is the one running.
+static const char* RestartPendingNote(const char* section, const char* key) {
+	if (!IsRestartSetting(section, key)) return nullptr;
+	if (TheShaderManager->CompiledShadowMode < 0) return nullptr;
+	if (TheSettingManager->GetSettingI(section, key) == TheShaderManager->CompiledShadowMode) return nullptr;
+	return "Save + restart to apply";
+}
+
 static const struct { int dik; const char* name; } kDIKTable[] = {
 	{ 0x01, "Escape" },
 	{ 0x02, "1" }, { 0x03, "2" }, { 0x04, "3" }, { 0x05, "4" }, { 0x06, "5" },
@@ -2367,6 +2385,18 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 	}
 
 	if (inert) ImGui::EndDisabled();
+
+	// A setting that cannot take effect until the next launch. The change is accepted and
+	// saved like any other, so the row has to say what is still missing - otherwise the value
+	// moves, nothing happens, and only the log explains why.
+	if (const char* pending = RestartPendingNote(node.Section, node.Key)) {
+		ImGui::SameLine();
+		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "%s", pending);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Press Save at the bottom of this panel, then restart the game. Until "
+				"then this session keeps the mode it started with: shaders compile the shadow map's "
+				"channel layout in and cannot be rebuilt while the game is running.");
+	}
 
 	if (mainHovered && !node.Description.empty()) {
 		ImGui::BeginTooltip();
