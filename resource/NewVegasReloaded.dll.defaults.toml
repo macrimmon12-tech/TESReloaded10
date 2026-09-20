@@ -925,7 +925,7 @@ Enabled = true                      # Post Process underwater fog/godrays/causti
 
 [_Shaders.VolumetricLight.Main]
 Strength = 1.0                      # Overall intensity multiplier for the light shaft.
-Anisotropy = 0.1                    # Forward scattering bias for ground-level light (Henyey-Greenstein g). Higher makes the shaft brighter when looking along it.
+Anisotropy = 0.6                    # [0.0-0.9] Forward scattering bias (Henyey-Greenstein g). Controls how strongly the shafts favour the direction of the sun. At 0.1 the phase function is very nearly isotropic -- only about 1.8x brighter looking into the sun than away from it -- which reads as flat haze rather than shafts. 0.6 gives roughly a 60x ratio, so light gathers into the sun instead of covering the frame.
 AccumDistance = 4000.0              # Distance over which the shaft's accumulated light fades out. Keeps the effect concentrated near visible occluders instead of washing out the whole draw distance.
 Dither = true                       # Dither the ray march start offset to hide banding between steps.
 
