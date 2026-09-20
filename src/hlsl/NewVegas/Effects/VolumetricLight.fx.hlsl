@@ -1,30 +1,32 @@
 // Volumetric Light shafts for New Vegas Reloaded.
 //
-// Ray-marched sun light shaft, ported from arafuse/tes-reloaded's OblivionReloaded/Shaders/
-// VolumetricLight/VolumetricLight.fx.hlsl (credited there to alexandre-pestana.com/volumetric-lights,
-// andrew-pham.blog volumetric lighting, shader-tutorial.dev dithering, and a flow-noise function
-// from https://www.shadertoy.com/view/MtcGRl). The ray march, Henyey-Greenstein scattering,
-// flow-noise animated fog, and dithered start offset are unchanged; the shadow lookup is
-// rewritten against this fork's VSM/EVSM cascade atlas (near/middle/far/lod, cross-faded) instead
-// of the source's plain near/far depth-compare maps.
+// Originally ported from arafuse/tes-reloaded's OblivionReloaded/Shaders/VolumetricLight/
+// VolumetricLight.fx.hlsl, then rewritten against this fork's VSM/EVSM cascade shadow atlas
+// (near/middle/far/lod, cross-faded) instead of the source's plain near/far depth-compare maps.
 //
-// Deliberately narrower than the source shader: every contribution here (scattering AND the
-// animated fog term) is multiplied by the cascade shadow value before it's accumulated, and
-// there is no separate non-marched ambient/sky glow term. The intent is a pure shaft-through-an-
-// occluder effect -- a pixel only lights up where a shadow boundary creates contrast against the
-// sun -- not a general atmospheric haze (that's what VolumetricFog.fx.hlsl is for).
+// This is now a from-scratch design for NVR rather than a port: two in-game tests (screenshots)
+// showed the source shader's height-bounded "fog layer" ray march (march within a volume capped
+// by a HEIGHT setting, animated flow-noise density, wind scroll) reads as a flat ground-hugging
+// haze, not shafts -- a fully-lit ray inside that fog volume still glows even with zero occluder
+// in view, so it looks like ambient fog rather than light breaking through gaps. In a second test,
+// its unclamped accumulated light blew past 1.0 in a debris-dense area (lots of small sky gaps),
+// which inverted CompositeLight's blend and erased the scene under a flat wash entirely.
+//
+// So: no fog volume, no height ceiling, no animated noise, no wind. The march is just camera to
+// visible surface (or a capped distance into open sky), testing the sun shadow atlas at each
+// step. The only thing that ever brightens a pixel is GetSunShadowAmount() varying along the ray
+// -- i.e. an actual occluder -- and the final output is saturated once, at the source, so it can
+// never invert the composite blend. General atmospheric haze is VolumetricFog.fx.hlsl's job, not
+// this one's.
 
 float4 TESR_ReciprocalResolution;
-float4 TESR_GameTime; // z: running time tick, used to scroll the animated fog noise
 float4 TESR_SmoothedSunDir;
 float4 TESR_SunColor;
 float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
-float4 TESR_ShadowData; // y: darkness
 
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
-float4 TESR_VolumetricLightData2; // xyz: wind direction, w: fog power
-float4 TESR_VolumetricLightData3; // x: strength (intensity multiplier), y: fog density, z: height, w: anisotropy
-float4 TESR_VolumetricLightData4; // x: unused, y: dither toggle, z: unused, w: unused
+float4 TESR_VolumetricLightData3; // x: strength (intensity multiplier), w: anisotropy (y, z unused)
+float4 TESR_VolumetricLightData4; // y: dither toggle (x, z, w unused)
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -162,8 +164,6 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float RAY_LENGTH_MAX = 20000.0f;
 
 static const float strength = TESR_VolumetricLightData3.x;
-static const float fogDensity = TESR_VolumetricLightData3.y;
-static const float HEIGHT = TESR_VolumetricLightData3.z;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
 static const float accumLightStrength = 3.0f;
@@ -185,159 +185,73 @@ VSOUT FrameVS(VSIN IN) {
     return OUT;
 }
 
-float2 GetGradient(float2 pos, float t) {
-    float r = rand(pos);
-    float angle = 6.283185 * r + 4.0 * t * r;
-    return float2(cos(angle), sin(angle));
-}
-
-float noise(float3 pos) {
-    float2 i = floor(pos.xy);
-    float2 f = pos.xy - i;
-    float2 blend = f * f * (3.0 - 2.0 * f);
-    float noiseVal =
-        lerp(
-            lerp(
-                dot(GetGradient(i + float2(0, 0), pos.z), f - float2(0, 0)),
-                dot(GetGradient(i + float2(1, 0), pos.z), f - float2(1, 0)),
-                blend.x),
-            lerp(
-                dot(GetGradient(i + float2(0, 1), pos.z), f - float2(0, 1)),
-                dot(GetGradient(i + float2(1, 1), pos.z), f - float2(1, 1)),
-                blend.x),
-        blend.y
-    );
-    return noiseVal / 0.7;
-}
-
-float flowNoise(float3 uvw) {
-    return noise(uvw * 4.0) / 3.0f;
-}
-
 // pow(g, 1.5); fxc does not fold this on its own.
 float Pow1_5(float g) {
     return g * sqrt(g);
 }
 
-// Ground scattering; the media (fog density) term may raise the Henyey-Greenstein parameter up
-// to ceiling, clamped once outside the loop by the caller.
-float ComputeScatteringClamped(float lightDotView, float media, float ceiling) {
-    float scatter = min(anisotropy + media, ceiling);
+// Henyey-Greenstein phase function, anisotropy clamped to ceiling (wider, flatter lobe for sky
+// rays than ground rays -- see the two call sites' scatterCeiling).
+float ComputeScattering(float lightDotView, float ceiling) {
+    float scatter = min(anisotropy, ceiling);
     float result = 1.0f - scatter * scatter;
     float g = 1.0f + scatter * scatter - (2.0f * scatter) * lightDotView;
     result /= (4.0f * PI * Pow1_5(g));
     return result;
 }
 
-// Low-resolution ray march: walks the view ray from the camera to the surface (or a capped
-// height plane for sky pixels), sampling the sun shadow atlas at each step so light shafts are
-// actually occluded by geometry between the camera and the sun -- not just a flat fog term.
+// Low-resolution ray march: walks the view ray from the camera to the visible surface (or
+// RAY_LENGTH_MAX into open sky), sampling the sun shadow atlas at each step. The Henyey-
+// Greenstein term itself only depends on view/sun angle, so it's constant along the ray and
+// computed once outside the loop; the ONLY thing that varies per step, and the only thing that
+// ever brightens a pixel, is the shadow value -- so a fully-lit, unoccluded view (no occluder in
+// the ray's path) contributes almost nothing, and contrast only appears where the ray actually
+// crosses a shadow boundary.
 float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float2 uv = IN.UVCoord.xy;
 
     float depth = readDepth(uv);
-    float3 cameraVector = toWorld(uv) * depth;
-    float3 shadowWorldPosition = TESR_CameraPosition.xyz + cameraVector;
-
-    bool inFog = TESR_CameraPosition.z < HEIGHT;
-    float stepHeight = 2500.0f;
-
-    float3 startPosition = TESR_CameraPosition.xyz;
-    float3 noiseStartPosition = startPosition;
-    float3 endPosition = shadowWorldPosition;
-    float3 rayVector = endPosition - startPosition;
-
-    float rayLength = length(rayVector);
-    float noiseRayLength = rayLength;
-    float3 rayDirection = rayVector / max(rayLength, 0.001f);
-    rayLength = min(rayLength, lerp(RAY_LENGTH_MAX, rayLength, smoothstep(HEIGHT - (stepHeight - 600), HEIGHT, TESR_CameraPosition.z)));
-    noiseRayLength = min(noiseRayLength, RAY_LENGTH_MAX);
-
-    float nearModifier = 0.0f;
     bool isSky = depth > (farZ * 0.99f);
-    if (isSky) nearModifier = 3.5f;
 
-    float noiseStepLength = noiseRayLength / MARCH_NUM;
-    float stepLength = rayLength / MARCH_NUM;
-    float3 noiseStep = rayDirection * noiseStepLength;
-    float3 step = rayDirection * stepLength;
-
-    float3 currentPosition = startPosition;
-    float3 noiseCurrentPosition = startPosition;
-
-    if (!inFog) {
-        currentPosition = startPosition + (step * MARCH_NUM);
-        noiseCurrentPosition = startPosition + (noiseStep * MARCH_NUM);
-        startPosition = currentPosition;
-        noiseStartPosition = noiseCurrentPosition;
-        step *= -1;
-        noiseStep *= -1;
-    }
+    float3 cameraVector = toWorld(uv) * depth;
+    float3 rayDirection = normalize(cameraVector);
+    float rayLength = isSky ? RAY_LENGTH_MAX : min(length(cameraVector), RAY_LENGTH_MAX);
+    float3 step = rayDirection * (rayLength / MARCH_NUM);
 
     float ditherOffset = ditherEnabled
         ? DITHER_PATTERN[int(abs(uv.x) * (1.0f / TESR_ReciprocalResolution.x)) % 4][int(abs(uv.y) * (1.0f / TESR_ReciprocalResolution.y)) % 4]
         : 0.5f;
-    currentPosition += step * ditherOffset;
-    noiseCurrentPosition += noiseStep * ditherOffset;
-
-    float3 accumLight = 0.0f.xxx;
-    float3 windOffset = TESR_VolumetricLightData2.xyz * (TESR_GameTime.z / 10000.0f);
+    float3 currentPosition = TESR_CameraPosition.xyz + step * ditherOffset;
 
     float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
     float3 lightColor = TESR_VolumetricLightData1.xyz * TESR_SunColor.rgb;
     float scatterCeiling = isSky ? 1.0f : 0.5f;
+    float3 scatterTerm = ComputeScattering(lightDotView, scatterCeiling).xxx * lightColor;
+
+    float3 accumLight = 0.0f.xxx;
 
     [loop]
     for (int i = 0; i < MARCH_NUM; i++) {
-        // 1.0 where this step sees the sun, towards 0 behind an occluder. Every contribution
-        // below is multiplied by it, so a shadowed step adds ~nothing -- the only thing that
-        // ever lights up is contrast against an occluder, i.e. an actual shaft, not a uniform
-        // haze sitting on top of the whole scene regardless of shadow.
+        // 1.0 where this step sees the sun, towards 0 behind an occluder.
         float Shadow = GetSunShadowAmount(currentPosition, TESR_SmoothedSunDir.xyz);
-
-        float3 noisePosition = (noiseCurrentPosition / 1500.0f) - windOffset;
-        float fog = lerp(saturate(flowNoise(noisePosition)), 0.1f, saturate((distance(currentPosition, TESR_CameraPosition.xyz) / 50000.0f)));
-        fog *= fogDensity;
-
-        float scatterFog = fog;
-        fog = fog * (TESR_VolumetricLightData1.xyz * 2);
-        fog = fog * max(nearModifier, 1);
-        fog = (fog / 6.0f);
-
-        float heightTransition = lerp(1, 0, smoothstep(HEIGHT - stepHeight, HEIGHT, currentPosition.z));
-
-        float3 scatterTerm = ComputeScatteringClamped(lightDotView, scatterFog.x, scatterCeiling).xxx * lightColor;
-        accumLight += (scatterTerm + fog) * Shadow * heightTransition;
-
+        accumLight += scatterTerm * Shadow;
         currentPosition += step;
-        noiseCurrentPosition += noiseStep;
-
-        if (currentPosition.z > HEIGHT && startPosition.z < HEIGHT) {
-            float3 vec = inFog ? currentPosition - startPosition : startPosition - currentPosition;
-            float rLength = length(vec);
-            float nrLength = min(rLength, RAY_LENGTH_MAX);
-            float3 rDir = vec / max(rLength, 0.001f);
-            float newStepLength = rLength / max(MARCH_NUM - i, 1);
-            float noiseNewStepLength = nrLength / max(MARCH_NUM - i, 1);
-            step = rDir * newStepLength;
-            noiseStep = rDir * noiseNewStepLength;
-            if (!inFog) {
-                step *= -1;
-                noiseStep *= -1;
-            }
-            currentPosition = startPosition + step;
-            noiseCurrentPosition = noiseStartPosition + noiseStep;
-        }
-        nearModifier -= 0.2f;
     }
 
-    accumLight /= isSky ? MARCH_NUM : lerp(MARCH_NUM * 1.10, MARCH_NUM * 0.85f, saturate(rayLength / RAY_LENGTH_MAX));
+    accumLight /= MARCH_NUM;
 
-    float fogCoeff = 1.0f - saturate(length(cameraVector) / max(TESR_VolumetricLightData1.w, 1.0f));
+    // Fades the shaft out with distance so it stays concentrated near visible occluders instead
+    // of contributing uniformly out to the far clip plane (isSky rays, at RAY_LENGTH_MAX, fall
+    // past AccumDistance and are suppressed by this almost entirely, which is intentional).
+    float fogCoeff = 1.0f - saturate(rayLength / max(TESR_VolumetricLightData1.w, 1.0f));
     accumLight *= accumLightStrength * fogCoeff * strength;
     accumLight += lerp(-NOISE_GRANULARITY, NOISE_GRANULARITY, rand(uv));
 
-    return float4(max(accumLight, 0.0f), 1.0f);
+    // Saturated here, once, at the source: CompositeLight's blend (color*(1-v)+v) only behaves
+    // as a blend for v in [0,1] -- above that it inverts and swamps the scene color entirely,
+    // which is exactly the "everything erased to a flat wash" failure an earlier, unclamped
+    // version of this produced in debris-dense areas with lots of small sky gaps.
+    return float4(saturate(accumLight), 1.0f);
 }
 
 // Full resolution: upsamples the low-res march (bilinear, via TESR_VolumetricLightBuffer's
