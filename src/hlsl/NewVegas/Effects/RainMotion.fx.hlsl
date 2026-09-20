@@ -98,6 +98,14 @@ VSOUT RainMotionVS(float3 corner : POSITION0)
 	float3 worldPos = streakCenter + widthOffset + lengthOffset + shearOffset;
 
 	float4 clipPos = mul(float4(worldPos, 1.0f), TESR_ViewProjectionTransform);
+#if RAINMOTION_DEBUG_FORCE_VISIBLE
+	// Bypass the world-space transform entirely: place every streak at a fixed, guaranteed-
+	// on-screen clip-space quad (spread out by instance index so they don't all overlap into
+	// one pixel), independent of camera/world matrices, wrap math, or billboard orientation.
+	clipPos = float4((cornerX * 0.05f) + frac(instanceIndex * 0.0173f) * 1.6f - 0.8f,
+	                  (cornerY * 0.05f) + frac(instanceIndex * 0.0313f) * 1.6f - 0.8f,
+	                  0.5f, 1.0f);
+#endif
 	OUT.vertPos = clipPos;
 	OUT.screenPos = clipPos;
 	OUT.uv = float2(cornerX, cornerY);
