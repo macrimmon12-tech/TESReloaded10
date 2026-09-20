@@ -18,6 +18,7 @@ float4 TESR_RainMotionData;    // x: intensity, y: effective fall speed, z: stre
 float4 TESR_RainMotionFall;    // xyz: normalized fall vector (world space), w: signed camera-whip shear
 float4 TESR_RainMotionVolume;  // xyz: wrap volume size (Sx, Sy, Sz), w: streak count (informational)
 float4 TESR_RainMotionFade;    // x: fade start (fraction of half-extent), y: fade range, z: refraction strength, w: opacity
+float4 TESR_CameraForward;
 float4 TESR_GameTime;
 float4 TESR_SunColor;
 
@@ -97,15 +98,19 @@ VSOUT RainMotionVS(float3 corner : POSITION0)
 
 	float3 worldPos = streakCenter + widthOffset + lengthOffset + shearOffset;
 
-	float4 clipPos = mul(float4(worldPos, 1.0f), TESR_ViewProjectionTransform);
 #if RAINMOTION_DEBUG_FORCE_VISIBLE
-	// Bypass the world-space transform entirely: place every streak at a fixed, guaranteed-
-	// on-screen clip-space quad (spread out by instance index so they don't all overlap into
-	// one pixel), independent of camera/world matrices, wrap math, or billboard orientation.
-	clipPos = float4((cornerX * 0.05f) + frac(instanceIndex * 0.0173f) * 1.6f - 0.8f,
-	                  (cornerY * 0.05f) + frac(instanceIndex * 0.0313f) * 1.6f - 0.8f,
-	                  0.5f, 1.0f);
+	// Bypass ONLY the wrap/billboard math: use the real camera matrices, but place each
+	// streak at a trivial, hand-picked point (spread out a little by instance index so
+	// they're not all exactly coincident) a fixed, modest distance in front of the camera,
+	// along the camera's forward axis. Isolates whether TESR_CameraPosition/
+	// TESR_ViewProjectionTransform are valid for this shader at all, separate from the
+	// wrap/billboard computation above.
+	float3 spread = float3(frac(instanceIndex * 0.0173f) * 400.0f - 200.0f,
+	                        frac(instanceIndex * 0.0313f) * 400.0f - 200.0f,
+	                        0.0f);
+	worldPos = TESR_CameraPosition.xyz + normalize(TESR_CameraForward.xyz) * 500.0f + spread;
 #endif
+	float4 clipPos = mul(float4(worldPos, 1.0f), TESR_ViewProjectionTransform);
 	OUT.vertPos = clipPos;
 	OUT.screenPos = clipPos;
 	OUT.uv = float2(cornerX, cornerY);
