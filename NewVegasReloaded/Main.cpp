@@ -50,6 +50,10 @@ extern "C" {
 
 			if (GetModuleHandle(L"VanillaPlusSkin.dll")) {
 				TheShaderManager->Shaders.Skin->bVPSLoaded = true;
+				Logger::Log("Vanilla Plus Skin found, routing SKIN shaders through SkinVPSTemplate");
+			}
+			else {
+				Logger::Log("Vanilla Plus Skin not found");
 			}
 
 			HMODULE hRTM = GetModuleHandle(L"RealTimeMenus.dll");
