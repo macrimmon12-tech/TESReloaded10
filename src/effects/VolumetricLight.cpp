@@ -15,7 +15,7 @@ void VolumetricLightEffect::UpdateSettings() {
 
 	Constants.Data1 = D3DXVECTOR4(Settings.ScatterColor.x, Settings.ScatterColor.y, Settings.ScatterColor.z, Settings.AccumDistance);
 	Constants.Data3 = D3DXVECTOR4(Settings.Strength, 0.0f, 0.0f, Settings.Anisotropy);
-	Constants.Data4 = D3DXVECTOR4(Settings.DebugView ? 1.0f : 0.0f, Settings.Dither ? 1.0f : 0.0f, 0.0f, 0.0f);
+	Constants.Data4 = D3DXVECTOR4((float)Settings.DebugView, Settings.Dither ? 1.0f : 0.0f, 0.0f, 0.0f);
 }
 
 void VolumetricLightEffect::RegisterConstants() {

@@ -207,7 +207,15 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
-static const bool debugView = TESR_VolumetricLightData4.x > 0.5f;
+// 0 off, 1 the finished march, 2 the raw shadow term alone. Mode 2 divides out everything
+// layered on top of occlusion -- the phase function, the distance falloff, Strength and
+// TESR_SunColor -- and shows only the average of GetSunShadowAmount along each ray. It answers
+// the one question the finished output cannot: whether the cascade lookup finds occluders at
+// all. A dim frame in mode 1 is ambiguous, because the sun's own colour is near zero shortly
+// after sunrise and scales the whole effect with it. Mode 2 depends on no tuning value, no sun
+// colour and no time of day: white is lit, black is occluded, and a flat featureless field
+// means the lookup returns a constant and no occluder is being detected.
+static const float debugMode = TESR_VolumetricLightData4.x;
 
 // Every uniform-wash screenshot so far shares one signature: the sky (correctly suppressed by
 // the distance falloff) looks fine while everything nearby is a flat, undifferentiated plateau
@@ -308,11 +316,13 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float3 scatterTerm = ComputeScattering(lightDotView, scatterCeiling).xxx * lightColor;
 
     float3 accumLight = 0.0f.xxx;
+    float accumShadow = 0.0f;
 
     [loop]
     for (int i = 0; i < MARCH_NUM; i++) {
         // 1.0 where this step sees the sun, towards 0 behind an occluder.
         float Shadow = GetSunShadowAmount(currentPosition);
+        accumShadow += Shadow;
 
         // Per-step distance falloff, not a single value based on the ray's endpoint: a step near
         // the camera should contribute the same whether the ray eventually hits a nearby wall or
@@ -327,6 +337,9 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
         accumLight += scatterTerm * Shadow * distFalloff;
         currentPosition += step;
     }
+
+    // Shadow term on its own, before anything is layered over it -- see debugMode.
+    [branch] if (debugMode > 1.5f) return float4((accumShadow / MARCH_NUM).xxx, 1.0f);
 
     // Mean sample value, then back to a path integral: the physical quantity is the integral of
     // scattered light along the ray, sum(f) * stepLength, and stepLength is rayLength/MARCH_NUM.
@@ -390,7 +403,7 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     // Debug view: the march's own output with no scene under it, so what the effect actually
     // computes can be read directly instead of inferred from how it tints the frame. Blown-out
     // highlights and a correctly shaped but over-bright shaft look identical once blended.
-    if (debugView) return float4(volumeLight, 1.0f);
+    if (debugMode > 0.5f) return float4(volumeLight, 1.0f);
 
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
     volumeLight = linearize(volumeLight);
