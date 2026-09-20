@@ -23,10 +23,10 @@ jobs:
     runs-on: windows-2022
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v1.0.2
+      uses: microsoft/setup-msbuild@v2
 
     - name: Restore NuGet packages
       working-directory: ${{env.GITHUB_WORKSPACE}}
@@ -45,23 +45,13 @@ jobs:
         dest: ${{env.ARTEFACT_NAME}}.zip
 
     - name: Create Release
-      uses: actions/create-release@v1
-      id: create_release
+      uses: softprops/action-gh-release@v2
       with:
         draft: true
         prerelease: false
-        release_name: ${{env.ARTEFACT_NAME}}
+        name: ${{env.ARTEFACT_NAME}}
         tag_name: ${{env.VERSION}}
+        files: ./${{env.ARTEFACT_NAME}}.zip
         # body_path: CHANGELOG.md #TODO: add changelog
       env:
         GITHUB_TOKEN: ${{ github.token }}
-
-    - name: Upload Release Artifact
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./${{env.ARTEFACT_NAME}}.zip
-        asset_name: ${{env.ARTEFACT_NAME}}.zip
-        asset_content_type: application/zip
