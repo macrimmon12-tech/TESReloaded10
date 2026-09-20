@@ -293,7 +293,15 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
         currentPosition += step;
     }
 
-    accumLight /= MARCH_NUM;
+    // Mean sample value, then back to a path integral: the physical quantity is the integral of
+    // scattered light along the ray, sum(f) * stepLength, and stepLength is rayLength/MARCH_NUM.
+    // Dividing by MARCH_NUM alone yields a mean with NO dependence on how far the ray actually
+    // travelled, so 20 units of air in front of a near wall accumulated exactly as much light as
+    // 4000 units of open sky -- every surface in the frame got the same wash regardless of how
+    // much air was really in front of it, which is what read as haze paint on nearby geometry
+    // rather than depth. Normalised by accumDistance so a full-length ray keeps the magnitude
+    // this was calibrated at and Strength stays meaningful.
+    accumLight *= rayLength / (accumDistance * MARCH_NUM);
     accumLight *= accumLightStrength * strength;
     accumLight += lerp(-NOISE_GRANULARITY, NOISE_GRANULARITY, rand(uv));
 
