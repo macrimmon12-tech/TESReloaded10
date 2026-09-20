@@ -246,6 +246,32 @@ bool ShadowsExteriorEffect::UpdateSettingsFromQuality(int quality) {
 		}
 	}
 	
+	// Mode cannot change mid-session, so a request to change it is held here rather than
+	// half-applied.
+	//
+	// Both ends of the shadow map bake it in at compile time: ShadowMap.pso picks its channel
+	// layout with #if SHADOW_FIXED_MODE, and GetSunShadow fails UNSHADOWED when the runtime
+	// value disagrees with the one it was built against. Nothing recompiles at runtime - game
+	// shaders have no reload path at all, and EffectReloadQueued is never set. So the only part
+	// of a mode switch that did take effect was this line, which reallocated the atlas into a
+	// format the shadow map shader was not writing: EVSM2 to VSM, for instance, hands 16 bit
+	// UNORM to a shader still emitting exp() values up to 254, all of which clamp to 1.
+	//
+	// The result was sun shadows disappearing entirely, with nothing in the log to say why.
+	// Holding the setting keeps the atlas, both shader ends and the constant agreeing, and says
+	// what has to happen for the change to take.
+	//
+	// Format (the 16/32 bit choice) is NOT held: ShadowMap.pso reads that one from a constant at
+	// runtime, so it follows the setting correctly.
+	if (TheShaderManager->CompiledShadowMode >= 0 && Settings.ShadowMaps.Mode != TheShaderManager->CompiledShadowMode) {
+		if (Settings.ShadowMaps.Mode != heldShadowMode) {
+			Logger::Log("[WARNING] Shadow Mode %i needs a restart to take effect - the shaders in this session were compiled for mode %i. Keeping mode %i.",
+				Settings.ShadowMaps.Mode, TheShaderManager->CompiledShadowMode, TheShaderManager->CompiledShadowMode);
+			heldShadowMode = Settings.ShadowMaps.Mode;
+		}
+		Settings.ShadowMaps.Mode = TheShaderManager->CompiledShadowMode;
+	}
+
 	Settings.ShadowMaps.Format = Formats[Settings.ShadowMaps.Mode][Settings.ShadowMaps.FormatBits];
 
 	// Set clear color for clearing the cascades.
