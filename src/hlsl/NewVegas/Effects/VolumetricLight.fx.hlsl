@@ -99,8 +99,9 @@ float GetShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float
         return GetLightAmountValueEVSM4(moments, lightSpaceCoord.z, bias, bleedReduction, ShadowFormatBits);
 }
 
-// 1.0 in full light, towards 0 in shadow. positionWS is camera-relative world position
-// (TESR_CameraPosition already folded in by the caller, matching GetShadowWorldPos elsewhere).
+// 1.0 in full light, towards 0 in shadow. positionWS is an absolute world position -- the same
+// space SunShadows.fx.hlsl feeds these transforms from reconstructWorldPosition(), and the space
+// TESR_Shadow*Center's xyz are expressed in, so the caller folds TESR_CameraPosition in first.
 //
 // No normal-offset bias here, unlike the game-shader/deferred versions this mirrors: that bias
 // exists to push a SURFACE sample away from itself to fight self-shadowing acne, and only makes
@@ -154,9 +155,20 @@ float GetSunShadowAmount(float3 positionWS) {
 #undef VL_SHADOW_TAP_FAR
 #undef VL_SHADOW_TAP_LOD
 
-    shadow = saturate(shadow);
-    shadow = lerp(shadow, 1.0f, saturate(TESR_ShadowFade.x));
-    return shadow;
+    // Deliberately NOT faded by TESR_ShadowFade.x here, unlike every surface-shading consumer
+    // of these same cascades. That fade ramps to a full 1.0 (shadows entirely off) for any
+    // dayLight in [0.4, 0.6] -- see ShadowsExterior.cpp, smoothStep(0.5, 0.1, abs(dayLight-0.5)),
+    // whose bounds run backwards -- which is the whole of sunrise and sunset. It exists to hide
+    // shadow acne on SURFACES at grazing sun angles, where a cascade texel spans a long run of
+    // receiver depth. The march samples free-floating points in open air: there is no surface to
+    // self-shadow, so there is no acne to hide, and the fade buys nothing.
+    //
+    // Applying it here forced this function to return exactly 1.0 on every sample of every ray
+    // at precisely the hours god rays exist for, collapsing the march to scatterTerm*distFalloff
+    // -- a uniform, geometry-independent haze. The atlas is still rendered and valid throughout
+    // (ShouldRenderShadowMaps never consults ShadowFade.x), so reading it here is sound.
+    // ShadowFade.y, the master "shadow maps active" toggle, is still honoured at the top.
+    return saturate(shadow);
 }
 
 // --- Ray march setup -------------------------------------------------------------------------
