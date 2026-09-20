@@ -207,7 +207,7 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
-// 0 off, 1 the finished march, 2 the raw shadow term alone. Mode 2 divides out everything
+// 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface. Mode 2 divides out everything
 // layered on top of occlusion -- the phase function, the distance falloff, Strength and
 // TESR_SunColor -- and shows only the average of GetSunShadowAmount along each ray. It answers
 // the one question the finished output cannot: whether the cascade lookup finds occluders at
@@ -336,6 +336,19 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
 
         accumLight += scatterTerm * Shadow * distFalloff;
         currentPosition += step;
+    }
+
+    // Mode 3: the same lookup run at the VISIBLE SURFACE instead of the air samples --
+    // exactly the position SunShadows.fx.hlsl feeds it, which is known to shadow correctly.
+    // This is the A/B that says whether GetSunShadowAmount is broken outright or only for
+    // free-floating points. If mode 3 shows proper shadows and mode 2 does not, the lookup is
+    // sound and the fault is specific to air samples -- most likely their light-space depth
+    // falling outside the cascade's near/far range, which reads as a cleared (far) texel and so
+    // as lit. If mode 3 is white too, the lookup is wrong for every position and differs from
+    // SunShadows in some way the two can then be diffed over directly.
+    [branch] if (debugMode > 2.5f) {
+        float3 surfacePos = TESR_CameraPosition.xyz + cameraVector;
+        return float4(GetSunShadowAmount(surfacePos).xxx, 1.0f);
     }
 
     // Shadow term on its own, before anything is layered over it -- see debugMode.
