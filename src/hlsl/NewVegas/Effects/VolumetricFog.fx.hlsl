@@ -371,7 +371,15 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float3 windOffset = float3(WindDirection * WindSpeed * TESR_GameTime.x * 0.002, 0);
 	float noiseVal = fbm3((worldPos + windOffset) / (1500 * NoiseScale));
 
-	float nvrDensity = BaseDensity * timeOfDayScale * lerp(1.0, noiseVal, NoiseStrength);
+	// Zero the noise's contribution to density on true sky pixels via isSkyDome (a hard depth
+	// test, not brightness-based) -- strength still feeds the exterior sun-scattering term even
+	// on sky pixels (it's only excluded from the *fog color* blend later, via skyMaskFactor), so
+	// without this the noise pattern visibly distorted the sun glow's shape as it crossed the sky.
+	// A luma-based version of this was tried first and reverted: it also caught ordinary bright
+	// non-sky surfaces (sunlit terrain, snow), crushing the noise's animated look almost everywhere
+	// in daylight instead of just on the sky. isSkyDome has no such false positives.
+	float noiseSkyMask = 1 - isSkyDome;
+	float nvrDensity = BaseDensity * timeOfDayScale * lerp(1.0, noiseVal, NoiseStrength * noiseSkyMask);
 	nvrDensity = nvrDensity * WeatherFilterBlend + SunriseSunsetBoost * sunsetBump * WeatherFilterBlend;
 
 	float strength = max(0, nvrDensity + WeatherImpact * vanillaStrength);
