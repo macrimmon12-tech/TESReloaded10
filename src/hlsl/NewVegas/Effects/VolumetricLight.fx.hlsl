@@ -90,8 +90,38 @@ float4 SampleShadowMoments(float2 uv) {
     return tex2Dlod(TESR_ShadowAtlas, float4(uv, 0.0f, 0.0f));
 }
 
+// A cascade's shadow map is an orthographic slab, 2*sphereRadius thick, oriented along the sun.
+// Outside it there is no occlusion information at all, and the only correct answer is 'lit'.
+//
+// Without this test the out-of-range coordinate was handed to the comparison anyway, which does
+// not fail gracefully: z > 1 (past the far plane) gives a huge warped depth, so pMax collapses to
+// 0 and reads fully SHADOWED, while z < 0 (in front of the near plane) gives a tiny one and reads
+// fully LIT. The switch between them is a hard plane in world space -- horizontal a few feet up
+// with the sun overhead, tilted with a low sun -- matching no geometry whatever, because it is not
+// occlusion. In-game that was the whole of the effect: shafts that cut off at a fixed height and
+// corresponded to nothing in view.
+//
+// It also buried the real signal rather than merely adding to it. Every sample that left the slab
+// returned a hard 0 or 1 regardless of what occluders lay along the ray, and with 64 samples those
+// dominate the average, so the march reported how much of each ray fell outside the cascade instead
+// of what crossed it. Near-field occlusion was being computed correctly and then swamped.
+//
+// SunShadows.fx.hlsl omits this check safely: its receivers are visible surfaces, and the cascade
+// was fitted to the view frustum that contains them, so they are inside the slab by construction.
+// A ray march walks thousands of units through open air and leaves it constantly. The Oblivion
+// source this was ported from does carry the test (OutsideShadowMap, returning 1.0); it was lost in
+// the rewrite onto the cascade atlas. Folded to one max-of-abs as it is there: |x| > 1 is exactly
+// x < -1 || x > 1, and |2z - 1| > 1 is exactly z < 0 || z > 1.
+bool OutsideShadowMap(float3 projected) {
+    return max(max(abs(projected.x), abs(projected.y)), abs(projected.z * 2.0f - 1.0f)) > 1.0f;
+}
+
 float GetShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float offsetY, float bias, float bleedReduction) {
-    float4 lightSpaceCoord = ScreenCoordToTexCoord(mul(coord, lightTransform));
+    float4 projected = mul(coord, lightTransform);
+    projected.xyz /= projected.w;
+    if (OutsideShadowMap(projected.xyz)) return 1.0f;
+
+    float4 lightSpaceCoord = float4(projected.x * 0.5f + 0.5f, projected.y * -0.5f + 0.5f, projected.z, 1.0f);
     lightSpaceCoord.xy *= 0.5f;
     lightSpaceCoord.x += offsetX;
     lightSpaceCoord.y += offsetY;
