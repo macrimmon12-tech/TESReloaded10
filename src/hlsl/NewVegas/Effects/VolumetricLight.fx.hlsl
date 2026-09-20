@@ -50,10 +50,18 @@ sampler2D TESR_VolumetricLightBuffer : register(s3) = sampler_state { ADDRESSU =
 // rather than shared: the two effects compile independently and SunShadows.fx.hlsl already
 // documents this "mirrored, not shared" pattern for the game-shader/effect split. Keep the two
 // in step if cascade selection, bias, or atlas layout ever change.
-row_major float4x4 TESR_ShadowCameraToLightTransformNear;
-row_major float4x4 TESR_ShadowCameraToLightTransformMiddle;
-row_major float4x4 TESR_ShadowCameraToLightTransformFar;
-row_major float4x4 TESR_ShadowCameraToLightTransformLod;
+// No row_major here: unlike the game-shader path (Shaders/Includes/Shadow.hlsl), which binds
+// matrices by raw register index and needs it explicit, D3DX Effects bind by name through
+// Effect->SetMatrix() with their own default (non-row_major) packing -- SunShadows.fx.hlsl,
+// the other Effect consuming these same matrices, declares them plain for exactly this reason.
+// row_major here silently transposed every light-space transform, which is why no occluder was
+// ever detected: a transposed transform sends samples outside the valid [0,1] shadow-map region
+// for virtually every real point, and CLAMP addressing on TESR_ShadowAtlas turns "off the edge"
+// into "reads as unoccluded" almost universally.
+float4x4 TESR_ShadowCameraToLightTransformNear;
+float4x4 TESR_ShadowCameraToLightTransformMiddle;
+float4x4 TESR_ShadowCameraToLightTransformFar;
+float4x4 TESR_ShadowCameraToLightTransformLod;
 float4 TESR_ShadowNearCenter;
 float4 TESR_ShadowMiddleCenter;
 float4 TESR_ShadowFarCenter;
