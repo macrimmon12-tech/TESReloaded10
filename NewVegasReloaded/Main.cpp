@@ -48,13 +48,10 @@ extern "C" {
 				TheShaderManager->Effects.AmbientOcclusion->bNVAOLoaded = true;
 			}
 
-			if (GetModuleHandle(L"VanillaPlusSkin.dll")) {
-				TheShaderManager->Shaders.Skin->bVPSLoaded = true;
-				Logger::Log("Vanilla Plus Skin found, routing SKIN shaders through SkinVPSTemplate");
-			}
-			else {
-				Logger::Log("Vanilla Plus Skin not found");
-			}
+			// Vanilla Plus Skin detection lives in src/core/Hooks/GameCommon.cpp's
+			// InitializeRendererHook instead of here -- by the time kMessage_DeferredInit
+			// fires, the game has already created every SKIN20xx shader, so setting
+			// bVPSLoaded this late has no effect.
 
 			HMODULE hRTM = GetModuleHandle(L"RealTimeMenus.dll");
 			if (hRTM) {
