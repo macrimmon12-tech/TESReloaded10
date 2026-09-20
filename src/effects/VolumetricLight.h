@@ -17,7 +17,6 @@ public:
 		float	FogDensity;
 		float	Height;
 		float	Anisotropy;
-		float	SkyScatterStrength;
 		bool	Dither;
 		D3DXVECTOR3	ScatterColor;
 		D3DXVECTOR3	WindDirection;
@@ -29,7 +28,7 @@ public:
 		D3DXVECTOR4	Data1;	// xyz: scatter color tint, w: accum distance cutoff
 		D3DXVECTOR4	Data2;	// xyz: wind direction, w: unused
 		D3DXVECTOR4	Data3;	// x: strength (intensity multiplier), y: fog density, z: height, w: anisotropy
-		D3DXVECTOR4	Data4;	// x: sky scatter strength, y: dither toggle
+		D3DXVECTOR4	Data4;	// x: unused, y: dither toggle
 	};
 	VolumetricLightStruct	Constants;
 

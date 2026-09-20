@@ -928,8 +928,7 @@ Strength = 1.0                      # Overall intensity multiplier for the light
 FogDensity = 1.0                    # Density of the animated fog the shaft scatters through.
 Height = 5000.0                     # World height of the fog layer ceiling the shaft marches through.
 Anisotropy = 0.1                    # Forward scattering bias for ground-level light (Henyey-Greenstein g). Higher makes the shaft brighter when looking along it.
-SkyScatterStrength = 1.0            # Strength of the cheap non-marched sky glow near the horizon.
-AccumDistance = 20000.0             # Distance over which the shaft's accumulated light fades out.
+AccumDistance = 4000.0              # Distance over which the shaft's accumulated light fades out. Keeps the effect concentrated near visible occluders instead of washing out the whole draw distance.
 Dither = true                       # Dither the ray march start offset to hide banding between steps.
 
 [_Shaders.VolumetricLight.Coloring]

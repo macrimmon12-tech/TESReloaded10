@@ -7,6 +7,12 @@
 // flow-noise animated fog, and dithered start offset are unchanged; the shadow lookup is
 // rewritten against this fork's VSM/EVSM cascade atlas (near/middle/far/lod, cross-faded) instead
 // of the source's plain near/far depth-compare maps.
+//
+// Deliberately narrower than the source shader: every contribution here (scattering AND the
+// animated fog term) is multiplied by the cascade shadow value before it's accumulated, and
+// there is no separate non-marched ambient/sky glow term. The intent is a pure shaft-through-an-
+// occluder effect -- a pixel only lights up where a shadow boundary creates contrast against the
+// sun -- not a general atmospheric haze (that's what VolumetricFog.fx.hlsl is for).
 
 float4 TESR_ReciprocalResolution;
 float4 TESR_GameTime; // z: running time tick, used to scroll the animated fog noise
@@ -18,7 +24,7 @@ float4 TESR_ShadowData; // y: darkness
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
 float4 TESR_VolumetricLightData2; // xyz: wind direction, w: fog power
 float4 TESR_VolumetricLightData3; // x: strength (intensity multiplier), y: fog density, z: height, w: anisotropy
-float4 TESR_VolumetricLightData4; // x: sky scatter strength, y: dither toggle, z: unused, w: unused
+float4 TESR_VolumetricLightData4; // x: unused, y: dither toggle, z: unused, w: unused
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -152,7 +158,6 @@ float GetSunShadowAmount(float3 positionWS, float3 normal) {
 static const float4x4 DITHER_PATTERN = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.22f, 0.875f, 0.375f, 0.1875f, 0.6875f, 0.0625f, 0.5625f, 0.9375f, 0.4375f, 0.8125f, 0.3125f };
 
 static const int MARCH_NUM = 14;
-static const float SCATTERING_SKY = 0.6f; // Henyey-Greenstein forward-scattering bias for the sky term; ground uses the tunable anisotropy below.
 static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float RAY_LENGTH_MAX = 20000.0f;
 
@@ -160,7 +165,6 @@ static const float strength = TESR_VolumetricLightData3.x;
 static const float fogDensity = TESR_VolumetricLightData3.y;
 static const float HEIGHT = TESR_VolumetricLightData3.z;
 static const float anisotropy = TESR_VolumetricLightData3.w;
-static const float skyScatterStrength = TESR_VolumetricLightData4.x;
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
 static const float accumLightStrength = 3.0f;
 
@@ -213,13 +217,6 @@ float flowNoise(float3 uvw) {
 // pow(g, 1.5); fxc does not fold this on its own.
 float Pow1_5(float g) {
     return g * sqrt(g);
-}
-
-float ComputeScatteringSky(float lightDotView) {
-    float result = 1.0f - SCATTERING_SKY * SCATTERING_SKY;
-    float g = 1.0f + SCATTERING_SKY * SCATTERING_SKY - (2.0f * SCATTERING_SKY) * lightDotView;
-    result /= (4.0f * PI * Pow1_5(g));
-    return result;
 }
 
 // Ground scattering; the media (fog density) term may raise the Henyey-Greenstein parameter up
@@ -289,10 +286,13 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
     float3 lightColor = TESR_VolumetricLightData1.xyz * TESR_SunColor.rgb;
     float scatterCeiling = isSky ? 1.0f : 0.5f;
-    float3 shadowedScatter = ComputeScatteringClamped(lightDotView, 0.0f, 0.5f).xxx * lightColor;
 
     [loop]
     for (int i = 0; i < MARCH_NUM; i++) {
+        // 1.0 where this step sees the sun, towards 0 behind an occluder. Every contribution
+        // below is multiplied by it, so a shadowed step adds ~nothing -- the only thing that
+        // ever lights up is contrast against an occluder, i.e. an actual shaft, not a uniform
+        // haze sitting on top of the whole scene regardless of shadow.
         float Shadow = GetSunShadowAmount(currentPosition, TESR_SmoothedSunDir.xyz);
 
         float3 noisePosition = (noiseCurrentPosition / 1500.0f) - windOffset;
@@ -306,9 +306,8 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
 
         float heightTransition = lerp(1, 0, smoothstep(HEIGHT - stepHeight, HEIGHT, currentPosition.z));
 
-        float3 litScatter = (ComputeScatteringClamped(lightDotView, scatterFog.x, scatterCeiling).xxx * lightColor) + fog;
-        float3 shadowedContribution = (shadowedScatter * (1 - saturate(TESR_VolumetricLightData1.w / max(distance(currentPosition, TESR_CameraPosition.xyz), 0.001f)))) + fog;
-        accumLight += lerp(shadowedContribution, litScatter, Shadow) * heightTransition;
+        float3 scatterTerm = ComputeScatteringClamped(lightDotView, scatterFog.x, scatterCeiling).xxx * lightColor;
+        accumLight += (scatterTerm + fog) * Shadow * heightTransition;
 
         currentPosition += step;
         noiseCurrentPosition += noiseStep;
@@ -342,22 +341,13 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
 }
 
 // Full resolution: upsamples the low-res march (bilinear, via TESR_VolumetricLightBuffer's
-// sampler state), adds a cheap non-marched sky-ambient glow on sky pixels (the march's per-pixel
-// cost would be wasted there since sky never occludes anything), then blends the result onto the
-// scene the same way the source shader's CombineLight did.
+// sampler state) and blends it onto the scene. No separate sky-ambient term: this stays a pure
+// shadow-occlusion shaft effect, not a general atmospheric glow -- the march itself already
+// scales every contribution by GetSunShadowAmount, so a pixel only lights up here where an
+// occluder actually created contrast against the sun.
 float4 CompositeLight(VSOUT IN) : COLOR0 {
     float2 uv = IN.UVCoord.xy;
     float3 volumeLight = tex2D(TESR_VolumetricLightBuffer, uv).rgb;
-
-    float depth = readDepth(uv);
-    bool isSky = depth > (farZ * 0.99f);
-
-    if (isSky) {
-        float3 rayDirection = normalize(toWorld(uv));
-        float scatter = ComputeScatteringSky(dot(rayDirection, TESR_SmoothedSunDir.xyz)) * skyScatterStrength;
-        float3 skyGlow = scatter * TESR_SunColor.rgb * accumLightStrength * strength;
-        volumeLight = saturate(volumeLight + skyGlow);
-    }
 
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
     volumeLight = linearize(volumeLight);

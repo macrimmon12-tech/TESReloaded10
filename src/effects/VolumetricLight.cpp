@@ -7,7 +7,6 @@ void VolumetricLightEffect::UpdateSettings() {
 	Settings.FogDensity = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "FogDensity");
 	Settings.Height = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Height");
 	Settings.Anisotropy = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Anisotropy");
-	Settings.SkyScatterStrength = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "SkyScatterStrength");
 	Settings.Dither = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "Dither");
 	Settings.AccumDistance = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "AccumDistance");
 
@@ -22,7 +21,7 @@ void VolumetricLightEffect::UpdateSettings() {
 	Constants.Data1 = D3DXVECTOR4(Settings.ScatterColor.x, Settings.ScatterColor.y, Settings.ScatterColor.z, Settings.AccumDistance);
 	Constants.Data2 = D3DXVECTOR4(Settings.WindDirection.x, Settings.WindDirection.y, Settings.WindDirection.z, 0.0f);
 	Constants.Data3 = D3DXVECTOR4(Settings.Strength, Settings.FogDensity, Settings.Height, Settings.Anisotropy);
-	Constants.Data4 = D3DXVECTOR4(Settings.SkyScatterStrength, Settings.Dither ? 1.0f : 0.0f, 0.0f, 0.0f);
+	Constants.Data4 = D3DXVECTOR4(0.0f, Settings.Dither ? 1.0f : 0.0f, 0.0f, 0.0f);
 }
 
 void VolumetricLightEffect::RegisterConstants() {
