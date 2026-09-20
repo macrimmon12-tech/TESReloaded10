@@ -453,11 +453,16 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// color (sky ambient or a manual override) that doesn't dim on its own at night, so blending
 	// straight toward it pulled dark distant terrain up to that brightness -- a glow, at any
 	// AerialStrength/AerialTintBlend that was visible during the day, however far aerialDayFade
-	// had already suppressed it. Normalizing the tint to luma 1 and multiplying instead means it
-	// only recolors: a near-black night pixel times any color is still near-black, so it can't be
-	// brightened past what's already there, regardless of tuning.
-	float3 aerialTintDir = aerialTint / max(luma(aerialTint), 0.0001);
-	finalColor.rgb = lerp(finalColor.rgb, finalColor.rgb * aerialTintDir, aerialFactor * AerialStrength * skyMaskFactor * aerialDayFade);
+	// had already suppressed it.
+	// Clamp to <= 1 per channel and multiply directly, rather than normalizing to luma 1 and
+	// multiplying (tried first, reverted): dividing by aerialTint's own luma is numerically
+	// unstable exactly when ambient light is dim but nonzero -- dawn/dusk -- spiking the
+	// multiplier and amplifying whatever variation was already in finalColor.rgb, including the
+	// density noise, which is what caused both the noise artifacts to reappear and the lingering
+	// sunrise glow. Clamped and multiplied directly, tinted <= finalColor.rgb per channel always,
+	// so amplification is impossible regardless of lighting or tuning.
+	float3 aerialTintClamped = saturate(aerialTint);
+	finalColor.rgb = lerp(finalColor.rgb, finalColor.rgb * aerialTintClamped, aerialFactor * AerialStrength * skyMaskFactor * aerialDayFade);
 
 	// ---- distant fog: horizon Z-fighting/sky-seam matte ----
 	finalColor = lerp(finalColor, skyColor, distantFog * saturate(DistantFogBlend) * distantHeightFade * isExterior);
