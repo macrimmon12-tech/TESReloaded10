@@ -331,6 +331,12 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// doubles as an edge-dilated mask usable for anti-aliasing that boundary further down.
 	float skyMaskFactor = lerp(1.0, 1.0 - isSky, WeatherFilterBlend); // weather can disable the sky exclusion so fog blends fully into an overcast sky
 
+	// Pure depth-threshold sky test, unweighted by luma -- getSky()'s own luma weighting makes
+	// isSky fall toward 0 on a dark sky (night, heavy overcast) even though the pixel genuinely
+	// is the skydome, which let the aerial tint paint over it. The aerial exclusion needs a hard
+	// gate regardless of sky brightness. Reuses `depth`, already sampled above via readDepth().
+	float isSkyDome = depth / farZ >= 0.9961;
+
 	// ---- vanilla-anchored density, derived from the active weather's own authored fog shape ----
 	float vanillaStrength = pows((saturate(1 - farFog / farZ) + saturate(1 - nearFog / farZ)) / 2, 2) / (FogPower + 1);
 
@@ -397,7 +403,7 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float4 finalColor = float4(lerp(color.rgb, fogged, skyMaskFactor), 1);
 
 	// ---- aerial perspective: mid-to-far distance tint on non-sky terrain ----
-	float aerialFactor = smoothstep(AerialRangeStart, 1.0, normalizedDepth) * (1.0 - isSky) * isExterior;
+	float aerialFactor = smoothstep(AerialRangeStart, 1.0, normalizedDepth) * (1.0 - isSkyDome) * isExterior;
 	float3 aerialTint = lerp(ambientColor, linearize(TESR_VolumetricFogAerialTint).rgb, AerialTintBlend);
 	finalColor.rgb = lerp(finalColor.rgb, aerialTint, aerialFactor * AerialStrength * skyMaskFactor);
 
