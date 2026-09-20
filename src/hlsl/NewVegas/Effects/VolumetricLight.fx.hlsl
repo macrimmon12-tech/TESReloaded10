@@ -35,11 +35,19 @@ float4 TESR_VolumetricLightData4; // y: dither toggle (x, z, w unused)
 // FlashlightBeamEffect's TESR_VolumetricBuffer. Technique 1 (Composite) runs later, at full
 // resolution, through the normal RenderEffectsPreTonemapping chain.
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
-sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+// POINT, not LINEAR. A depth buffer is not a colour buffer: interpolating between two texels
+// either side of a silhouette yields a depth that belongs to neither surface. The march reads
+// this at half-res UVs, so every sampled point sits between four full-res texels and every
+// silhouette produces a band of rays terminating at an invented mid-air depth -- light with
+// nothing to attach to. The composite's depth-aware upsample below wants true neighbour depths
+// for the same reason.
+sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 sampler2D TESR_ShadowAtlas : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
-// Dedicated half-res march result. LINEAR filtering here is the upsample: Composite reads it
-// with a plain tex2D and the sampler does the bilinear work.
-sampler2D TESR_VolumetricLightBuffer : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
+// Dedicated half-res march result. POINT, because Composite does the reconstruction itself:
+// it takes the same four source texels bilinear would have used and weights them by depth
+// similarity. Leaving this LINEAR would hand each of those four taps back a pre-blended mix of
+// its neighbours, smuggling the cross-silhouette bleed back in underneath the depth weighting.
+sampler2D TESR_VolumetricLightBuffer : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 
 #include "Includes/Helpers.hlsl"
 #include "Includes/Depth.hlsl"
@@ -312,14 +320,45 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     return float4(saturate(accumLight), 1.0f);
 }
 
-// Full resolution: upsamples the low-res march (bilinear, via TESR_VolumetricLightBuffer's
-// sampler state) and blends it onto the scene. No separate sky-ambient term: this stays a pure
-// shadow-occlusion shaft effect, not a general atmospheric glow -- the march itself already
-// scales every contribution by GetSunShadowAmount, so a pixel only lights up here where an
-// occluder actually created contrast against the sun.
+// One tap of the depth-aware upsample. exp2 falls off fast enough that a tap on the far side
+// of a silhouette contributes essentially nothing, while the depth difference across a
+// continuous surface (even a steeply raked one) stays well inside the kernel. Relative to
+// centerDepth, not absolute: the same slope spans a far larger absolute depth range at 4000
+// units than at 40, and an absolute tolerance would either bleed up close or over-reject far off.
+void AccumulateTap(float2 tapUV, float centerDepth, inout float3 sum, inout float weightSum) {
+    float tapDepth = readDepth(tapUV);
+    float weight = exp2(-32.0f * abs(tapDepth - centerDepth) / max(centerDepth, 1.0f));
+    sum += tex2D(TESR_VolumetricLightBuffer, tapUV).rgb * weight;
+    weightSum += weight;
+}
+
+// Full resolution: upsamples the low-res march and blends it onto the scene. No separate
+// sky-ambient term: this stays a pure shadow-occlusion shaft effect, not a general atmospheric
+// glow -- the march itself already scales every contribution by GetSunShadowAmount, so a pixel
+// only lights up here where an occluder actually created contrast against the sun.
+//
+// The upsample is depth-aware rather than a plain bilinear tex2D. A half-res texel straddling a
+// silhouette mixes a short ray (near surface, little accumulated light) with a long one (open sky
+// behind it, much more), and bilinear then smears that mixture several full-res pixels to either
+// side of the edge -- a halo of light detached from the object that should bound it. Scaling the
+// march by path length widens precisely that near/far gap, so this matters more now, not less.
 float4 CompositeLight(VSOUT IN) : COLOR0 {
     float2 uv = IN.UVCoord.xy;
-    float3 volumeLight = tex2D(TESR_VolumetricLightBuffer, uv).rgb;
+
+    // TESR_ReciprocalResolution is the full-res texel; the half-res texel is twice that, so this
+    // offset is exactly half a half-res texel -- the four source texels bilinear would have used.
+    float2 offset = TESR_ReciprocalResolution.xy;
+    float centerDepth = readDepth(uv);
+
+    float3 sum = 0.0f.xxx;
+    float weightSum = 0.0f;
+    AccumulateTap(uv + float2(-offset.x, -offset.y), centerDepth, sum, weightSum);
+    AccumulateTap(uv + float2( offset.x, -offset.y), centerDepth, sum, weightSum);
+    AccumulateTap(uv + float2(-offset.x,  offset.y), centerDepth, sum, weightSum);
+    AccumulateTap(uv + float2( offset.x,  offset.y), centerDepth, sum, weightSum);
+
+    // Guarded: on a thin feature every tap can land on a different surface and drop out.
+    float3 volumeLight = sum / max(weightSum, 0.0001f);
 
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
     volumeLight = linearize(volumeLight);
