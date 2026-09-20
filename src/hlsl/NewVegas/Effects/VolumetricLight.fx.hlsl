@@ -207,7 +207,7 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
-// 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface. Mode 2 divides out everything
+// 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface, 4 the lookup's intermediates. Mode 2 divides out everything
 // layered on top of occlusion -- the phase function, the distance falloff, Strength and
 // TESR_SunColor -- and shows only the average of GetSunShadowAmount along each ray. It answers
 // the one question the finished output cannot: whether the cascade lookup finds occluders at
@@ -336,6 +336,25 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
 
         accumLight += scatterTerm * Shadow * distFalloff;
         currentPosition += step;
+    }
+
+    // Mode 4: the lookup's intermediates for the surface point, rather than its verdict.
+    // Mode 3 came back white at surface positions too -- the positions SunShadows passes and
+    // shadows correctly -- so the fault is not specific to air samples and reading the code has
+    // not found it. This shows where each sample actually lands and what it reads there:
+    //   RED, GREEN = the near cascade's light-space UV, scaled so the quadrant fills 0..1.
+    //                Expect a smooth gradient across the frame. Flat or pinned to an edge means
+    //                the transform is wrong and CLAMP is returning the atlas border everywhere.
+    //   BLUE       = the moment actually sampled there, scaled by the EVSM positive exponent so
+    //                it is visible. Bright blue means a cleared far texel, which reads as lit;
+    //                varying blue means real occluder depths are being read and the fault is in
+    //                the comparison rather than the addressing.
+    [branch] if (debugMode > 3.5f) {
+        float3 surfacePos = TESR_CameraPosition.xyz + cameraVector;
+        float4 lsc = ScreenCoordToTexCoord(mul(float4(surfacePos, 1.0f), TESR_ShadowCameraToLightTransformNear));
+        float2 atlasUV = lsc.xy * 0.5f;
+        float moment = SampleShadowMoments(atlasUV).x;
+        return float4(saturate(lsc.x), saturate(lsc.y), saturate(moment / exp(5.54f)), 1.0f);
     }
 
     // Mode 3: the same lookup run at the VISIBLE SURFACE instead of the air samples --
