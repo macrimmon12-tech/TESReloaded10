@@ -41,18 +41,12 @@ float4 TESR_ShadowFade;       // y: shadow maps active
 
 // interior point lights -- same tracked-light arrays SnowAccumulation.fx.hlsl already consumes.
 // First ShadowCubeMapsMax (12) slots of TESR_LightColor correspond to TESR_ShadowLightPosition
-// (shadow-casting lights); the next 12 correspond to TESR_LightPosition (non-shadowed).
+// (shadow-casting lights); the next 12 correspond to TESR_LightPosition (non-shadowed). Both
+// arrays hold only the engine's nearest 12 lights to the camera -- a light popping in/out of
+// that tracked set is the reason InteriorGlowFadeRange exists (see the interior branch below).
 float4 TESR_ShadowLightPosition[12];
 float4 TESR_LightPosition[12];
 float4 TESR_LightColor[24];
-
-// interior hero light (tier 2 shafts) -- picked in C++, see VolumetricFog.cpp. A and B are the
-// current and previous hero, crossfaded by HeroBlend.x; w of either position is 0 when unset.
-float4 TESR_VolumetricFogHeroLightA; // xyz: world position, w: radius
-float4 TESR_VolumetricFogHeroLightB;
-float4 TESR_VolumetricFogHeroColorA; // rgb: color, a: intensity
-float4 TESR_VolumetricFogHeroColorB;
-float4 TESR_VolumetricFogHeroBlend;  // x: crossfade blend (0=B, 1=A), y: InteriorGlowStrength, z: InteriorShaftStrength
 
 float4 TESR_VolumetricFogDensity;    // x: BaseDensity, y: WeatherImpact, z: MorningFogDip, w: SunriseSunsetBoost
 float4 TESR_VolumetricFogShape;      // x: HeightFalloff, y: MaxHeight, z: Extinction, w: Inscattering
@@ -63,14 +57,13 @@ float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, 
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
 float4 TESR_VolumetricFogGlobal;     // x: Amount
+float4 TESR_VolumetricFogGlow;       // x: InteriorGlowStrength, y: InteriorGlowFadeRange
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_ShadowAtlas : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_NormalsBuffer : register(s4) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
-samplerCUBE TESR_FogHeroCubeMapA : register(s5) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
-samplerCUBE TESR_FogHeroCubeMapB : register(s6) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 
 /*Height-based fog settings*/
 static const float FOG_GROUND = -10000;
@@ -118,9 +111,12 @@ static const float DistantFogBlend = TESR_VolumetricFogDistant.y;
 static const float DistantFogHeight = TESR_VolumetricFogDistant.z;
 static const float EdgeAA = max(0, TESR_VolumetricFogDistant.w);
 
-static const float HeroCrossfadeBlend = saturate(TESR_VolumetricFogHeroBlend.x);
-static const float InteriorGlowStrength = max(0, TESR_VolumetricFogHeroBlend.y);
-static const float InteriorShaftStrength = max(0, TESR_VolumetricFogHeroBlend.z);
+static const float InteriorGlowStrength = max(0, TESR_VolumetricFogGlow.x);
+// Distance (from the camera) at which each point light's glow contribution is faded to zero.
+// The engine only tracks the nearest 12 lights per array; without this, a light crossing that
+// boundary would pop in/out abruptly. Tuned low enough that, in typical level geometry, a light
+// has already faded out well before it could be the 13th-nearest and get dropped from tracking.
+static const float InteriorGlowFadeRange = max(1, TESR_VolumetricFogGlow.y);
 
 // fixed tuning constant: how strongly a high density value pulls the fog's own color toward
 // TESR_FogColor instead of the sky/ambient tint. Was two separate exposed settings
@@ -428,24 +424,24 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 		distantHeightFade = (DistantFogHeight == 0) ? (1.0 - isSky) : exp(-worldPos.z / (80000 * DistantFogHeight));
 	}
 	else {
-		// interior point-light in-scattering, the indoor analog of the sun term above: tier 1 is
-		// a cheap unshadowed glow from every tracked light (matches SnowAccumulation.fx.hlsl's
-		// own point-light loop), tier 2 is real shadowed beams from the single "hero" light
-		// picked in C++ (VolumetricFog.cpp), crossfaded between its current and previous winner.
+		// interior point-light glow, the indoor analog of the sun term above: cheap, unshadowed
+		// in-scattering from every tracked light (matches SnowAccumulation.fx.hlsl's own
+		// point-light loop). The engine only tracks the nearest 12 lights per array (by distance
+		// to the camera) -- without a fade, a light crossing that boundary as the player moves
+		// would pop in/out abruptly. Faded out here (by distance from the camera, the same
+		// reference the tracking selection itself uses) well before that's likely to happen, so
+		// the tracking cutoff stays invisible in typical level geometry.
 		float3 glow = 0;
 		for (int i = 0; i < 12; i++) {
-			glow += GetPointLightContribution(float4(worldPos, 1), TESR_ShadowLightPosition[i], float4(worldNormal, 1)) * linearize(float4(TESR_LightColor[i].rgb * TESR_LightColor[i].a, 1)).rgb;
-			glow += GetPointLightContribution(float4(worldPos, 1), TESR_LightPosition[i], float4(worldNormal, 1)) * linearize(float4(TESR_LightColor[12 + i].rgb * TESR_LightColor[12 + i].a, 1)).rgb;
+			float fadeShadow = 1 - smoothstep(0, InteriorGlowFadeRange, length(TESR_ShadowLightPosition[i].xyz - TESR_CameraPosition.xyz));
+			float fadeTracked = 1 - smoothstep(0, InteriorGlowFadeRange, length(TESR_LightPosition[i].xyz - TESR_CameraPosition.xyz));
+
+			glow += GetPointLightContribution(float4(worldPos, 1), TESR_ShadowLightPosition[i], float4(worldNormal, 1)) * linearize(float4(TESR_LightColor[i].rgb * TESR_LightColor[i].a, 1)).rgb * fadeShadow;
+			glow += GetPointLightContribution(float4(worldPos, 1), TESR_LightPosition[i], float4(worldNormal, 1)) * linearize(float4(TESR_LightColor[12 + i].rgb * TESR_LightColor[12 + i].a, 1)).rgb * fadeTracked;
 		}
 		glow *= InteriorGlowStrength;
 
-		float3 heroColorA = linearize(float4(TESR_VolumetricFogHeroColorA.rgb * TESR_VolumetricFogHeroColorA.a, 1)).rgb;
-		float3 heroColorB = linearize(float4(TESR_VolumetricFogHeroColorB.rgb * TESR_VolumetricFogHeroColorB.a, 1)).rgb;
-		float heroAmountA = GetPointLightAmount(TESR_FogHeroCubeMapA, float4(worldPos, 1), TESR_VolumetricFogHeroLightA, float4(worldNormal, 1));
-		float heroAmountB = GetPointLightAmount(TESR_FogHeroCubeMapB, float4(worldPos, 1), TESR_VolumetricFogHeroLightB, float4(worldNormal, 1));
-		float3 shafts = lerp(heroAmountB * heroColorB, heroAmountA * heroColorA, HeroCrossfadeBlend) * InteriorShaftStrength;
-
-		sun = float4(glow + shafts, 1);
+		sun = float4(glow, 1);
 	}
 
 	// ---- sky ambient in-scattering (SH-reconstructed, or flat fallback), unshadowed ----

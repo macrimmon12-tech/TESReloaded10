@@ -972,9 +972,7 @@ NoiseStrength = 0.5                 # How much the procedural noise modulates de
 RainyDisablesSkyFilter = true       # Has no visible effect indoors unless the cell is exterior-lit; kept for consistency.
 CloudyDisablesSkyFilter = true      # Has no visible effect indoors unless the cell is exterior-lit; kept for consistency.
 InteriorGlowStrength = 0.4          # Soft, unshadowed in-scattering glow around every active point light in the room (torches, lanterns). Cheap -- no shadow sampling.
-InteriorShaftStrength = 0.6         # Real shadowed light-shaft beams from a single "hero" point light, picked automatically each frame (nearest/brightest active light near the player). Requires Shaders.ShadowsInteriors.Main.LightPoints > 0 or there's nothing to sample.
-HeroCrossfadeDuration = 0.05        # How long the hero light takes to crossfade when it switches. In GAME HOURS (Animator's unit), not seconds -- 0.05 is a few real seconds at typical time scale.
-HeroHysteresisMargin = 0.25         # How much better a challenger light's score must be than the current hero's before it takes over (0.25 = 25% better). Prevents the hero flickering between two similar lights as you walk past them.
+InteriorGlowFadeRange = 2500.0      # Distance (game units) from the camera at which a light's glow fades to zero. The engine only tracks the nearest 12 lights per array; keep this well below your scene's typical spacing so a light fades out before it could be dropped from tracking, or it'll pop instead of fade. Lower it if you still see popping in light-dense rooms.
 
 
 [_Shaders.VolumetricFog.Status]
