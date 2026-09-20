@@ -44,10 +44,10 @@ float4 TESR_VolumetricFogShape;      // x: HeightFalloff, y: MaxHeight, z: Extin
 float4 TESR_VolumetricFogWind;       // x: WindDirX, y: WindDirY, z: WindSpeed, w: NoiseScale
 float4 TESR_VolumetricFogScatter;    // x: PhaseAsymmetry, y: ShadowStrength, z: NoiseStrength, w: HeightInfluence
 float4 TESR_VolumetricFogWeather;    // x: WeatherFilterBlend (animated 0-1), y: isExterior, z: SkyAmbientAvailable, w: FogSaturation
-float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: unused
+float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-float4 TESR_VolumetricFogGlobal;     // x: Amount
+float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NoiseSkyMaskThreshold
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -64,6 +64,10 @@ static const float FogPower = TESR_FogData.w;
 
 // scale settings for easier tuning
 static const float FogAmount = max(0, TESR_VolumetricFogGlobal.x);
+// Source-pixel luma above which the procedural noise's contribution to density is faded out --
+// keeps the noise pattern from visibly breaking up bright sky/sun regions it would otherwise
+// modulate (isSky's own masking happens later, on the composited result, not on this term).
+static const float NoiseSkyMaskThreshold = max(0.01, TESR_VolumetricFogGlobal.y);
 
 static const float BaseDensity = max(0, TESR_VolumetricFogDensity.x);
 static const float WeatherImpact = max(0, TESR_VolumetricFogDensity.y);
@@ -95,6 +99,11 @@ static const float FogSaturation = max(0, TESR_VolumetricFogWeather.w);
 static const float AerialStrength = max(0, TESR_VolumetricFogAerial.x);
 static const float AerialRangeStart = saturate(TESR_VolumetricFogAerial.y);
 static const float AerialTintBlend = saturate(TESR_VolumetricFogAerial.z);
+// TESR_SunAmount.x value at which aerial perspective reaches full strength. Wider than
+// isDayTimeFog's own 0.1-0.6 ramp (used for sun-scattering) so aerial stays suppressed through
+// more of the sunrise/sunset transition, not just full night -- that's specifically when direct
+// low-angle sun on distant terrain was reading as too bright/glowy.
+static const float AerialDayFadeStart = saturate(TESR_VolumetricFogAerial.w);
 
 static const float DistantFogRange = exp(-4 * clamp(TESR_VolumetricFogDistant.x, 0.00000001, 1.0));
 static const float DistantFogBlend = TESR_VolumetricFogDistant.y;
@@ -366,7 +375,13 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float3 windOffset = float3(WindDirection * WindSpeed * TESR_GameTime.x * 0.002, 0);
 	float noiseVal = fbm3((worldPos + windOffset) / (1500 * NoiseScale));
 
-	float nvrDensity = BaseDensity * timeOfDayScale * lerp(1.0, noiseVal, NoiseStrength);
+	// Fade the noise's influence out (not the whole density term) on bright source pixels --
+	// the sun disc and near-sun sky glow -- so the noise pattern doesn't visibly mottle the
+	// brightest part of the frame. isSky's own masking happens later on the fully composited
+	// result, which doesn't stop the noise from having already distorted the sun-scattering
+	// term (sun depends on strength, which this noise feeds into) before that point.
+	float noiseSkyMask = 1 - smoothstep(NoiseSkyMaskThreshold * 0.5, NoiseSkyMaskThreshold, luma(color));
+	float nvrDensity = BaseDensity * timeOfDayScale * lerp(1.0, noiseVal, NoiseStrength * noiseSkyMask);
 	nvrDensity = nvrDensity * WeatherFilterBlend + SunriseSunsetBoost * sunsetBump * WeatherFilterBlend;
 
 	float strength = max(0, nvrDensity + WeatherImpact * vanillaStrength);
@@ -428,12 +443,16 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float4 finalColor = float4(lerp(color.rgb, fogged, skyMaskFactor), 1);
 
 	// ---- aerial perspective: mid-to-far distance tint on non-sky terrain ----
-	// Gated by isDayTimeFog: aerial haze is a daylight-scattering phenomenon, and the manual
-	// AerialTint override in particular is a fixed color that doesn't dim on its own at night --
-	// without this gate it reads as a glow against an otherwise-dark night scene.
+	// Own day-fade curve, wider than isDayTimeFog's: aerial haze is a daylight-scattering
+	// phenomenon, and the manual AerialTint override in particular is a fixed color that doesn't
+	// dim on its own at night -- without a gate it reads as a glow against an otherwise-dark
+	// night scene. Using a wider ramp than isDayTimeFog (which sun-scattering still uses) keeps
+	// aerial suppressed through more of the sunrise/sunset transition too, not just full night --
+	// direct low-angle sun was making it read as too bright on distant terrain at that specific time.
+	float aerialDayFade = smoothstep(0.1, AerialDayFadeStart, TESR_SunAmount.x);
 	float aerialFactor = smoothstep(AerialRangeStart, 1.0, normalizedDepth) * (1.0 - isSkyDome) * isExterior;
 	float3 aerialTint = lerp(ambientColor, linearize(TESR_VolumetricFogAerialTint).rgb, AerialTintBlend);
-	finalColor.rgb = lerp(finalColor.rgb, aerialTint, aerialFactor * AerialStrength * skyMaskFactor * isDayTimeFog);
+	finalColor.rgb = lerp(finalColor.rgb, aerialTint, aerialFactor * AerialStrength * skyMaskFactor * aerialDayFade);
 
 	// ---- distant fog: horizon Z-fighting/sky-seam matte ----
 	finalColor = lerp(finalColor, skyColor, distantFog * saturate(DistantFogBlend) * distantHeightFade * isExterior);

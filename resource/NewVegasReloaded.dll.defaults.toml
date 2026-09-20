@@ -926,6 +926,7 @@ Enabled = true                      # Post Process underwater fog/godrays/causti
 [_Shaders.VolumetricFog.Main]
 Amount = 0.4                        # Global multiplier for the final fog strength in exteriors.
 FogSaturation = 1.7                 # Tune the saturation of the fog color.
+NoiseSkyMaskThreshold = 0.9         # Linear-HDR source luma above which the density noise's contribution is faded out, so it doesn't mottle the sun disc/bright sky. Lower = noise gets suppressed starting on dimmer pixels.
 BaseDensity = 0.2                   # NVR-authored fog density baseline, independent of vanilla weather fog.
 WeatherImpact = 0.5                 # How much the vanilla weather's own fog near/far/power/color feeds into density and color, on top of BaseDensity. 0 = ignore vanilla weather fog, 1 = fully vanilla-driven.
 MorningFogDip = 0.5                 # How much the NVR-driven density dips around solar noon (0 = no change, 1 = fully cleared at noon). Ramps back to full by evening.
@@ -946,6 +947,7 @@ CloudyDisablesSkyFilter = true      # Same as above, but for Cloudy weather. Tur
 AerialStrength = 0.5                # Strength of the mid-to-far distance aerial-perspective tint on terrain/mountains.
 AerialRangeStart = 0.3              # Normalized depth at which the aerial-perspective tint starts building up.
 AerialTintBlend = 0.0               # 0 = aerial tint color comes entirely from the sky model (matches time of day automatically). 1 = fully replaced by the manual AerialTint color below.
+AerialDayFadeStart = 0.85           # TESR_SunAmount.x value at which aerial perspective reaches full strength. Wider than the sun-scattering ramp (which tops out at 0.6) so aerial stays suppressed further into the sunrise/sunset transition, when low sun on distant terrain was reading as too bright. Raise toward 1.0 to suppress it even later into full daylight.
 AerialTintR = 0.6                   # Manual aerial-perspective tint color (red), used when AerialTintBlend > 0.
 AerialTintG = 0.7                   # Manual aerial-perspective tint color (green), used when AerialTintBlend > 0.
 AerialTintB = 1.0                   # Manual aerial-perspective tint color (blue), used when AerialTintBlend > 0.
@@ -958,6 +960,7 @@ EdgeAA = 0.4                        # Strength of the inverted distant-fog term 
 [_Shaders.VolumetricFog.Interiors]
 Amount = 0.25                       # Global multiplier for the final fog strength in interiors.
 FogSaturation = 0.5                 # Tune the saturation of the fog color.
+NoiseSkyMaskThreshold = 0.9         # Linear-HDR source luma above which the density noise's contribution is faded out. Has little effect indoors outside exterior-lit cells; kept for consistency.
 BaseDensity = 0.3                   # NVR-authored fog density baseline, independent of vanilla weather fog.
 WeatherImpact = 0.0                 # How much the vanilla weather's own fog near/far/power/color feeds into density and color, on top of BaseDensity.
 HeightFalloff = 50.0                # Vertical falloff rate of the fog density with altitude.

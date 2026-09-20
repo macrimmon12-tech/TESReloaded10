@@ -16,10 +16,10 @@ public:
 		D3DXVECTOR4		Wind;            // x: WindDirX, y: WindDirY, z: WindSpeed, w: NoiseScale
 		D3DXVECTOR4		Scatter;         // x: PhaseAsymmetry, y: ShadowStrength, z: NoiseStrength, w: HeightInfluence
 		D3DXVECTOR4		Weather;         // x: WeatherFilterBlend (animated 0-1, 1=sky mask active), y: isExterior, z: SkyAmbientAvailable, w: FogSaturation
-		D3DXVECTOR4		Aerial;          // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: unused
+		D3DXVECTOR4		Aerial;          // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 		D3DXVECTOR4		AerialTintColor; // xyz: manual aerial tint override
 		D3DXVECTOR4		Distant;         // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-		D3DXVECTOR4		Global;          // x: Amount, y: unused, z: unused, w: unused
+		D3DXVECTOR4		Global;          // x: Amount, y: NoiseSkyMaskThreshold, z: unused, w: unused
 		Animator		WeatherFilterAnimator;
 	};
 	VolumetricFogStruct	Constants;

@@ -39,6 +39,7 @@ void VolumetricFogEffect::UpdateSettings(){
 
 	Constants.Global.x = TheSettingManager->GetSettingF(SettingCategory, "Amount");
 	Constants.Weather.w = TheSettingManager->GetSettingF(SettingCategory, "FogSaturation");
+	Constants.Global.y = TheSettingManager->GetSettingF(SettingCategory, "NoiseSkyMaskThreshold");
 
 	Constants.Density.x = TheSettingManager->GetSettingF(SettingCategory, "BaseDensity");
 	Constants.Density.y = TheSettingManager->GetSettingF(SettingCategory, "WeatherImpact");
@@ -70,6 +71,7 @@ void VolumetricFogEffect::UpdateSettings(){
 		Constants.Aerial.x = TheSettingManager->GetSettingF(SettingCategory, "AerialStrength");
 		Constants.Aerial.y = TheSettingManager->GetSettingF(SettingCategory, "AerialRangeStart");
 		Constants.Aerial.z = TheSettingManager->GetSettingF(SettingCategory, "AerialTintBlend");
+		Constants.Aerial.w = TheSettingManager->GetSettingF(SettingCategory, "AerialDayFadeStart");
 
 		Constants.AerialTintColor.x = TheSettingManager->GetSettingF(SettingCategory, "AerialTintR");
 		Constants.AerialTintColor.y = TheSettingManager->GetSettingF(SettingCategory, "AerialTintG");
