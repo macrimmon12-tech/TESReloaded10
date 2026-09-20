@@ -164,7 +164,18 @@ static const float RAY_LENGTH_MAX = 20000.0f;
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
-static const float accumLightStrength = 3.0f;
+
+// Every uniform-wash screenshot so far shares one signature: the sky (correctly suppressed by
+// the distance falloff) looks fine while everything nearby is a flat, undifferentiated plateau
+// -- not literally inverted (that bug is already fixed by the saturate() below), just genuinely
+// hitting 1.0 and staying there regardless of shadow state, which erases whatever contrast the
+// shadow value would otherwise produce. TESR_SunColor carries real HDR magnitude in this engine
+// (this is the same PBR pipeline ObjectTemplate.hlsl's PBRSun/PBRDiffuse consume, not a display-
+// range [0,1] color), so a fully-lit ray was almost certainly clipping well before the shadow
+// term ever got a chance to pull it back down. Cut hard from the source shader's 3.0 so a
+// fully-lit ray has headroom below 1.0 for the shadow value to actually carve a visible gap out
+// of, and treat Strength (the user-facing setting) as the knob to raise from here, not this.
+static const float accumLightStrength = 0.3f;
 
 struct VSOUT {
     float4 vertPos : POSITION;
