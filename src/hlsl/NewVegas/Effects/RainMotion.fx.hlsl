@@ -27,6 +27,12 @@ sampler2D TESR_OrthoMapBuffer : register(s2) = sampler_state { ADDRESSU = CLAMP;
 
 #include "Includes/Depth.hlsl"
 
+// TEMPORARY DIAGNOSTIC SWITCH -- set to 0 to restore normal behavior. While 1, both discard
+// tests (roof/ortho occlusion, depth soft-particle) are skipped and every streak is forced to
+// an opaque bright magenta quad, so we can tell whether geometry is reaching the screen at all
+// versus being culled by one of those tests.
+#define RAINMOTION_DEBUG_FORCE_VISIBLE 1
+
 float hash11(float n) { return frac(sin(n) * 43758.5453123f); }
 float3 hash3(float n) { return float3(hash11(n), hash11(n + 17.17f), hash11(n + 41.41f)); }
 
@@ -111,11 +117,17 @@ float4 RainMotionPS(VSOUT IN) : COLOR0
 	float shapeWidth = 1.0f - smoothstep(0.0f, 1.0f, abs(IN.uv.x));
 	float shapeLength = 1.0f - IN.uv.y;
 	float shape = shapeWidth * shapeLength * IN.fade;
+#if !RAINMOTION_DEBUG_FORCE_VISIBLE
 	if (shape <= 0.001f) discard;
+#endif
 
 	float2 screenUV;
 	screenUV.x = IN.screenPos.x / IN.screenPos.w * 0.5f + 0.5f;
 	screenUV.y = 0.5f - (IN.screenPos.y / IN.screenPos.w * 0.5f);
+
+#if RAINMOTION_DEBUG_FORCE_VISIBLE
+	return float4(1.0f, 0.0f, 1.0f, 1.0f); // opaque magenta -- if you see this, geometry is reaching the screen
+#endif
 
 	// roof/indoor occlusion, reusing the same top-down exposure buffer other precipitation-
 	// adjacent effects already rely on for this exact test.
