@@ -227,22 +227,29 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float3 scatterTerm = ComputeScattering(lightDotView, scatterCeiling).xxx * lightColor;
 
     float3 accumLight = 0.0f.xxx;
+    float accumDistance = max(TESR_VolumetricLightData1.w, 1.0f);
 
     [loop]
     for (int i = 0; i < MARCH_NUM; i++) {
         // 1.0 where this step sees the sun, towards 0 behind an occluder.
         float Shadow = GetSunShadowAmount(currentPosition);
-        accumLight += scatterTerm * Shadow;
+
+        // Per-step distance falloff, not a single value based on the ray's endpoint: a step near
+        // the camera should contribute the same whether the ray eventually hits a nearby wall or
+        // continues on to open sky far beyond it. Keying the falloff to the ray's endpoint
+        // distance instead (an earlier version of this) made the effect only ever visible
+        // painted onto whatever solid surface a given ray happened to hit -- since a sky-bound
+        // ray's endpoint is always RAY_LENGTH_MAX and got crushed to ~0, while a nearby object's
+        // endpoint was always close and got the "full strength" falloff uniformly across its
+        // whole silhouette -- and never as a glow genuinely hanging in open air.
+        float distFalloff = 1.0f - saturate(distance(currentPosition, TESR_CameraPosition.xyz) / accumDistance);
+
+        accumLight += scatterTerm * Shadow * distFalloff;
         currentPosition += step;
     }
 
     accumLight /= MARCH_NUM;
-
-    // Fades the shaft out with distance so it stays concentrated near visible occluders instead
-    // of contributing uniformly out to the far clip plane (isSky rays, at RAY_LENGTH_MAX, fall
-    // past AccumDistance and are suppressed by this almost entirely, which is intentional).
-    float fogCoeff = 1.0f - saturate(rayLength / max(TESR_VolumetricLightData1.w, 1.0f));
-    accumLight *= accumLightStrength * fogCoeff * strength;
+    accumLight *= accumLightStrength * strength;
     accumLight += lerp(-NOISE_GRANULARITY, NOISE_GRANULARITY, rand(uv));
 
     // Saturated here, once, at the source: CompositeLight's blend (color*(1-v)+v) only behaves
