@@ -39,7 +39,6 @@ void VolumetricFogEffect::UpdateSettings(){
 
 	Constants.Global.x = TheSettingManager->GetSettingF(SettingCategory, "Amount");
 	Constants.Weather.w = TheSettingManager->GetSettingF(SettingCategory, "FogSaturation");
-	Constants.Global.y = TheSettingManager->GetSettingF(SettingCategory, "NoiseSkyMaskThreshold");
 
 	Constants.Density.x = TheSettingManager->GetSettingF(SettingCategory, "BaseDensity");
 	Constants.Density.y = TheSettingManager->GetSettingF(SettingCategory, "WeatherImpact");

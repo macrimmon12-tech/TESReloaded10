@@ -19,7 +19,7 @@ public:
 		D3DXVECTOR4		Aerial;          // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 		D3DXVECTOR4		AerialTintColor; // xyz: manual aerial tint override
 		D3DXVECTOR4		Distant;         // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-		D3DXVECTOR4		Global;          // x: Amount, y: NoiseSkyMaskThreshold, z: unused, w: unused
+		D3DXVECTOR4		Global;          // x: Amount, y: unused, z: unused, w: unused
 		Animator		WeatherFilterAnimator;
 	};
 	VolumetricFogStruct	Constants;

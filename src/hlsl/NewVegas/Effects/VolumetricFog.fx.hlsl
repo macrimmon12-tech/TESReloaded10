@@ -47,7 +47,7 @@ float4 TESR_VolumetricFogWeather;    // x: WeatherFilterBlend (animated 0-1), y:
 float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NoiseSkyMaskThreshold
+float4 TESR_VolumetricFogGlobal;     // x: Amount
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -64,10 +64,6 @@ static const float FogPower = TESR_FogData.w;
 
 // scale settings for easier tuning
 static const float FogAmount = max(0, TESR_VolumetricFogGlobal.x);
-// Source-pixel luma above which the procedural noise's contribution to density is faded out --
-// keeps the noise pattern from visibly breaking up bright sky/sun regions it would otherwise
-// modulate (isSky's own masking happens later, on the composited result, not on this term).
-static const float NoiseSkyMaskThreshold = max(0.01, TESR_VolumetricFogGlobal.y);
 
 static const float BaseDensity = max(0, TESR_VolumetricFogDensity.x);
 static const float WeatherImpact = max(0, TESR_VolumetricFogDensity.y);
@@ -375,13 +371,7 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float3 windOffset = float3(WindDirection * WindSpeed * TESR_GameTime.x * 0.002, 0);
 	float noiseVal = fbm3((worldPos + windOffset) / (1500 * NoiseScale));
 
-	// Fade the noise's influence out (not the whole density term) on bright source pixels --
-	// the sun disc and near-sun sky glow -- so the noise pattern doesn't visibly mottle the
-	// brightest part of the frame. isSky's own masking happens later on the fully composited
-	// result, which doesn't stop the noise from having already distorted the sun-scattering
-	// term (sun depends on strength, which this noise feeds into) before that point.
-	float noiseSkyMask = 1 - smoothstep(NoiseSkyMaskThreshold * 0.5, NoiseSkyMaskThreshold, luma(color));
-	float nvrDensity = BaseDensity * timeOfDayScale * lerp(1.0, noiseVal, NoiseStrength * noiseSkyMask);
+	float nvrDensity = BaseDensity * timeOfDayScale * lerp(1.0, noiseVal, NoiseStrength);
 	nvrDensity = nvrDensity * WeatherFilterBlend + SunriseSunsetBoost * sunsetBump * WeatherFilterBlend;
 
 	float strength = max(0, nvrDensity + WeatherImpact * vanillaStrength);
