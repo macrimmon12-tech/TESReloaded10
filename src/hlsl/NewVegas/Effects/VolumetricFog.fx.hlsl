@@ -403,9 +403,12 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float4 finalColor = float4(lerp(color.rgb, fogged, skyMaskFactor), 1);
 
 	// ---- aerial perspective: mid-to-far distance tint on non-sky terrain ----
+	// Gated by isDayTimeFog: aerial haze is a daylight-scattering phenomenon, and the manual
+	// AerialTint override in particular is a fixed color that doesn't dim on its own at night --
+	// without this gate it reads as a glow against an otherwise-dark night scene.
 	float aerialFactor = smoothstep(AerialRangeStart, 1.0, normalizedDepth) * (1.0 - isSkyDome) * isExterior;
 	float3 aerialTint = lerp(ambientColor, linearize(TESR_VolumetricFogAerialTint).rgb, AerialTintBlend);
-	finalColor.rgb = lerp(finalColor.rgb, aerialTint, aerialFactor * AerialStrength * skyMaskFactor);
+	finalColor.rgb = lerp(finalColor.rgb, aerialTint, aerialFactor * AerialStrength * skyMaskFactor * isDayTimeFog);
 
 	// ---- distant fog: horizon Z-fighting/sky-seam matte ----
 	finalColor = lerp(finalColor, skyColor, distantFog * saturate(DistantFogBlend) * distantHeightFade * isExterior);
