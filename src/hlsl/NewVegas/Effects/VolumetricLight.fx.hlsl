@@ -78,9 +78,8 @@ float4 ScreenCoordToTexCoord(float4 coord) {
     return coord;
 }
 
-float SampleShadowMoments(float2 uv, out float4 moments) {
-    moments = tex2Dlod(TESR_ShadowAtlas, float4(uv, 0.0f, 0.0f));
-    return 1.0f;
+float4 SampleShadowMoments(float2 uv) {
+    return tex2Dlod(TESR_ShadowAtlas, float4(uv, 0.0f, 0.0f));
 }
 
 float GetShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float offsetY, float bias, float bleedReduction) {
@@ -89,8 +88,7 @@ float GetShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float
     lightSpaceCoord.x += offsetX;
     lightSpaceCoord.y += offsetY;
 
-    float4 moments;
-    SampleShadowMoments(lightSpaceCoord.xy, moments);
+    float4 moments = SampleShadowMoments(lightSpaceCoord.xy);
 
     [branch]
     if (ShadowMode == 0.0f)
