@@ -923,6 +923,28 @@ Enabled = true                      # Replaces shaders used by terrain, adding P
 [_Shaders.Underwater.Status]
 Enabled = true                      # Post Process underwater fog/godrays/caustics effect.
 
+[_Shaders.VolumetricLight.Main]
+Strength = 1.0                      # Overall intensity multiplier for the light shaft.
+FogDensity = 1.0                    # Density of the animated fog the shaft scatters through.
+Height = 5000.0                     # World height of the fog layer ceiling the shaft marches through.
+Anisotropy = 0.1                    # Forward scattering bias for ground-level light (Henyey-Greenstein g). Higher makes the shaft brighter when looking along it.
+SkyScatterStrength = 1.0            # Strength of the cheap non-marched sky glow near the horizon.
+AccumDistance = 20000.0             # Distance over which the shaft's accumulated light fades out.
+Dither = true                       # Dither the ray march start offset to hide banding between steps.
+
+[_Shaders.VolumetricLight.Coloring]
+ScatterR = 1.0                      # Red channel tint on the scattered sun color.
+ScatterG = 1.0                      # Green channel tint on the scattered sun color.
+ScatterB = 1.0                      # Blue channel tint on the scattered sun color.
+
+[_Shaders.VolumetricLight.Wind]
+DirectionX = 1.0                    # X component of the wind direction that scrolls the animated fog noise.
+DirectionY = 0.0                    # Y component of the wind direction that scrolls the animated fog noise.
+DirectionZ = 0.0                    # Z component of the wind direction that scrolls the animated fog noise.
+
+[_Shaders.VolumetricLight.Status]
+Enabled = true                       # Ray-marched sun light shafts, occluded by the sun shadow atlas.
+
 [_Shaders.VolumetricFog.Main]
 Amount = 0.4                        # Global multiplier for fog strength in exteriors
 SunPower = 0.2                      # Controls the influence of Sun Color when shining through fog

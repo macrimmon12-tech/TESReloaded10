@@ -17,13 +17,21 @@ float4 TESR_ShadowData; // y: darkness
 
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
 float4 TESR_VolumetricLightData2; // xyz: wind direction, w: fog power
-float4 TESR_VolumetricLightData3; // x: strength (0 = off, also the Combine gate), y: fog density, z: height, w: anisotropy
+float4 TESR_VolumetricLightData3; // x: strength (intensity multiplier), y: fog density, z: height, w: anisotropy
 float4 TESR_VolumetricLightData4; // x: sky scatter strength, y: dither toggle, z: unused, w: unused
 
-sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
-sampler2D TESR_SourceBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
-sampler2D TESR_DepthBuffer : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
-sampler2D TESR_ShadowAtlas : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
+// Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
+// RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
+// a full-res composite can't share a technique. Technique 0 (March) renders into its own
+// dedicated half-res TESR_VolumetricLightBuffer via RenderEffectToRT, same pattern as
+// FlashlightBeamEffect's TESR_VolumetricBuffer. Technique 1 (Composite) runs later, at full
+// resolution, through the normal RenderEffectsPreTonemapping chain.
+sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+sampler2D TESR_ShadowAtlas : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
+// Dedicated half-res march result. LINEAR filtering here is the upsample: Composite reads it
+// with a plain tex2D and the sampler does the bilinear work.
+sampler2D TESR_VolumetricLightBuffer : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 
 #include "Includes/Helpers.hlsl"
 #include "Includes/Depth.hlsl"
@@ -144,8 +152,7 @@ float GetSunShadowAmount(float3 positionWS, float3 normal) {
 static const float4x4 DITHER_PATTERN = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.22f, 0.875f, 0.375f, 0.1875f, 0.6875f, 0.0625f, 0.5625f, 0.9375f, 0.4375f, 0.8125f, 0.3125f };
 
 static const int MARCH_NUM = 14;
-static const float SCATTERING = 0.1f;
-static const float SCATTERING_SKY = 0.6f;
+static const float SCATTERING_SKY = 0.6f; // Henyey-Greenstein forward-scattering bias for the sky term; ground uses the tunable anisotropy below.
 static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float RAY_LENGTH_MAX = 20000.0f;
 
@@ -215,18 +222,14 @@ float ComputeScatteringSky(float lightDotView) {
     return result;
 }
 
-// Sky and ground scattering differ only in how far the media term may raise the
-// Henyey-Greenstein parameter; the march picks the ceiling once outside the loop.
+// Ground scattering; the media (fog density) term may raise the Henyey-Greenstein parameter up
+// to ceiling, clamped once outside the loop by the caller.
 float ComputeScatteringClamped(float lightDotView, float media, float ceiling) {
-    float scatter = min(SCATTERING + media, ceiling);
+    float scatter = min(anisotropy + media, ceiling);
     float result = 1.0f - scatter * scatter;
     float g = 1.0f + scatter * scatter - (2.0f * scatter) * lightDotView;
     result /= (4.0f * PI * Pow1_5(g));
     return result;
-}
-
-float ComputeScattering(float lightDotView, float media) {
-    return ComputeScatteringClamped(lightDotView, media, 0.5f);
 }
 
 // Low-resolution ray march: walks the view ray from the camera to the surface (or a capped
@@ -338,12 +341,13 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     return float4(max(accumLight, 0.0f), 1.0f);
 }
 
-// Full resolution: upsamples the low-res march (bilinear, via the sampler state above) and adds
-// a cheap non-marched sky-ambient glow so the horizon doesn't look flat where the march's own
-// per-pixel cost would be wasted on sky that never occludes anything.
-float4 VolumetricLightSky(VSOUT IN) : COLOR0 {
+// Full resolution: upsamples the low-res march (bilinear, via TESR_VolumetricLightBuffer's
+// sampler state), adds a cheap non-marched sky-ambient glow on sky pixels (the march's per-pixel
+// cost would be wasted there since sky never occludes anything), then blends the result onto the
+// scene the same way the source shader's CombineLight did.
+float4 CompositeLight(VSOUT IN) : COLOR0 {
     float2 uv = IN.UVCoord.xy;
-    float3 color = tex2D(TESR_RenderedBuffer, uv).rgb;
+    float3 volumeLight = tex2D(TESR_VolumetricLightBuffer, uv).rgb;
 
     float depth = readDepth(uv);
     bool isSky = depth > (farZ * 0.99f);
@@ -352,30 +356,25 @@ float4 VolumetricLightSky(VSOUT IN) : COLOR0 {
         float3 rayDirection = normalize(toWorld(uv));
         float scatter = ComputeScatteringSky(dot(rayDirection, TESR_SmoothedSunDir.xyz)) * skyScatterStrength;
         float3 skyGlow = scatter * TESR_SunColor.rgb * accumLightStrength * strength;
-        color = saturate(color + skyGlow);
+        volumeLight = saturate(volumeLight + skyGlow);
     }
 
-    return float4(color, 1.0f);
-}
-
-float4 CombineLight(VSOUT IN) : COLOR0 {
-    float3 color = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord)).rgb;
-    float3 volumeLight = linearize(tex2D(TESR_RenderedBuffer, IN.UVCoord)).rgb;
+    float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
+    volumeLight = linearize(volumeLight);
     float3 result = color * (1 - volumeLight) + volumeLight;
     return delinearize(float4(result, 1.0f));
 }
 
-technique {
+technique March {
     pass {
         VertexShader = compile vs_3_0 FrameVS();
         PixelShader = compile ps_3_0 VolumetricLight();
     }
+}
+
+technique Composite {
     pass {
         VertexShader = compile vs_3_0 FrameVS();
-        PixelShader = compile ps_3_0 VolumetricLightSky();
-    }
-    pass {
-        VertexShader = compile vs_3_0 FrameVS();
-        PixelShader = compile ps_3_0 CombineLight();
+        PixelShader = compile ps_3_0 CompositeLight();
     }
 }
