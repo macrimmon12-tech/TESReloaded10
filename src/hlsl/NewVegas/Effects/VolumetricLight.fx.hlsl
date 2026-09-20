@@ -26,7 +26,7 @@ float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
 float4 TESR_VolumetricLightData3; // x: strength (intensity multiplier), w: anisotropy (y, z unused)
-float4 TESR_VolumetricLightData4; // y: dither toggle (x, z, w unused)
+float4 TESR_VolumetricLightData4; // x: debug view toggle, y: dither toggle (z, w unused)
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -190,6 +190,7 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
+static const bool debugView = TESR_VolumetricLightData4.x > 0.5f;
 
 // Every uniform-wash screenshot so far shares one signature: the sky (correctly suppressed by
 // the distance falloff) looks fine while everything nearby is a flat, undifferentiated plateau
@@ -227,12 +228,21 @@ float Pow1_5(float g) {
 
 // Henyey-Greenstein phase function, anisotropy clamped to ceiling (wider, flatter lobe for sky
 // rays than ground rays -- see the two call sites' scatterCeiling).
+//
+// Normalised to peak at exactly 1.0 looking straight into the sun, so Anisotropy sets the SHAPE
+// of the lobe and nothing else. Raw HG has its magnitude tied to g: the peak is
+// (1-g^2)/(4*PI*(1-g)^3), which climbs from 0.108 at g=0.1 to 0.796 at g=0.6 -- so tightening
+// the lobe also made the whole effect 7.4x brighter, far past where the composite blend
+// saturates, and the frame washed out to a flat sheet that destroyed the very structure the
+// tighter lobe was meant to reveal. Dividing through by that peak decouples the two knobs:
+// Anisotropy controls how sharply light gathers toward the sun, Strength controls how much
+// there is. The peak term is a closed form -- at lightDotView == 1 the denominator is
+// (1 + g^2 - 2g)^1.5 = ((1-g)^2)^1.5 = (1-g)^3 -- so this costs no extra evaluation.
 float ComputeScattering(float lightDotView, float ceiling) {
-    float scatter = min(anisotropy, ceiling);
-    float result = 1.0f - scatter * scatter;
-    float g = 1.0f + scatter * scatter - (2.0f * scatter) * lightDotView;
-    result /= (4.0f * PI * Pow1_5(g));
-    return result;
+    float g = min(anisotropy, ceiling);
+    float forward = 1.0f - g;
+    float denom = 1.0f + g * g - (2.0f * g) * lightDotView;
+    return (forward * forward * forward) / Pow1_5(max(denom, 0.0001f));
 }
 
 // Low-resolution ray march: walks the view ray from the camera to the visible surface, or to
@@ -359,6 +369,11 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
 
     // Guarded: on a thin feature every tap can land on a different surface and drop out.
     float3 volumeLight = sum / max(weightSum, 0.0001f);
+
+    // Debug view: the march's own output with no scene under it, so what the effect actually
+    // computes can be read directly instead of inferred from how it tints the frame. Blown-out
+    // highlights and a correctly shaped but over-bright shaft look identical once blended.
+    if (debugView) return float4(volumeLight, 1.0f);
 
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
     volumeLight = linearize(volumeLight);

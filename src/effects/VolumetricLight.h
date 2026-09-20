@@ -17,6 +17,7 @@ public:
 		float	Strength;
 		float	Anisotropy;
 		bool	Dither;
+		bool	DebugView;
 		D3DXVECTOR3	ScatterColor;
 		float	AccumDistance;
 	};
@@ -25,7 +26,7 @@ public:
 	struct VolumetricLightStruct {
 		D3DXVECTOR4	Data1;	// xyz: scatter color tint, w: accum distance cutoff
 		D3DXVECTOR4	Data3;	// x: strength (intensity multiplier), w: anisotropy (y, z unused)
-		D3DXVECTOR4	Data4;	// y: dither toggle (x, z, w unused)
+		D3DXVECTOR4	Data4;	// x: debug view toggle, y: dither toggle (z, w unused)
 	};
 	VolumetricLightStruct	Constants;
 

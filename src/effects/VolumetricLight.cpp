@@ -6,6 +6,7 @@ void VolumetricLightEffect::UpdateSettings() {
 	Settings.Strength = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Strength");
 	Settings.Anisotropy = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Anisotropy");
 	Settings.Dither = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "Dither");
+	Settings.DebugView = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "DebugView");
 	Settings.AccumDistance = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "AccumDistance");
 
 	Settings.ScatterColor.x = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Coloring", "ScatterR");
@@ -14,7 +15,7 @@ void VolumetricLightEffect::UpdateSettings() {
 
 	Constants.Data1 = D3DXVECTOR4(Settings.ScatterColor.x, Settings.ScatterColor.y, Settings.ScatterColor.z, Settings.AccumDistance);
 	Constants.Data3 = D3DXVECTOR4(Settings.Strength, 0.0f, 0.0f, Settings.Anisotropy);
-	Constants.Data4 = D3DXVECTOR4(0.0f, Settings.Dither ? 1.0f : 0.0f, 0.0f, 0.0f);
+	Constants.Data4 = D3DXVECTOR4(Settings.DebugView ? 1.0f : 0.0f, Settings.Dither ? 1.0f : 0.0f, 0.0f, 0.0f);
 }
 
 void VolumetricLightEffect::RegisterConstants() {
