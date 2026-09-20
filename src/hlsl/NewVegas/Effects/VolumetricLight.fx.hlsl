@@ -25,7 +25,7 @@ float4 TESR_SunColor;
 float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
-float4 TESR_VolumetricLightData3; // x: strength (intensity multiplier), w: anisotropy (y, z unused)
+float4 TESR_VolumetricLightData3; // x: strength, y: march sample count, w: anisotropy (z unused)
 float4 TESR_VolumetricLightData4; // x: debug view toggle, y: dither toggle (z, w unused)
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
@@ -184,7 +184,15 @@ float GetSunShadowAmount(float3 positionWS) {
 
 static const float4x4 DITHER_PATTERN = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.22f, 0.875f, 0.375f, 0.1875f, 0.6875f, 0.0625f, 0.5625f, 0.9375f, 0.4375f, 0.8125f, 0.3125f };
 
-static const int MARCH_NUM = 14;
+// Sample count is the resolution at which the march can resolve a shadow volume, and it has to
+// beat the occluders you want shafts from. At 14 samples over a 2000-unit range the step is 143
+// units, while a tree trunk's shadow volume is 25-45 units across and a pole's is 15-30: the
+// march simply steps over them, landing inside one maybe a fifth of the time, and a single
+// darkened sample out of 14 is a 7% dip nobody can see. A building wall's shadow is 300+ units,
+// wider than the step, which is why streets produced clear shafts while a forest produced none.
+// Dithering the start offset helps beyond the raw count -- neighbouring pixels probe different
+// points and the depth-aware upsample averages them -- but it cannot rescue a 5x shortfall.
+static const float sampleCount = max(TESR_VolumetricLightData3.y, 4.0f);
 static const float NOISE_GRANULARITY = 0.5 / 255.0;
 
 static const float strength = TESR_VolumetricLightData3.x;
@@ -272,7 +280,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // hanging in mid-air, untethered from any geometry.
     float accumDistance = max(TESR_VolumetricLightData1.w, 1.0f);
     float rayLength = isSky ? accumDistance : min(length(cameraVector), accumDistance);
-    float3 step = rayDirection * (rayLength / MARCH_NUM);
+    float3 step = rayDirection * (rayLength / sampleCount);
 
     // 0.5/Reciprocal, not 1/Reciprocal: TESR_ReciprocalResolution describes the full-res back
     // buffer, but this technique renders into the half-res TESR_VolumetricLightBuffer, so uv
@@ -293,7 +301,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float3 accumLight = 0.0f.xxx;
 
     [loop]
-    for (int i = 0; i < MARCH_NUM; i++) {
+    for (float i = 0.0f; i < sampleCount; i += 1.0f) {
         // 1.0 where this step sees the sun, towards 0 behind an occluder.
         float Shadow = GetSunShadowAmount(currentPosition);
 
@@ -312,14 +320,14 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     }
 
     // Mean sample value, then back to a path integral: the physical quantity is the integral of
-    // scattered light along the ray, sum(f) * stepLength, and stepLength is rayLength/MARCH_NUM.
-    // Dividing by MARCH_NUM alone yields a mean with NO dependence on how far the ray actually
+    // scattered light along the ray, sum(f) * stepLength, and stepLength is rayLength/sampleCount.
+    // Dividing by the sample count alone yields a mean with NO dependence on how far the ray
     // travelled, so 20 units of air in front of a near wall accumulated exactly as much light as
     // 4000 units of open sky -- every surface in the frame got the same wash regardless of how
     // much air was really in front of it, which is what read as haze paint on nearby geometry
     // rather than depth. Normalised by accumDistance so a full-length ray keeps the magnitude
     // this was calibrated at and Strength stays meaningful.
-    accumLight *= rayLength / (accumDistance * MARCH_NUM);
+    accumLight *= rayLength / (accumDistance * sampleCount);
     accumLight *= accumLightStrength * strength;
     accumLight += lerp(-NOISE_GRANULARITY, NOISE_GRANULARITY, rand(uv));
 
