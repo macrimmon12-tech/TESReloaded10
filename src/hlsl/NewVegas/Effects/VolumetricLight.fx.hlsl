@@ -158,7 +158,8 @@ float GetSunShadowAmount(float3 positionWS) {
     // Deliberately NOT faded by TESR_ShadowFade.x here, unlike every surface-shading consumer
     // of these same cascades. That fade ramps to a full 1.0 (shadows entirely off) for any
     // dayLight in [0.4, 0.6] -- see ShadowsExterior.cpp, smoothStep(0.5, 0.1, abs(dayLight-0.5)),
-    // whose bounds run backwards -- which is the whole of sunrise and sunset. It exists to hide
+    // whose bounds run backwards -- and stays partially faded across the rest of each sunrise and
+    // sunset ramp, reaching 0 only once dayLight pins at 1.0 (or 0.0). It exists to hide
     // shadow acne on SURFACES at grazing sun angles, where a cascade texel spans a long run of
     // receiver depth. The march samples free-floating points in open air: there is no surface to
     // self-shadow, so there is no acne to hide, and the fade buys nothing.
