@@ -69,10 +69,14 @@ PS_OUTPUT main(VS_OUTPUT IN) {
 		float moment2 = depth * depth + 0.25 * (dx * dx + dy * dy);
 		OUT.color_0 = float4(depth, moment2, 0.0f, 1.0f);
 #elif SHADOW_FIXED_MODE == 1
-		// EVSM2
+		// EVSM2 stores one warped depth and its square. Both resolves - SampleShadowAtlas in
+		// Shaders/Includes/Shadow.hlsl and GetLightAmountValueEVSM2 in Effects/Includes/Shadows.hlsl -
+		// hand .xy to ChebyshevUpperBound, which reads .y as the second moment of .x. Writing the
+		// negative warp into .y put two different quantities in that pair, so the variance computed
+		// from them described neither. EVSM2 has no room for the negative warp; that is what EVSM4 is.
 		float2 exponents = GetEVSMExponents(40.0f, 5.0f);
-		float2 evsm2 = WarpDepth(depth, exponents);
-		OUT.color_0 = float4(evsm2, 0.0f, 1.0f);
+		float posWarp = WarpDepth(depth, exponents).x;
+		OUT.color_0 = float4(posWarp, posWarp * posWarp, 0.0f, 1.0f);
 #else
 		// EVSM4
 		float2 exponents = GetEVSMExponents(40.0f, 5.0f);
