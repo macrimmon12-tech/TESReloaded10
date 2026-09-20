@@ -11,6 +11,14 @@
 // each streak's hashed local offset is folded back into a box re-centered on the *live*
 // TESR_CameraPosition every frame, so the rain can never be "left behind" no matter how far
 // the player walks -- there is no fixed origin or bounded extent to walk out of.
+//
+// No hardware alpha blending: RenderEffectsPreTonemapping's caller explicitly resets
+// D3DRS_ALPHABLENDENABLE to false right before this whole effects chain runs (see
+// src/NewVegas/Hooks/Render.cpp, "Disable render state settings that create artefacts"), via
+// the engine's own render-state cache rather than the raw device -- the same reason every other
+// effect at this pipeline stage composites manually instead of relying on the blend unit. This
+// shader follows that convention: it self-samples the background at its own screen position and
+// lerps toward the streak color in the pixel shader, always writing a fully opaque result.
 
 float4x4 TESR_ViewProjectionTransform;
 float4x4 TESR_ShadowCameraToLightTransformOrtho;
@@ -18,7 +26,6 @@ float4 TESR_RainMotionData;    // x: intensity, y: effective fall speed, z: stre
 float4 TESR_RainMotionFall;    // xyz: normalized fall vector (world space), w: signed camera-whip shear
 float4 TESR_RainMotionVolume;  // xyz: wrap volume size (Sx, Sy, Sz), w: streak count (informational)
 float4 TESR_RainMotionFade;    // x: fade start (fraction of half-extent), y: fade range, z: refraction strength, w: opacity
-float4 TESR_CameraForward;
 float4 TESR_GameTime;
 float4 TESR_SunColor;
 
@@ -27,12 +34,6 @@ sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; AD
 sampler2D TESR_OrthoMapBuffer : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 
 #include "Includes/Depth.hlsl"
-
-// TEMPORARY DIAGNOSTIC SWITCH -- set to 0 to restore normal behavior. While 1, both discard
-// tests (roof/ortho occlusion, depth soft-particle) are skipped and every streak is forced to
-// an opaque bright magenta quad, so we can tell whether geometry is reaching the screen at all
-// versus being culled by one of those tests.
-#define RAINMOTION_DEBUG_FORCE_VISIBLE 1
 
 float hash11(float n) { return frac(sin(n) * 43758.5453123f); }
 float3 hash3(float n) { return float3(hash11(n), hash11(n + 17.17f), hash11(n + 41.41f)); }
@@ -98,18 +99,6 @@ VSOUT RainMotionVS(float3 corner : POSITION0)
 
 	float3 worldPos = streakCenter + widthOffset + lengthOffset + shearOffset;
 
-#if RAINMOTION_DEBUG_FORCE_VISIBLE
-	// Bypass ONLY the wrap/billboard math: use the real camera matrices, but place each
-	// streak at a trivial, hand-picked point (spread out a little by instance index so
-	// they're not all exactly coincident) a fixed, modest distance in front of the camera,
-	// along the camera's forward axis. Isolates whether TESR_CameraPosition/
-	// TESR_ViewProjectionTransform are valid for this shader at all, separate from the
-	// wrap/billboard computation above.
-	float3 spread = float3(frac(instanceIndex * 0.0173f) * 400.0f - 200.0f,
-	                        frac(instanceIndex * 0.0313f) * 400.0f - 200.0f,
-	                        0.0f);
-	worldPos = TESR_CameraPosition.xyz + normalize(TESR_CameraForward.xyz) * 500.0f + spread;
-#endif
 	float4 clipPos = mul(float4(worldPos, 1.0f), TESR_ViewProjectionTransform);
 	OUT.vertPos = clipPos;
 	OUT.screenPos = clipPos;
@@ -127,20 +116,15 @@ VSOUT RainMotionVS(float3 corner : POSITION0)
 
 float4 RainMotionPS(VSOUT IN) : COLOR0
 {
-	float shapeWidth = 1.0f - smoothstep(0.0f, 1.0f, abs(IN.uv.x));
-	float shapeLength = 1.0f - IN.uv.y;
-	float shape = shapeWidth * shapeLength * IN.fade;
-#if !RAINMOTION_DEBUG_FORCE_VISIBLE
-	if (shape <= 0.001f) discard;
-#endif
-
 	float2 screenUV;
 	screenUV.x = IN.screenPos.x / IN.screenPos.w * 0.5f + 0.5f;
 	screenUV.y = 0.5f - (IN.screenPos.y / IN.screenPos.w * 0.5f);
+	float3 originalColor = tex2D(TESR_SourceBuffer, screenUV).rgb;
 
-#if RAINMOTION_DEBUG_FORCE_VISIBLE
-	return float4(1.0f, 0.0f, 1.0f, 1.0f); // opaque magenta -- if you see this, geometry is reaching the screen
-#endif
+	float shapeWidth = 1.0f - smoothstep(0.0f, 1.0f, abs(IN.uv.x));
+	float shapeLength = 1.0f - IN.uv.y;
+	float shape = shapeWidth * shapeLength * IN.fade;
+	if (shape <= 0.001f) return float4(originalColor, 1.0f);
 
 	// roof/indoor occlusion, reusing the same top-down exposure buffer other precipitation-
 	// adjacent effects already rely on for this exact test.
@@ -149,7 +133,7 @@ float4 RainMotionPS(VSOUT IN) : COLOR0
 	float2 orthoUV = float2(orthoPos.x * 0.5f + 0.5f, orthoPos.y * -0.5f + 0.5f);
 	float orthoDepth = tex2D(TESR_OrthoMapBuffer, orthoUV).r;
 	bool occluded = outOfBounds || (orthoDepth < orthoPos.z - 0.0001f);
-	if (occluded) discard;
+	if (occluded) return float4(originalColor, 1.0f);
 
 	// soft-particle fade against opaque scene geometry, using the same combined depth buffer
 	// every other post effect reads rather than a hardware Z-test (no depth-stencil is bound
@@ -157,18 +141,19 @@ float4 RainMotionPS(VSOUT IN) : COLOR0
 	float sceneDepth = readDepth(screenUV);
 	float depthFade = saturate((sceneDepth - IN.viewDepth) / 50.0f);
 	shape *= depthFade;
-	if (shape <= 0.001f) discard;
+	if (shape <= 0.001f) return float4(originalColor, 1.0f);
 
 	// per-streak refraction: bend the background behind the drop rather than tint over it.
 	float2 refractNormal = float2(IN.uv.x, 0.0f);
 	float2 refractUV = screenUV + refractNormal * TESR_RainMotionFade.z * 0.01f;
-	float3 sceneColor = tex2D(TESR_SourceBuffer, refractUV).rgb;
+	float3 refractedColor = tex2D(TESR_SourceBuffer, refractUV).rgb;
 
 	float glint = pow(saturate(1.0f - abs(IN.uv.x)), 8.0f) * shapeLength;
-	float3 color = sceneColor + TESR_SunColor.rgb * glint * 0.35f;
+	float3 streakColor = refractedColor + TESR_SunColor.rgb * glint * 0.35f;
 
 	float alpha = saturate(shape * TESR_RainMotionData.x * TESR_RainMotionFade.w);
-	return float4(color, alpha);
+	float3 finalColor = lerp(originalColor, streakColor, alpha);
+	return float4(finalColor, 1.0f);
 }
 
 technique
@@ -179,9 +164,7 @@ technique
 		PixelShader = compile ps_3_0 RainMotionPS();
 		ZEnable = false;
 		ZWriteEnable = false;
-		AlphaBlendEnable = true;
-		SrcBlend = SRCALPHA;
-		DestBlend = INVSRCALPHA;
+		AlphaBlendEnable = false;
 		CullMode = NONE;
 		AlphaTestEnable = false;
 	}
