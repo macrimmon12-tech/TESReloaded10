@@ -819,9 +819,19 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	Effects.WetWorld->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 
 	// March into VolumetricLight's own half res buffer first (technique 0); the Composite pass
-	// below (technique 1) reads it back at full res. Same two-step pattern as FlashlightBeam.
-	RenderEffectToRT(Effects.VolumetricLight->Textures.VolumetricSurface, Effects.VolumetricLight, true);
-	Device->SetRenderTarget(0, RenderTarget);
+	// below (technique 1) reads it back at full res. Same two-step pattern as FlashlightBeam,
+	// including the guard, which is not optional: RenderEffectToRT switches the render target
+	// BEFORE EffectRecord::Render can test Enabled/ShouldRender, so an unguarded call rebinds
+	// every frame even in interiors where this effect never draws. Worse, if the surface is null
+	// -- texture creation failed, or a device reset released it before RegisterTextures ran again
+	// -- it becomes SetRenderTarget(0, NULL), which D3D9 forbids for target 0 and leaves the
+	// device with no colour target for whatever draws next.
+	if (Effects.VolumetricLight->Textures.VolumetricSurface &&
+		Effects.VolumetricLight->Enabled &&
+		Effects.VolumetricLight->ShouldRender()) {
+		RenderEffectToRT(Effects.VolumetricLight->Textures.VolumetricSurface, Effects.VolumetricLight, true);
+		Device->SetRenderTarget(0, RenderTarget);
+	}
 
 	// Beam march first, into its own half res buffer, so the Flashlight Combine pass can
 	// read it. Control.x already folds the effect toggle, the per view toggle and the
