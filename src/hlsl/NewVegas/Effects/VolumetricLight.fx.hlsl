@@ -59,12 +59,9 @@ float4 TESR_ShadowMiddleCenter;
 float4 TESR_ShadowFarCenter;
 float4 TESR_ShadowLodCenter;
 float4 TESR_ShadowFormatData; // x: mode, y: format bits
-float4 TESR_ShadowBlur; // x: 1 / atlas resolution
 
 static const float ShadowMode = TESR_ShadowFormatData.x;
 static const float ShadowFormatBits = TESR_ShadowFormatData.y;
-static const float ShadowNormalBiasTexels = 2.5f;
-static const float ShadowSlopeBias = 1.0f;
 
 float4 ScreenCoordToTexCoord(float4 coord) {
     coord.xyz /= coord.w;
@@ -98,29 +95,30 @@ float GetShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float
 
 // 1.0 in full light, towards 0 in shadow. positionWS is camera-relative world position
 // (TESR_CameraPosition already folded in by the caller, matching GetShadowWorldPos elsewhere).
-float GetSunShadowAmount(float3 positionWS, float3 normal) {
+//
+// No normal-offset bias here, unlike the game-shader/deferred versions this mirrors: that bias
+// exists to push a SURFACE sample away from itself to fight self-shadowing acne, and only makes
+// sense with a real geometric normal. The march samples free-floating points in open air, not a
+// surface, so there is no meaningful normal to offset along -- a flat bias is the correct choice,
+// not a degenerate substitute (an earlier version of this passed the sun direction itself as
+// "normal", which made NdotL always exactly 1 and silently zeroed the bias everywhere).
+float GetSunShadowAmount(float3 positionWS) {
     if (!TESR_ShadowFade.y) return 1.0f;
 
-    float NdotL = dot(normal, TESR_SmoothedSunDir.xyz);
-    float offsetScale = saturate(1.0f - NdotL);
-
-    float4 radii = float4(TESR_ShadowNearCenter.w, TESR_ShadowMiddleCenter.w, TESR_ShadowFarCenter.w, TESR_ShadowLodCenter.w);
-    float4 texelWorld = 4.0f * radii * max(TESR_ShadowBlur.x, 1.0f / 16384.0f);
-    float4 offsetDistance = offsetScale * ShadowNormalBiasTexels * texelWorld;
-
-    float bias = (ShadowMode == 0.0f ? 0.00001f : 0.01f) * (1.0f + ShadowSlopeBias * offsetScale);
+    const float bias = ShadowMode == 0.0f ? 0.00001f : 0.01f;
     const float blend = 0.9f;
 
+    float4 radii = float4(TESR_ShadowNearCenter.w, TESR_ShadowMiddleCenter.w, TESR_ShadowFarCenter.w, TESR_ShadowLodCenter.w);
     float4 distances = float4(
         length(positionWS - TESR_ShadowNearCenter.xyz),
         length(positionWS - TESR_ShadowMiddleCenter.xyz),
         length(positionWS - TESR_ShadowFarCenter.xyz),
         length(positionWS - TESR_ShadowLodCenter.xyz));
 
-#define VL_SHADOW_TAP_NEAR   GetShadowValue(TESR_ShadowCameraToLightTransformNear,   float4(positionWS + offsetDistance.x * normal, 1.0f), 0.0f, 0.0f, bias, 0.1f)
-#define VL_SHADOW_TAP_MIDDLE GetShadowValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS + offsetDistance.y * normal, 1.0f), 0.5f, 0.0f, bias, 0.2f)
-#define VL_SHADOW_TAP_FAR    GetShadowValue(TESR_ShadowCameraToLightTransformFar,    float4(positionWS + offsetDistance.z * normal, 1.0f), 0.0f, 0.5f, bias, 0.6f)
-#define VL_SHADOW_TAP_LOD    GetShadowValue(TESR_ShadowCameraToLightTransformLod,    float4(positionWS + offsetDistance.w * normal, 1.0f), 0.5f, 0.5f, bias, 0.8f)
+#define VL_SHADOW_TAP_NEAR   GetShadowValue(TESR_ShadowCameraToLightTransformNear,   float4(positionWS, 1.0f), 0.0f, 0.0f, bias, 0.1f)
+#define VL_SHADOW_TAP_MIDDLE GetShadowValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS, 1.0f), 0.5f, 0.0f, bias, 0.2f)
+#define VL_SHADOW_TAP_FAR    GetShadowValue(TESR_ShadowCameraToLightTransformFar,    float4(positionWS, 1.0f), 0.0f, 0.5f, bias, 0.6f)
+#define VL_SHADOW_TAP_LOD    GetShadowValue(TESR_ShadowCameraToLightTransformLod,    float4(positionWS, 1.0f), 0.5f, 0.5f, bias, 0.8f)
 
     float shadow = 1.0f;
     [branch] if (distances.x < radii.x) {
@@ -233,7 +231,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     [loop]
     for (int i = 0; i < MARCH_NUM; i++) {
         // 1.0 where this step sees the sun, towards 0 behind an occluder.
-        float Shadow = GetSunShadowAmount(currentPosition, TESR_SmoothedSunDir.xyz);
+        float Shadow = GetSunShadowAmount(currentPosition);
         accumLight += scatterTerm * Shadow;
         currentPosition += step;
     }
