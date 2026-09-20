@@ -4,6 +4,19 @@
 New Vegas Reloaded (NVR) — a post-process graphics injector for Fallout: New Vegas.
 Built as a 32-bit DLL (NewVegasReloaded.vcxproj), injected via xNVSE.
 
+## Build/deploy workflow
+The user does **not** use `build.bat`. They compile the DLL themselves and always patch a
+live install by hand. When a change touches this repo, tell them exactly which files to copy
+and where, rather than pointing at `build.bat` or assuming a fresh `robocopy /mir` deploy:
+- `NewVegasReloaded.dll` (+ `.pdb` if useful for a crash) -> `<deploy>\nvse\Plugins\`
+- Any new/changed runtime `.hlsl` files under `src/hlsl/NewVegas/Shaders/` -> the same relative
+  path under `<deploy>\Shaders\NewVegasReloaded\Shaders\` (these are loaded/compiled at runtime,
+  not built into the DLL)
+- Mention `Shaders\NewVegasReloaded\Shaders\Cache\` as the place to clear if a shader change
+  doesn't seem to take effect (`ShaderRecord::LoadShader` caches compiled/preprocessed shaders
+  per name and normally auto-recompiles on content change, but it's a reasonable troubleshooting
+  step)
+
 ## Key architecture
 - `src/core/ImGuiManager.cpp` — ImGui settings overlay (DX9 + Win32 backend)
 - `src/core/ShaderManager.cpp` — main render loop; calls `ImGuiManager::NewFrame()` and `Render()`
