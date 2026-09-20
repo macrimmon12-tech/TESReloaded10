@@ -2,19 +2,23 @@
 
 void VolumetricFogEffect::UpdateConstants() {
 	// live weather-driven sky-filter disable, smoothly animated the same way RainEffect
-	// animates rain onset/offset (Animator started once on the true/false edge, sampled every frame)
+	// animates rain onset/offset (Animator started once on the true/false edge, sampled every frame).
+	// Animator's clock runs in GAME HOURS, not real seconds (Animator.cpp derives currenttime from
+	// GameDaysPassed) -- 0.1f here is a few game-minutes, a few real seconds at typical time scale,
+	// matching the same order of magnitude RainEffect uses (0.05f/0.07f) rather than the ~6-real-minute
+	// transition an unadjusted "3.0f meaning 3 seconds" mistake would have produced.
 	bool shouldDisableFilter = (TheShaderManager->GameState.isRainy && rainyDisablesSkyFilter) ||
 	                           (TheShaderManager->GameState.isCloudy && cloudyDisablesSkyFilter);
 
 	if (shouldDisableFilter && weatherFilterWasActive) {
 		// weather just started hiding the sky filter / disabling NVR-driven density
 		weatherFilterWasActive = false;
-		Constants.WeatherFilterAnimator.Start(3.0f, 0.0f);
+		Constants.WeatherFilterAnimator.Start(0.1f, 0.0f);
 	}
 	else if (!shouldDisableFilter && !weatherFilterWasActive) {
 		// weather cleared, sky filter/density fade back in
 		weatherFilterWasActive = true;
-		Constants.WeatherFilterAnimator.Start(3.0f, 1.0f);
+		Constants.WeatherFilterAnimator.Start(0.1f, 1.0f);
 	}
 
 	Constants.Weather.x = Constants.WeatherFilterAnimator.GetValue();
