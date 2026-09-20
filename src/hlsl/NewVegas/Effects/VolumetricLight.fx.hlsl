@@ -25,7 +25,7 @@ float4 TESR_SunColor;
 float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
-float4 TESR_VolumetricLightData3; // x: strength, y: march sample count, w: anisotropy (z unused)
+float4 TESR_VolumetricLightData3; // x: strength, w: anisotropy (y, z unused)
 float4 TESR_VolumetricLightData4; // x: debug view toggle, y: dither toggle (z, w unused)
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
@@ -192,7 +192,16 @@ static const float4x4 DITHER_PATTERN = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.22
 // wider than the step, which is why streets produced clear shafts while a forest produced none.
 // Dithering the start offset helps beyond the raw count -- neighbouring pixels probe different
 // points and the depth-aware upsample averages them -- but it cannot rescue a 5x shortfall.
-static const float sampleCount = max(TESR_VolumetricLightData3.y, 4.0f);
+// Compile-time constant, and an int -- deliberately, not a setting. Driving this from
+// TESR_VolumetricLightData3.y made it a runtime bound with a float loop counter, and that
+// crashed the D3DX9 HLSL compiler outright: the game died inside CompileEffect with no error
+// logged, the log simply ending after this effect registered its texture. ps_3_0's native
+// loop instruction counts with an integer register, so a float counter compared against a
+// float bound cannot use it, and fxc falls back to a path that does not survive tex2Dlod and
+// nested [branch] blocks in the body. Changing the count means editing this line and letting
+// the effect recompile; if it needs to be a setting again, the D3DXMACRO route EffectRecord
+// already uses for FORWARD_SHADOWS keeps it a compile-time constant, which this must stay.
+static const int MARCH_NUM = 64;
 static const float NOISE_GRANULARITY = 0.5 / 255.0;
 
 static const float strength = TESR_VolumetricLightData3.x;
@@ -280,7 +289,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // hanging in mid-air, untethered from any geometry.
     float accumDistance = max(TESR_VolumetricLightData1.w, 1.0f);
     float rayLength = isSky ? accumDistance : min(length(cameraVector), accumDistance);
-    float3 step = rayDirection * (rayLength / sampleCount);
+    float3 step = rayDirection * (rayLength / MARCH_NUM);
 
     // 0.5/Reciprocal, not 1/Reciprocal: TESR_ReciprocalResolution describes the full-res back
     // buffer, but this technique renders into the half-res TESR_VolumetricLightBuffer, so uv
@@ -301,7 +310,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float3 accumLight = 0.0f.xxx;
 
     [loop]
-    for (float i = 0.0f; i < sampleCount; i += 1.0f) {
+    for (int i = 0; i < MARCH_NUM; i++) {
         // 1.0 where this step sees the sun, towards 0 behind an occluder.
         float Shadow = GetSunShadowAmount(currentPosition);
 
@@ -320,14 +329,14 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     }
 
     // Mean sample value, then back to a path integral: the physical quantity is the integral of
-    // scattered light along the ray, sum(f) * stepLength, and stepLength is rayLength/sampleCount.
+    // scattered light along the ray, sum(f) * stepLength, and stepLength is rayLength/MARCH_NUM.
     // Dividing by the sample count alone yields a mean with NO dependence on how far the ray
     // travelled, so 20 units of air in front of a near wall accumulated exactly as much light as
     // 4000 units of open sky -- every surface in the frame got the same wash regardless of how
     // much air was really in front of it, which is what read as haze paint on nearby geometry
     // rather than depth. Normalised by accumDistance so a full-length ray keeps the magnitude
     // this was calibrated at and Strength stays meaningful.
-    accumLight *= rayLength / (accumDistance * sampleCount);
+    accumLight *= rayLength / (accumDistance * MARCH_NUM);
     accumLight *= accumLightStrength * strength;
     accumLight += lerp(-NOISE_GRANULARITY, NOISE_GRANULARITY, rand(uv));
 
