@@ -442,15 +442,22 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 
 	// ---- aerial perspective: mid-to-far distance tint on non-sky terrain ----
 	// Own day-fade curve, wider than isDayTimeFog's: aerial haze is a daylight-scattering
-	// phenomenon, and the manual AerialTint override in particular is a fixed color that doesn't
-	// dim on its own at night -- without a gate it reads as a glow against an otherwise-dark
-	// night scene. Using a wider ramp than isDayTimeFog (which sun-scattering still uses) keeps
-	// aerial suppressed through more of the sunrise/sunset transition too, not just full night --
-	// direct low-angle sun was making it read as too bright on distant terrain at that specific time.
+	// phenomenon, so it's still suppressed through more of the sunrise/sunset transition than
+	// sun-scattering's own 0.1-0.6 ramp -- direct low-angle sun was making it read as too bright
+	// on distant terrain at that specific time.
 	float aerialDayFade = smoothstep(0.1, AerialDayFadeStart, TESR_SunAmount.x);
 	float aerialFactor = smoothstep(AerialRangeStart, 1.0, normalizedDepth) * (1.0 - isSkyDome) * isExterior;
 	float3 aerialTint = lerp(ambientColor, linearize(TESR_VolumetricFogAerialTint).rgb, AerialTintBlend);
-	finalColor.rgb = lerp(finalColor.rgb, aerialTint, aerialFactor * AerialStrength * skyMaskFactor * aerialDayFade);
+
+	// Multiplicative recolor, not a lerp toward an absolute color. aerialTint is a roughly-fixed
+	// color (sky ambient or a manual override) that doesn't dim on its own at night, so blending
+	// straight toward it pulled dark distant terrain up to that brightness -- a glow, at any
+	// AerialStrength/AerialTintBlend that was visible during the day, however far aerialDayFade
+	// had already suppressed it. Normalizing the tint to luma 1 and multiplying instead means it
+	// only recolors: a near-black night pixel times any color is still near-black, so it can't be
+	// brightened past what's already there, regardless of tuning.
+	float3 aerialTintDir = aerialTint / max(luma(aerialTint), 0.0001);
+	finalColor.rgb = lerp(finalColor.rgb, finalColor.rgb * aerialTintDir, aerialFactor * AerialStrength * skyMaskFactor * aerialDayFade);
 
 	// ---- distant fog: horizon Z-fighting/sky-seam matte ----
 	finalColor = lerp(finalColor, skyColor, distantFog * saturate(DistantFogBlend) * distantHeightFade * isExterior);
