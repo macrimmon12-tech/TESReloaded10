@@ -22,6 +22,7 @@
 #include "MotionBlur.h"
 #include "Normals.h"
 #include "Rain.h"
+#include "RainMotion.h"
 #include "Sharpening.h"
 #include "Specular.h"
 #include "SunShadows.h"

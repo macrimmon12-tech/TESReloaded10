@@ -121,6 +121,9 @@
     <ClInclude Include="..\src\effects\Rain.h">
       <Filter>Effects</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\effects\RainMotion.h">
+      <Filter>Effects</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\effects\ShadowsInteriors.h">
       <Filter>Effects</Filter>
     </ClInclude>
@@ -388,6 +391,9 @@
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\Rain.cpp">
+      <Filter>Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\effects\RainMotion.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\ShadowsExterior.cpp">

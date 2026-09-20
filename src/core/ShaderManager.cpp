@@ -64,6 +64,7 @@ void ShaderManager::Initialize() {
 	TheShaderManager->RegisterEffect<MotionBlurEffect>(&TheShaderManager->Effects.MotionBlur);
 	TheShaderManager->RegisterEffect<NormalsEffect>(&TheShaderManager->Effects.Normals);
 	TheShaderManager->RegisterEffect<RainEffect>(&TheShaderManager->Effects.Rain);
+	TheShaderManager->RegisterEffect<RainMotionEffect>(&TheShaderManager->Effects.RainMotion);
 	TheShaderManager->RegisterEffect<SharpeningEffect>(&TheShaderManager->Effects.Sharpening);
 	TheShaderManager->RegisterEffect<ShadowsExteriorEffect>(&TheShaderManager->Effects.ShadowsExteriors);
 	TheShaderManager->RegisterEffect<ShadowsInteriorsEffect>(&TheShaderManager->Effects.ShadowsInteriors);
@@ -829,6 +830,11 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	Effects.Underwater->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.VolumetricFog->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.GodRays->Render(Device, RenderTarget, RenderedSurface, 0, true, SourceSurface);
+
+	// Real streak geometry rendered here, pre-tonemap, so its refracted highlights participate
+	// in HDR bloom/exposure like any other lit scene element instead of sitting on top of the
+	// tonemapped image as a flat overlay.
+	Effects.RainMotion->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 
 	// calculate average luma for use by shaders
 	if (avglumaRequired) {

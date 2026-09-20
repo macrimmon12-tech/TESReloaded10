@@ -620,6 +620,29 @@ VerticalScale = 1.6                  # Multiplier for the length of the drops/st
 [_Shaders.Precipitations.Status]
 Enabled = true                       # Rain effect that is blocked by objects above and refracts light.
 
+[_Shaders.RainMotion.Main]
+StreakDensity = 1500                 # Number of rain streaks rendered as real geometry (0-8000).
+FallSpeed = 2200.0                   # Base fall speed of streaks, in world units/second.
+StreakLength = 220.0                 # Length of a streak, in world units.
+StreakWidth = 3.0                    # Width of a streak, in world units.
+VolumeSizeXY = 6000.0                # Horizontal size of the camera-following streak volume.
+VolumeSizeZ = 3000.0                 # Vertical size of the camera-following streak volume.
+WindDriftSpeed = 40.0                # Base strength of the procedural wind drift (no game wind data is used).
+WindGustStrength = 60.0              # Extra strength added by the procedural gust envelope.
+PlayerWindInfluence = 1.0            # How strongly player movement opposes the wind (relative-wind lean).
+CameraWhipShear = 0.0006             # Extra streak shear applied on fast camera turns.
+RefractionStrength = 1.0             # Per-streak refraction offset into the scene behind it.
+FadeStart = 0.75                     # Fraction of the volume's half-extent where streaks start fading out.
+FadeRange = 0.25                     # Fraction of the half-extent over which the fade completes.
+Opacity = 0.8                        # Overall streak opacity multiplier.
+TeleportSpeedThreshold = 2000.0      # Instantaneous speed (world units/second) above which a position
+                                     # jump is treated as a teleport and ignored for wind-lean purposes.
+IntensityIncreaseRate = 0.05         # Time in game hours for the effect to fade in when rain starts.
+IntensityDecreaseRate = 0.07         # Time in game hours for the effect to fade out when rain stops.
+
+[_Shaders.RainMotion.Status]
+Enabled = true                       # World-space rain streaks that lean with wind and player motion.
+
 [_Shaders.ShadowsExteriors.Main]
 Quality = 4                          # Quality preset - 0: Low, 1: Medium, 2: High, 3: Full, 4: Custom
 Enabled = true                       # Enable sun shadows using rendered shadow maps.

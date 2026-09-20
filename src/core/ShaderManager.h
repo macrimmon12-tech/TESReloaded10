@@ -99,6 +99,7 @@ public:
 		MotionBlurEffect*		MotionBlur;
 		NormalsEffect*			Normals;
 		RainEffect*				Rain;
+		RainMotionEffect*		RainMotion;
 		SharpeningEffect*		Sharpening;
 		SpecularEffect*			Specular;
 		SnowEffect*				Snow;
