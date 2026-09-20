@@ -28,12 +28,21 @@ float4 TESR_RainMotionVolume;  // xyz: wrap volume size (Sx, Sy, Sz), w: streak 
 float4 TESR_RainMotionFade;    // x: fade start (fraction of half-extent), y: fade range, z: refraction strength, w: opacity
 float4 TESR_GameTime;
 float4 TESR_SunColor;
+float4 TESR_CameraForward;
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_OrthoMapBuffer : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 
 #include "Includes/Depth.hlsl"
+
+// TEMPORARY DIAGNOSTIC SWITCH -- set to 0 to restore normal behavior. While 1, every streak is
+// placed at a fixed, guaranteed-in-front-of-camera position (bypassing the wrap/billboard math)
+// and the pixel shader unconditionally writes an extreme, oversaturated HDR value that should
+// survive tonemapping/exposure/grading as a blown-out highlight -- ruling out both "geometry
+// isn't where I think it is" and "the color got crushed by the HDR pipeline before it reached
+// the screen" in one pass.
+#define RAINMOTION_DEBUG_FORCE_VISIBLE 1
 
 float hash11(float n) { return frac(sin(n) * 43758.5453123f); }
 float3 hash3(float n) { return float3(hash11(n), hash11(n + 17.17f), hash11(n + 41.41f)); }
@@ -99,6 +108,13 @@ VSOUT RainMotionVS(float3 corner : POSITION0)
 
 	float3 worldPos = streakCenter + widthOffset + lengthOffset + shearOffset;
 
+#if RAINMOTION_DEBUG_FORCE_VISIBLE
+	float3 spread = float3(frac(instanceIndex * 0.0173f) * 400.0f - 200.0f,
+	                        frac(instanceIndex * 0.0313f) * 400.0f - 200.0f,
+	                        0.0f);
+	worldPos = TESR_CameraPosition.xyz + normalize(TESR_CameraForward.xyz) * 500.0f + spread;
+#endif
+
 	float4 clipPos = mul(float4(worldPos, 1.0f), TESR_ViewProjectionTransform);
 	OUT.vertPos = clipPos;
 	OUT.screenPos = clipPos;
@@ -120,6 +136,10 @@ float4 RainMotionPS(VSOUT IN) : COLOR0
 	screenUV.x = IN.screenPos.x / IN.screenPos.w * 0.5f + 0.5f;
 	screenUV.y = 0.5f - (IN.screenPos.y / IN.screenPos.w * 0.5f);
 	float3 originalColor = tex2D(TESR_SourceBuffer, screenUV).rgb;
+
+#if RAINMOTION_DEBUG_FORCE_VISIBLE
+	return float4(50.0f, 0.0f, 50.0f, 1.0f); // extreme HDR value -- should blow out as bright magenta regardless of tonemapping/exposure
+#endif
 
 	float shapeWidth = 1.0f - smoothstep(0.0f, 1.0f, abs(IN.uv.x));
 	float shapeLength = 1.0f - IN.uv.y;
