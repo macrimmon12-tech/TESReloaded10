@@ -932,6 +932,7 @@ MorningFogDip = 0.5                 # How much the NVR-driven density dips aroun
 SunriseSunsetBoost = 0.3            # Extra density/inscattering bump specifically during the sunrise and sunset transitions, on top of vanilla/base density.
 HeightFalloff = 50.0                # Vertical falloff rate of the fog density with altitude.
 MaxHeight = 3.0                     # "Sea level" above which fog density falls off.
+HeightInfluence = 1.0               # 1 = normal height-based falloff. 0 = uniform density regardless of height, falloff purely from distance. Meant to be tuned down for interiors; exteriors want this at 1.
 Extinction = 3.0                    # Light lost to absorption when seen through the fog.
 Inscattering = 1.6                  # Light gained from scattering when seen through the fog.
 WindAngle = 45.0                    # Compass direction (degrees) the fog's density noise drifts toward.
@@ -960,7 +961,8 @@ FogSaturation = 0.5                 # Tune the saturation of the fog color.
 BaseDensity = 0.3                   # NVR-authored fog density baseline, independent of vanilla weather fog.
 WeatherImpact = 0.0                 # How much the vanilla weather's own fog near/far/power/color feeds into density and color, on top of BaseDensity.
 HeightFalloff = 50.0                # Vertical falloff rate of the fog density with altitude.
-MaxHeight = 0.0                     # "Sea level" above which fog density falls off.
+MaxHeight = 0.0                     # "Sea level" above which fog density falls off. Only meaningful when HeightInfluence > 0 -- tune per-cell via the preset manager for spaces where a real gradient makes sense (e.g. a tall Metro shaft), alongside HeightInfluence itself.
+HeightInfluence = 0.0               # 1 = normal height-based falloff. 0 = uniform density regardless of height (the safe default for a generic preset with no per-cell tuning). Raise this only where MaxHeight has also been tuned for that specific space.
 Extinction = 0.4                    # Light lost to absorption when seen through the fog.
 Inscattering = 0.35                 # Light gained from scattering when seen through the fog.
 WindAngle = 0.0                     # Compass direction (degrees) the fog's density noise drifts toward.

@@ -55,6 +55,7 @@ void VolumetricFogEffect::UpdateSettings(){
 	Constants.Wind.w = TheSettingManager->GetSettingF(SettingCategory, "NoiseScale");
 
 	Constants.Scatter.z = TheSettingManager->GetSettingF(SettingCategory, "NoiseStrength");
+	Constants.Scatter.w = TheSettingManager->GetSettingF(SettingCategory, "HeightInfluence");
 
 	rainyDisablesSkyFilter = TheSettingManager->GetSettingI(SettingCategory, "RainyDisablesSkyFilter") != 0;
 	cloudyDisablesSkyFilter = TheSettingManager->GetSettingI(SettingCategory, "CloudyDisablesSkyFilter") != 0;

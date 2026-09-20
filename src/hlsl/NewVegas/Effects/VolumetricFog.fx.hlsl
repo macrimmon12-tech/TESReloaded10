@@ -42,7 +42,7 @@ float4 TESR_ShadowFade;       // y: shadow maps active
 float4 TESR_VolumetricFogDensity;    // x: BaseDensity, y: WeatherImpact, z: MorningFogDip, w: SunriseSunsetBoost
 float4 TESR_VolumetricFogShape;      // x: HeightFalloff, y: MaxHeight, z: Extinction, w: Inscattering
 float4 TESR_VolumetricFogWind;       // x: WindDirX, y: WindDirY, z: WindSpeed, w: NoiseScale
-float4 TESR_VolumetricFogScatter;    // x: PhaseAsymmetry, y: ShadowStrength, z: NoiseStrength, w: unused
+float4 TESR_VolumetricFogScatter;    // x: PhaseAsymmetry, y: ShadowStrength, z: NoiseStrength, w: HeightInfluence
 float4 TESR_VolumetricFogWeather;    // x: WeatherFilterBlend (animated 0-1), y: isExterior, z: SkyAmbientAvailable, w: FogSaturation
 float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: unused
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
@@ -82,6 +82,10 @@ static const float NoiseScale = max(0.0001, TESR_VolumetricFogWind.w);
 static const float PhaseAsymmetry = saturate(TESR_VolumetricFogScatter.x);
 static const float ShadowStrength = saturate(TESR_VolumetricFogScatter.y);
 static const float NoiseStrength = saturate(TESR_VolumetricFogScatter.z);
+// 1 = normal height-based density falloff (exterior default). 0 = no height dependence at all,
+// density shaped purely by distance -- for interiors, where MaxHeight has no consistent meaning
+// across arbitrary cell geometry unless an author explicitly tunes it for a known space.
+static const float HeightInfluence = saturate(TESR_VolumetricFogScatter.w);
 
 static const float WeatherFilterBlend = saturate(TESR_VolumetricFogWeather.x);
 static const float isExterior = TESR_VolumetricFogWeather.y; // 0 or 1 to activate/cancel fog in interiors
@@ -200,6 +204,20 @@ float3 mixHeightFog(float3 color, float3 fogColor, float3 extinctionColor, float
 	float fog = density * 0.00001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset);
 	float3 extColor = fog * extinctionColor;
 	float3 insColor = fog * inscatteringColor;
+	return color * saturate(1 - extColor) + fogColor * saturate(insColor);
+}
+
+// Flat, distance-only density -- no height term at all. This is the HeightInfluence=0 endpoint;
+// it is NOT the same as feeding falloff=0 into getHeightFog/mixHeightFog above, since that
+// function's outer (length(eyeVector)/distance) normalization is built assuming the integral is
+// doing real work and doesn't collapse to a clean distance-only result at falloff=0.
+float3 getFogFlat(float distance, float3 density){
+	return 1 - exp(-distance * density * 0.0001);
+}
+
+float3 mixFogFlat(float3 color, float3 fogColor, float3 extinctionColor, float3 inscatteringColor, float distance, float density){
+	float3 extColor = getFogFlat(distance, density * extinctionColor);
+	float3 insColor = getFogFlat(distance, density * inscatteringColor);
 	return color * saturate(1 - extColor) + fogColor * saturate(insColor);
 }
 
@@ -398,8 +416,15 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float4 ambientSkyColor = float4(lerp(ambientColor, skyColor.rgb, saturate(WeatherImpact)), 1);
 
 	float4 fogColorFinal = fogColor(ambientSkyColor, pureFogColor, strength, FogSkyColorCoeff, sun, FogSaturation);
+	// Blend between flat (distance-only, no height dependence) and height-integrated density.
+	// HeightInfluence=1 (exterior default) reduces to exactly the prior height-only behavior;
+	// HeightInfluence=0 (interior default) gives uniform density regardless of MaxHeight, safe
+	// for a generic preset with no per-cell tuning. Per-cell presets can raise HeightInfluence
+	// alongside a hand-tuned MaxHeight for spaces where a real gradient is known to make sense.
+	float3 flatFogged = mixFogFlat(color.rgb, fogColorFinal.rgb, Extinction, Inscattering, fogDepth, strength);
 	float falloffArg = 1.5 / (fogPower * HeightFalloff);
-	float3 fogged = mixHeightFog(color.rgb, fogColorFinal.rgb, Extinction, Inscattering, fogDepth, strength, falloffArg, worldPos, MaxHeight);
+	float3 heightFogged = mixHeightFog(color.rgb, fogColorFinal.rgb, Extinction, Inscattering, fogDepth, strength, falloffArg, worldPos, MaxHeight);
+	float3 fogged = lerp(flatFogged, heightFogged, HeightInfluence);
 	float4 finalColor = float4(lerp(color.rgb, fogged, skyMaskFactor), 1);
 
 	// ---- aerial perspective: mid-to-far distance tint on non-sky terrain ----
