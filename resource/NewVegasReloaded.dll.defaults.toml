@@ -930,6 +930,9 @@ Enabled = true                      # Post Process underwater fog/godrays/causti
 # a tighter bound and slightly cleaner shadow edges, at double the atlas bandwidth, but is not
 # required. An earlier note here claimed it was; that was written while a camera-space bug was
 # suppressing the shadow lookup entirely, and the format was never the cause.
+[_Shaders.TerrainBlend.Main]
+Enabled = false                     # PROBE, off by default. Depth-based blending of objects into the terrain behind them, so statics sink into the ground instead of intersecting it with a hard seam. Ported in principle from Community Shaders' Terrain Blending, which cannot be ported directly: that runs on a deferred renderer and writes the blend weight into G-buffer alpha, while FNV is forward and has to act at draw time. Currently it only COMPUTES and displays the factor, it does not apply it -- see TERRAIN_BLEND_DEBUG in Shaders/Includes/TerrainBlend.hlsl. Enabling makes every object shader declare TESR_DepthBuffer, which triggers a RESZ depth resolve per shader bind, so expect a frame cost and judge whether it is affordable before the feature is built out.
+
 [_Shaders.VolumetricLight.Main]
 Strength = 1.0                      # Overall intensity multiplier for the light shaft.
 Anisotropy = 0.35                   # [0.0-0.9] Forward scattering bias (Henyey-Greenstein g). Controls how strongly the shafts favour the direction of the sun. At 0.1 the phase function is very nearly isotropic -- only about 1.8x brighter looking into the sun than away from it -- which reads as flat haze rather than shafts. 0.6 gives roughly a 60x ratio, so light gathers into the sun instead of covering the frame.
