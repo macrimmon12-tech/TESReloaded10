@@ -38,8 +38,9 @@ float4 TESR_SmoothedSunDir;
 float4 TESR_SunColor;
 float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
+float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
-float4 TESR_VolumetricLightData3; // x: strength, w: anisotropy (y, z unused)
+float4 TESR_VolumetricLightData3; // x: strength, z: fog influence, w: anisotropy (y unused)
 float4 TESR_VolumetricLightData4; // x: debug view toggle, y: dither toggle (z, w unused)
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
@@ -233,6 +234,27 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
+static const float fogInfluence = TESR_VolumetricLightData3.z;
+
+// Scattering medium density taken from the weather's own fog.
+//
+// Scattered light is proportional to how much medium the ray crosses, so a constant density
+// gives identical shafts in clear desert air and in thick fog, which is wrong in both
+// directions: too strong when there is nothing to scatter off, too weak when the air is full
+// of it. The game already varies fog per weather, so that is the density to use rather than
+// inventing a second one that disagrees with the fog the player can see.
+//
+// TESR_FogData carries the near and far fog distances. Denser fog reaches full opacity over a
+// shorter span, so the span is an inverse density; FOG_REFERENCE_SPAN is the span treated as
+// fully dense. Typical clear weather runs tens of thousands of units and lands near 0.1, while
+// a fog weather closes to a few thousand and approaches 1.
+static const float FOG_REFERENCE_SPAN = 4000.0f;
+
+float GetFogDensity() {
+    float span = max(TESR_FogData.y - TESR_FogData.x, 1.0f);
+    return saturate(FOG_REFERENCE_SPAN / span);
+}
+
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
 // 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface, 4 the lookup's intermediates, 5-8 the sampling inputs. Mode 2 divides out everything
 // layered on top of occlusion -- the phase function, the distance falloff, Strength and
@@ -362,7 +384,10 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
     float3 lightColor = TESR_VolumetricLightData1.xyz * TESR_SunColor.rgb;
     float scatterCeiling = isSky ? 1.0f : 0.5f;
+    // Weather fog scales the medium density. FogInfluence at 0 keeps a constant medium and the
+    // previous behaviour exactly; at 1 the shafts track the fog the player can actually see.
     float3 scatterTerm = ComputeScattering(lightDotView, scatterCeiling).xxx * lightColor;
+    scatterTerm *= lerp(1.0f, GetFogDensity(), saturate(fogInfluence));
 
     float3 accumLight = 0.0f.xxx;
     float accumShadow = 0.0f;

@@ -20,12 +20,13 @@ public:
 		int		DebugView;
 		D3DXVECTOR3	ScatterColor;
 		float	AccumDistance;
+		float	FogInfluence;
 	};
 	VolumetricLightSettingsStruct	Settings;
 
 	struct VolumetricLightStruct {
 		D3DXVECTOR4	Data1;	// xyz: scatter color tint, w: accum distance cutoff
-		D3DXVECTOR4	Data3;	// x: strength, w: anisotropy (y, z unused)
+		D3DXVECTOR4	Data3;	// x: strength, z: fog influence, w: anisotropy (y unused)
 		D3DXVECTOR4	Data4;	// x: debug mode (0 off, 1 march, 2 shadow), y: dither toggle (z, w unused)
 	};
 	VolumetricLightStruct	Constants;
