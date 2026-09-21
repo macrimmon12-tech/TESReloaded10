@@ -310,28 +310,32 @@ static const bool ditherMotion = TESR_VolumetricLightData4.w > 0.5f;
 // means the lookup returns a constant and no occluder is being detected.
 static const float debugMode = TESR_VolumetricLightData4.x;
 
-// Calibration constant, so that Strength = 1.0 is the usable setting.
+// Calibration constant. Left at 0.04, with Strength carrying the rest, so the usable setting is
+// around 55 rather than around 1.
 //
-// MEASURED, not derived. The previous value of 0.04 was reasoned out on paper from the claim --
-// made in a comment elsewhere in this file -- that TESR_SunColor "carries real HDR magnitude".
-// Working backwards from a tuned in-game frame, it does not: it sits somewhere around 0.5, so
-// everything downstream was scaled down with it and the effect only became visible with Strength
-// up around 55. That is the whole of the 55x between the two numbers. Anyone recalibrating this
-// again should do it from a screenshot, not from arithmetic about what the sun colour ought to be.
+// This is not the number the maths wants. TESR_SunColor does not carry the large linear HDR
+// magnitude a comment elsewhere in this file claims -- working back from a tuned frame it sits
+// near 0.5 -- so everything downstream is scaled down with it, and 2.2 here is what would put the
+// slider back near 1.0. That change was made and then reversed: it silently rescales Strength by
+// 55x, so every config tuned against this constant reads 55x too bright until it is edited by
+// hand, and that cost more than the tidier slider range was worth.
 //
-// It is also no longer a ceiling. Two things that used to cap it are gone:
+// If it is ever revisited, the two have to move together: multiply here, divide in every
+// [Shaders.VolumetricLight.Main] Strength, including any the user has saved.
+//
+// It is not a ceiling either way. Two things that used to cap it are gone:
 //
 //   - CompositeLight ran the march output through linearize() as though it were an sRGB-encoded
 //     colour. It is not -- it is linear light -- so the shaft was gamma-decoded a second time,
 //     which crushed it and made the response to Strength a 2.4-power curve. Strength is linear
-//     now, which is what lets this be a calibration point at all rather than a point on a curve.
+//     now, so it scales predictably however this is calibrated.
 //
 //   - The old value was cut from the source shader's 3.0 to stop a fully lit ray clipping past
 //     1.0, because above 1.0 the old composite blend inverted. The composite tracks transmittance
 //     separately now, so in-scattered light is additive and a value above 1.0 is just a bright
 //     shaft. The buffers are FP16 all the way to the tonemapper, so it survives to be rolled off
 //     rather than clipped.
-static const float accumLightStrength = 2.2f;
+static const float accumLightStrength = 0.04f;
 
 struct VSOUT {
     float4 vertPos : POSITION;
