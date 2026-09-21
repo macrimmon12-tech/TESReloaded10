@@ -405,7 +405,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     //   are nowhere near the camera, and every theory about precision, slab bounds and atlas
     //   format was downstream of a lookup that never ran. Black here means the constants are
     //   arriving as zero, which is a binding failure rather than anything in the shader maths.
-    [branch] if (debugMode > 8.5f)
+    [branch] if (debugMode > 8.5f && debugMode < 9.5f)
         return float4(saturate(TESR_ShadowNearCenter.w / 250.0f),
                       saturate(TESR_ShadowMiddleCenter.w / 1000.0f),
                       saturate(TESR_ShadowFarCenter.w / 3000.0f), 1.0f);
