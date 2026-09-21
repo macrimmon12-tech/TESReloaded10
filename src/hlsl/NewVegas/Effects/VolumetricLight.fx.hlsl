@@ -271,8 +271,26 @@ float ComputeScattering(float lightDotView, float ceiling) {
 // ever brightens a pixel, is the shadow value -- so a fully-lit, unoccluded view (no occluder in
 // the ray's path) contributes almost nothing, and contrast only appears where the ray actually
 // crosses a shadow boundary.
+// Ray origin, taken from TESR_InvViewTransform rather than TESR_CameraPosition.
+//
+// RenderManager::SetupSceneCamera builds the view and inverse-view matrices from
+// *Pointers::Generic::CameraLocation, but sets CameraPosition from
+// WorldSceneGraph->camera->m_worldTransform.pos. Those are two different sources for the same
+// thing. The march took its direction from toWorld(), which is built on TESR_ViewTransform and
+// so on the first of them, while taking its origin from the second -- so any disagreement
+// between them offsets every world position the march produces, and with it every cascade test
+// and every shadow sample, while still looking perfectly coherent in a frac() grid.
+//
+// SunShadows.fx.hlsl cannot hit this: reconstructWorldPosition derives position entirely from
+// TESR_InvViewTransform, so its origin and direction always agree. Matching that here removes
+// the mismatch rather than assuming the two sources are equal.
+float3 GetRayOrigin() {
+    return float3(TESR_InvViewTransform[3][0], TESR_InvViewTransform[3][1], TESR_InvViewTransform[3][2]);
+}
+
 float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float2 uv = IN.UVCoord.xy;
+    float3 rayOrigin = GetRayOrigin();
 
     float depth = readDepth(uv);
     bool isSky = depth > (farZ * 0.99f);
@@ -302,7 +320,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float ditherOffset = ditherEnabled
         ? DITHER_PATTERN[int(ditherPixel.x) % 4][int(ditherPixel.y) % 4]
         : 0.5f;
-    float3 currentPosition = TESR_CameraPosition.xyz + step * ditherOffset;
+    float3 currentPosition = rayOrigin + step * ditherOffset;
 
     float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
     float3 lightColor = TESR_VolumetricLightData1.xyz * TESR_SunColor.rgb;
@@ -326,7 +344,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
         // ray's endpoint was always the far cap and got crushed to ~0, while a nearby object's
         // endpoint was always close and got the "full strength" falloff uniformly across its
         // whole silhouette -- and never as a glow genuinely hanging in open air.
-        float distFalloff = 1.0f - saturate(distance(currentPosition, TESR_CameraPosition.xyz) / accumDistance);
+        float distFalloff = 1.0f - saturate(distance(currentPosition, rayOrigin) / accumDistance);
 
         accumLight += scatterTerm * Shadow * distFalloff;
         currentPosition += step;
@@ -347,14 +365,14 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     //   Expect coloured banding that stays welded to surfaces as the camera moves, and stays put
     //   when only the camera rotates. Swimming with rotation means the reconstruction is wrong.
     [branch] if (debugMode > 5.5f && debugMode < 6.5f)
-        return float4(frac((TESR_CameraPosition.xyz + cameraVector) / 512.0f), 1.0f);
+        return float4(frac((rayOrigin + cameraVector) / 512.0f), 1.0f);
 
     // 7 CASCADE SELECTION for the surface point. red near, green middle, blue far, yellow lod,
     //   BLACK none. This is the one that matters most: GetSunShadowAmount starts at shadow = 1.0
     //   and only assigns if a cascade claims the point, so anything black here is returning lit
     //   without sampling the atlas at all. Expect concentric bands, red nearest the camera.
     [branch] if (debugMode > 6.5f && debugMode < 7.5f) {
-        float3 p = TESR_CameraPosition.xyz + cameraVector;
+        float3 p = rayOrigin + cameraVector;
         if (length(p - TESR_ShadowNearCenter.xyz)   < TESR_ShadowNearCenter.w)   return float4(1,0,0,1);
         if (length(p - TESR_ShadowMiddleCenter.xyz) < TESR_ShadowMiddleCenter.w) return float4(0,1,0,1);
         if (length(p - TESR_ShadowFarCenter.xyz)    < TESR_ShadowFarCenter.w)    return float4(0,0,1,1);
@@ -378,7 +396,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     //   gradient means the centre is a real world position near the camera. Uniform white means
     //   it is far away or at the origin, which is what a zeroed constant looks like.
     [branch] if (debugMode > 9.5f && debugMode < 10.5f)
-        return float4(saturate(length((TESR_CameraPosition.xyz + cameraVector) - TESR_ShadowNearCenter.xyz) / 2000.0f).xxx, 1.0f);
+        return float4(saturate(length((rayOrigin + cameraVector) - TESR_ShadowNearCenter.xyz) / 2000.0f).xxx, 1.0f);
 
     // 11 CASCADE SELECTION AT A MARCH SAMPLE -- the midpoint of the ray, not the visible
     //   surface. This is the test mode 7 should have been. Mode 7 and mode 10 both use the
@@ -388,14 +406,21 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     //   was wrong. March samples are capped at accumDistance from the camera, so unlike the
     //   surface they should land inside a cascade, and anything black here is a real failure.
     //   red near, green middle, blue far, yellow lod, black none.
-    [branch] if (debugMode > 10.5f) {
-        float3 m = TESR_CameraPosition.xyz + rayDirection * (rayLength * 0.5f);
+    [branch] if (debugMode > 10.5f && debugMode < 11.5f) {
+        float3 m = rayOrigin + rayDirection * (rayLength * 0.5f);
         if (length(m - TESR_ShadowNearCenter.xyz)   < TESR_ShadowNearCenter.w)   return float4(1,0,0,1);
         if (length(m - TESR_ShadowMiddleCenter.xyz) < TESR_ShadowMiddleCenter.w) return float4(0,1,0,1);
         if (length(m - TESR_ShadowFarCenter.xyz)    < TESR_ShadowFarCenter.w)    return float4(0,0,1,1);
         if (length(m - TESR_ShadowLodCenter.xyz)    < TESR_ShadowLodCenter.w)    return float4(1,1,0,1);
         return float4(0,0,0,1);
     }
+
+    // 12 CAMERA SOURCE DISAGREEMENT, as a flat grey: the distance between TESR_CameraPosition
+    //   and the origin encoded in TESR_InvViewTransform, over 64 units. Black means the two
+    //   agree and this was never the fault; anything brighter is the offset that was being
+    //   applied to every world position the march built.
+    [branch] if (debugMode > 11.5f)
+        return float4(saturate(length(TESR_CameraPosition.xyz - GetRayOrigin()) / 64.0f).xxx, 1.0f);
 
     // 8 GATING CONSTANTS, as one flat colour. red TESR_ShadowFade.y (0 disables the lookup
     //   entirely and returns 1.0 before anything is sampled), green shadow mode over 2 so VSM,
@@ -417,7 +442,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     //                varying blue means real occluder depths are being read and the fault is in
     //                the comparison rather than the addressing.
     [branch] if (debugMode > 3.5f) {
-        float3 surfacePos = TESR_CameraPosition.xyz + cameraVector;
+        float3 surfacePos = rayOrigin + cameraVector;
         // The cascade the real lookup would select, not a hardcoded one. Pinning this to Near
         // made the mode useless: Near spans ~212 units, so nearly every visible point projects
         // outside it, saturate clamped to 0 or 1, and the result was flat colour-cube corners that
@@ -441,7 +466,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // as lit. If mode 3 is white too, the lookup is wrong for every position and differs from
     // SunShadows in some way the two can then be diffed over directly.
     [branch] if (debugMode > 2.5f) {
-        float3 surfacePos = TESR_CameraPosition.xyz + cameraVector;
+        float3 surfacePos = rayOrigin + cameraVector;
         return float4(GetSunShadowAmount(surfacePos).xxx, 1.0f);
     }
 
