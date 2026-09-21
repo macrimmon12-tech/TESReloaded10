@@ -4,7 +4,6 @@ void TerrainShaders::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_TerrainData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_TerrainExtraData", &Constants.ExtraData);
 	TheShaderManager->RegisterConstant("TESR_TerrainSkyData", &Constants.SkyData);
-	TheShaderManager->RegisterConstant("TESR_TerrainVariationData", &Constants.VariationData);
 	TheShaderManager->RegisterConstant("TESR_TerrainParallaxData", &ParallaxConstants.Data);
 	TheShaderManager->RegisterConstant("TESR_TerrainParallaxExtraData", &ParallaxConstants.ExtraData);
 }
@@ -55,9 +54,6 @@ void TerrainShaders::UpdateSettings() {
 
 	LODSettings.NoiseScale = TheSettingManager->GetSettingF("Shaders.Terrain.LOD", "LODNoiseScale");
 	LODSettings.NoiseTile = TheSettingManager->GetSettingF("Shaders.Terrain.LOD", "LODNoiseTile");
-
-	VariationSettings.Scale = TheSettingManager->GetSettingF("Shaders.Terrain.Variation", "Scale");
-	VariationSettings.HeightInfluence = TheSettingManager->GetSettingF("Shaders.Terrain.Variation", "HeightInfluence");
 }
 
 void TerrainShaders::UpdateConstants() {
@@ -82,14 +78,6 @@ void TerrainShaders::UpdateConstants() {
 
 	Constants.ExtraData.z = LODSettings.NoiseScale;
 	Constants.ExtraData.w = LODSettings.NoiseTile;
-
-	// Whether the stochastic path is compiled in at all is a separate, compile-time decision
-	// (Shaders.Terrain.Variation.Enabled -> TERRAIN_VARIATION in ShaderRecord.cpp). These two
-	// only shape it once it is. A scale of 0 would collapse the whole world into one lattice
-	// cell, which is a constant hash offset everywhere and so just a shifted vanilla tiling --
-	// not a disable, and confusing to land on by accident, so the floor is above zero.
-	Constants.VariationData.x = max(VariationSettings.Scale, 0.01f);
-	Constants.VariationData.y = max(VariationSettings.HeightInfluence, 0.0f);
 
 	if (usePBR) {
 		Constants.Data.x = std::lerp(TheShaderManager->GetTransitionValue(Settings.Default.Metallicness, Settings.Night.Metallicness, 0.0),

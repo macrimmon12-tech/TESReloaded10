@@ -178,25 +178,6 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	AppendDefine("FORWARD_SHADOWS",
 		TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows") ? "1" : "0");
 
-	// Stochastic terrain tiling. Compile time because it changes the shape of the terrain
-	// sampling loop, not just a value in it: every stochastic layer turns one tex2D into two
-	// tex2Dgrad plus a blend, and ps_3_0 only has 512 instruction slots -- a runtime switch
-	// would make the 7-layer, 24-pointlight terrain variants pay for the two-tap path whether
-	// or not it is on. The layer cap is a second define for the same reason; see
-	// Includes/TerrainVariation.hlsl. Only Terrain*.hlsl reads either.
-	{
-		bool variation = TheSettingManager->GetSettingI("Shaders.Terrain.Variation", "Enabled") != 0;
-		AppendDefine("TERRAIN_VARIATION", variation ? "1" : "0");
-
-		int layers = TheSettingManager->GetSettingI("Shaders.Terrain.Variation", "Layers");
-		if (layers < 1) layers = 1;
-		if (layers > 7) layers = 7;
-		static char LayerDefine[2];
-		LayerDefine[0] = (char)('0' + layers);
-		LayerDefine[1] = '\0';
-		AppendDefine("TERRAIN_VARIATION_LAYERS", LayerDefine);
-	}
-
 	// Which skylighting model is compiled in. 0 = spherical harmonic irradiance, 1 = the older
 	// single directional sample. Compile time rather than a runtime branch: ps_3_0 flattens
 	// branches like this, so a runtime switch would make every lit pixel pay for BOTH paths.

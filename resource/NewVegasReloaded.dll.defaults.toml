@@ -917,21 +917,6 @@ ShadowsIntensity = 2.0              # Intensity of self shadowing.
 LODNoiseScale = 0.7                 # Amount of noise applied to LOD.
 LODNoiseTile = 2.7                  # LOD noise texture tiling modifier.
 
-# Stochastic texture tiling, after Deliot & Heitz 2019, ported from Community Shaders'
-# Terrain Variation. Each stochastic layer is sampled twice at hash-randomised offsets taken from
-# a triangular lattice over the UV, and the two taps are blended -- so the texture's phase changes
-# from cell to cell and a large open landscape stops reading as wallpaper.
-#
-# Enabled and Layers are COMPILE TIME: they change the shape of the terrain sampling loop, and
-# ps_3_0 has only 512 instruction slots, so a runtime switch would make the heaviest terrain
-# shaders pay for the two-tap path even with the effect off. Changing either rewrites the
-# preprocessed source, so they take effect on the next shader load, not immediately.
-[_Shaders.Terrain.Variation]
-Enabled = true                      # Break up terrain texture tiling with stochastic sampling.
-Layers = 3                          # [1-7] How many blend layers take the two-tap path. Each one costs two tex2Dgrad instead of one tex2D on BOTH the diffuse and the normal map, so 7 means 28 terrain samples per pixel against the vanilla 14, and roughly 200 extra instruction slots against ps_3_0's 512 -- enough that the 7-texture shaders may not compile. Going past 3 buys little: a quad blending many textures is already broken up by the blend itself, and the layers that far down carry small weights, so de-tiling them changes little of the pixel. 3 rather than 1 because the cap takes layers by INDEX, not by weight -- nothing sorts blends[], so if a quad's dominant texture is not layer 0, a cap of 1 de-tiles the wrong one. Raise it only if multi-texture ground (road edges, rock transitions) still visibly repeats, and check the log for a compile error if you do.
-Scale = 1.0                         # Lattice cells per UV unit. Terrain UVs are in texture-tile space, so 1.0 gives one randomised cell per texture repeat -- roughly every 256 game units. Lower values make the variation coarser and preserve more of the texture's own large features; higher values vary faster but blend more often, which softens contrast.
-HeightInfluence = 0.3               # [0.0-1.0] How much the two taps' height decides the blend. At 0 it is a straight crossfade, which ghosts: both taps are half-visible across the whole transition band. Higher lets the taller tap win its own area, so the seam follows relief.
-
 [_Shaders.Terrain.Status]
 Enabled = true                      # Replaces shaders used by terrain, adding PBR lighting and parallax.
 

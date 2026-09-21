@@ -9,19 +9,8 @@
 
 #if defined(__INTELLISENSE__)
     #include "SkyAmbient.hlsl"
-    #include "TerrainVariation.hlsl"
 #else
     #include "includes/SkyAmbient.hlsl"
-    #include "includes/TerrainVariation.hlsl"
-#endif
-
-// Stochastic tiling. Off unless ShaderRecord.cpp defines it, and even then only the first
-// TERRAIN_VARIATION_LAYERS blend layers take the two-tap path -- see TerrainVariation.hlsl.
-#ifndef TERRAIN_VARIATION
-    #define TERRAIN_VARIATION 0
-#endif
-#ifndef TERRAIN_VARIATION_LAYERS
-    #define TERRAIN_VARIATION_LAYERS 1
 #endif
 
 float4 TESR_TerrainData : register(c89);
@@ -41,34 +30,16 @@ float4 TESR_TerrainSkyData : register(c135);
     #define SKY_AMBIENT_STRENGTH  (TESR_TerrainSkyData.x)    // scale on skyUpper at w = 1
 #endif
 
-// stochasticWeights carries each layer's albedo blend weight out to blendNormalMaps, so that
-// layer's normal comes from the same mix of the two taps its colour did. One entry per layer
-// rather than one shared float: the weight is height-dependent, so it differs per texture.
-// dx/dy are the original uv derivatives, hoisted to top level by the caller.
-//
-// The i < TERRAIN_VARIATION_LAYERS test is on the index of an [unroll]ed loop, so fxc folds it
-// and layers past the limit keep their single tex2D untouched. The array is only ever indexed
-// by that same unrolled i, so it stays in registers -- no relative addressing.
-float3 blendDiffuseMaps(float3 vertexColor, float2 uv, float2 dx, float2 dy, int texCount, sampler2D tex[7], float blends[7], StochasticOffsets stochastic, inout float stochasticWeights[7]) {
+float3 blendDiffuseMaps(float3 vertexColor, float2 uv, int texCount, sampler2D tex[7], float blends[7]) {
     float3 color = float3(0, 0, 0);
-
     [unroll] for (int i = 0; i < texCount; i++) {
-#if TERRAIN_VARIATION
-        if (i < TERRAIN_VARIATION_LAYERS) {
-            color += StochasticSampleAlbedo(tex[i], uv, dx, dy, stochastic, stochasticWeights[i]).xyz * blends[i];
-        }
-        else {
-            color += tex2D(tex[i], uv).xyz * blends[i];
-        }
-#else
         color += tex2D(tex[i], uv).xyz * blends[i];
-#endif
     }
 
     return color * vertexColor;
 }
 
-float3 blendNormalMaps(float2 uv, float2 dx, float2 dy, int texCount, sampler2D tex[7], float blends[7], float spec[7], StochasticOffsets stochastic, float stochasticWeights[7], out float gloss, out float specExponent) {
+float3 blendNormalMaps(float2 uv, int texCount, sampler2D tex[7], float blends[7], float spec[7], out float gloss, out float specExponent) {
     gloss = 0.0f;
     specExponent = 0.0f;
 
@@ -76,16 +47,7 @@ float3 blendNormalMaps(float2 uv, float2 dx, float2 dy, int texCount, sampler2D 
 
     float4 normal;
     [unroll] for (int i = 0; i < texCount; i++) {
-#if TERRAIN_VARIATION
-        if (i < TERRAIN_VARIATION_LAYERS) {
-            normal = StochasticSampleWith(tex[i], uv, dx, dy, stochastic, stochasticWeights[i]);
-        }
-        else {
-            normal = tex2D(tex[i], uv);
-        }
-#else
         normal = tex2D(tex[i], uv);
-#endif
         blendedNormal += normal.xyz * blends[i];
         gloss += normal.w * blends[i] * (spec[i] > 0 ? 1.0f : 0.0f);
         specExponent += spec[i] * blends[i];

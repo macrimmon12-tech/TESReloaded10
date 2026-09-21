@@ -144,32 +144,10 @@ PS_OUTPUT main(PS_INPUT IN) {
     float heightStatus[7] = { LandHeight[0].x, LandHeight[0].y, LandHeight[0].z, LandHeight[0].w, LandHeight[1].x, LandHeight[1].y, LandHeight[1].z };
     float2 offsetUV = getParallaxCoords(dist, IN.uv.xy, dx, dy, eyeDir, texCount, BaseMap, blends, heightStatus, weights);
 
-    // Stochastic tiling. The lattice is built from the ORIGINAL uv, not offsetUV: a surface point
-    // has to keep the same hash offset whatever the view angle, and offsetUV moves with it, which
-    // would slide the randomisation across the ground as the camera turns. The SAMPLES still go
-    // to offsetUV + hash, so parallax still applies. dx/dy likewise stay the original uv's
-    // derivatives -- they are the pixel's footprint on the texture, which a hash offset does not
-    // change, and ddx/ddy are illegal below this point anyway (dynamic flow control).
-    //
-    // Known gap: the parallax march itself (getParallaxCoords, getParallaxShadowMultipler) still
-    // reads height from the vanilla tiled uv, so relief comes from a different tap than colour
-    // does. Making it stochastic means two taps per march STEP, which is where the ps_3_0
-    // instruction budget would go; at the default Height of 0.1 the displacement is small enough
-    // that the mismatch reads as slight smearing rather than as misplaced bumps.
-    StochasticOffsets stochastic;
-    #if TERRAIN_VARIATION
-        stochastic = ComputeStochasticOffsets(IN.uv.xy, TESR_TerrainVariationData.x);
-    #else
-        stochastic = NoStochasticOffsets();
-    #endif
-
     float gloss = 0.0f;
     float specExponent = 0.0f;
-    // Filled in per layer by blendDiffuseMaps and read back by blendNormalMaps. Seeded with 1 so
-    // the layers that never take the stochastic path carry a weight that means "tap 1 only".
-    float stochasticWeights[7] = { 1, 1, 1, 1, 1, 1, 1 };
-    float3 baseColor = blendDiffuseMaps(IN.vertex_color, offsetUV, dx, dy, texCount, BaseMap, weights, stochastic, stochasticWeights);
-    float3 combinedNormal = blendNormalMaps(offsetUV, dx, dy, texCount, NormalMap, weights, spec, stochastic, stochasticWeights, gloss, specExponent);
+    float3 baseColor = blendDiffuseMaps(IN.vertex_color, offsetUV, texCount, BaseMap, weights);
+    float3 combinedNormal = blendNormalMaps(offsetUV, texCount, NormalMap, weights, spec, gloss, specExponent);
 
     float3 lightTS = mul(tbn, SunDir.xyz);
     float parallaxShadowMultiplier = getParallaxShadowMultipler(dist, offsetUV, dx, dy, lightTS, texCount, blends, heightStatus, BaseMap);
