@@ -63,6 +63,10 @@ sampler2D TESR_ShadowAtlas : register(s2) = sampler_state { ADDRESSU = CLAMP; AD
 // its neighbours, smuggling the cross-silhouette bleed back in underneath the depth weighting.
 sampler2D TESR_VolumetricLightBuffer : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 
+// Blue noise for the march start offset, the same texture SunShadows and AmbientOcclusion use.
+// WRAP so it tiles one texel per pixel across the half-res buffer.
+sampler2D TESR_NoiseSampler : register(s4) < string ResourceName = "Effects\bluenoise256.dds"; > = sampler_state { ADDRESSU = WRAP; ADDRESSV = WRAP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
+
 #include "Includes/Helpers.hlsl"
 #include "Includes/Depth.hlsl"
 #include "Includes/Shadows.hlsl"
@@ -206,7 +210,6 @@ float GetSunShadowAmount(float3 positionWS) {
 
 // --- Ray march setup -------------------------------------------------------------------------
 
-static const float4x4 DITHER_PATTERN = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.22f, 0.875f, 0.375f, 0.1875f, 0.6875f, 0.0625f, 0.5625f, 0.9375f, 0.4375f, 0.8125f, 0.3125f };
 
 // Sample count is the resolution at which the march can resolve a shadow volume, and it has to
 // beat the occluders you want shafts from. At 14 samples over a 2000-unit range the step is 143
@@ -341,15 +344,19 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float rayLength = isSky ? accumDistance : min(length(cameraVector), accumDistance);
     float3 step = rayDirection * (rayLength / MARCH_NUM);
 
-    // 0.5/Reciprocal, not 1/Reciprocal: TESR_ReciprocalResolution describes the full-res back
-    // buffer, but this technique renders into the half-res TESR_VolumetricLightBuffer, so uv
-    // spans the half-res target. Scaling by the full-res size advanced the index by two per
-    // pixel, so only two of the pattern's four columns (and rows) were ever reachable -- a 2x2
-    // dither doing a 4x4 dither's job, which leaves banding for the bilinear upsample to smear.
-    float2 ditherPixel = abs(uv) * 0.5f / TESR_ReciprocalResolution.xy;
-    float ditherOffset = ditherEnabled
-        ? DITHER_PATTERN[int(ditherPixel.x) % 4][int(ditherPixel.y) % 4]
-        : 0.5f;
+    // Blue noise, not the 4x4 ordered pattern this used to use.
+    //
+    // An ordered pattern repeats every 4 pixels by construction, so the step boundaries it is
+    // meant to hide line up into a regular structure instead of scattering. Upsampled from half
+    // resolution that became clear diagonal banding with a crosshatch texture across every shaft
+    // -- structured, not random, and therefore not something a denoiser can remove: blurring
+    // bands only produces softer bands.
+    //
+    // Blue noise has no such periodicity, so the same step boundaries scatter into fine grain
+    // that a blur genuinely does clear. Sampled one texel per pixel, unfiltered, which is how a
+    // blue noise mask has to be read to keep its spectral properties.
+    float2 noiseUV = uv * (0.5f / TESR_ReciprocalResolution.xy) / 256.0f;
+    float ditherOffset = ditherEnabled ? tex2D(TESR_NoiseSampler, noiseUV).r : 0.5f;
     float3 currentPosition = rayOrigin + step * ditherOffset;
 
     float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
