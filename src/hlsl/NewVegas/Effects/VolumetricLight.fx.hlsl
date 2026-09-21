@@ -116,10 +116,13 @@ bool OutsideShadowMap(float3 projected) {
     return max(max(abs(projected.x), abs(projected.y)), abs(projected.z * 2.0f - 1.0f)) > 1.0f;
 }
 
-float GetShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float offsetY, float bias, float bleedReduction) {
+// Samples one cascade, or returns -1 when the point does not fall inside that cascade's map.
+// The caller uses that to pick a cascade, which is the whole reason this reports it rather
+// than clamping: selecting on the projection itself needs no TESR_Shadow*Center constant.
+float TryCascade(float4x4 lightTransform, float4 coord, float offsetX, float offsetY, float bias, float bleedReduction) {
     float4 projected = mul(coord, lightTransform);
     projected.xyz /= projected.w;
-    if (OutsideShadowMap(projected.xyz)) return 1.0f;
+    if (OutsideShadowMap(projected.xyz)) return -1.0f;
 
     float4 lightSpaceCoord = float4(projected.x * 0.5f + 0.5f, projected.y * -0.5f + 0.5f, projected.z, 1.0f);
     lightSpaceCoord.xy *= 0.5f;
@@ -137,76 +140,37 @@ float GetShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float
         return GetLightAmountValueEVSM4(moments, lightSpaceCoord.z, bias, bleedReduction, ShadowFormatBits);
 }
 
-// 1.0 in full light, towards 0 in shadow. positionWS is an absolute world position -- the same
-// space SunShadows.fx.hlsl feeds these transforms from reconstructWorldPosition(), and the space
-// TESR_Shadow*Center's xyz are expressed in, so the caller folds TESR_CameraPosition in first.
-//
-// No normal-offset bias here, unlike the game-shader/deferred versions this mirrors: that bias
-// exists to push a SURFACE sample away from itself to fight self-shadowing acne, and only makes
-// sense with a real geometric normal. The march samples free-floating points in open air, not a
-// surface, so there is no meaningful normal to offset along -- a flat bias is the correct choice,
-// not a degenerate substitute (an earlier version of this passed the sun direction itself as
-// "normal", which made NdotL always exactly 1 and silently zeroed the bias everywhere).
 float GetSunShadowAmount(float3 positionWS) {
     if (!TESR_ShadowFade.y) return 1.0f;
 
     const float bias = ShadowMode == 0.0f ? 0.00001f : 0.01f;
-    const float blend = 0.9f;
+    float4 coord = float4(positionWS, 1.0f);
 
-    float4 radii = float4(TESR_ShadowNearCenter.w, TESR_ShadowMiddleCenter.w, TESR_ShadowFarCenter.w, TESR_ShadowLodCenter.w);
-    float4 distances = float4(
-        length(positionWS - TESR_ShadowNearCenter.xyz),
-        length(positionWS - TESR_ShadowMiddleCenter.xyz),
-        length(positionWS - TESR_ShadowFarCenter.xyz),
-        length(positionWS - TESR_ShadowLodCenter.xyz));
-
-#define VL_SHADOW_TAP_NEAR   GetShadowValue(TESR_ShadowCameraToLightTransformNear,   float4(positionWS, 1.0f), 0.0f, 0.0f, bias, 0.1f)
-#define VL_SHADOW_TAP_MIDDLE GetShadowValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS, 1.0f), 0.5f, 0.0f, bias, 0.2f)
-#define VL_SHADOW_TAP_FAR    GetShadowValue(TESR_ShadowCameraToLightTransformFar,    float4(positionWS, 1.0f), 0.0f, 0.5f, bias, 0.6f)
-#define VL_SHADOW_TAP_LOD    GetShadowValue(TESR_ShadowCameraToLightTransformLod,    float4(positionWS, 1.0f), 0.5f, 0.5f, bias, 0.8f)
-
-    float shadow = 1.0f;
-    [branch] if (distances.x < radii.x) {
-        [branch] if (distances.x < radii.x * blend)
-            shadow = VL_SHADOW_TAP_NEAR;
-        else
-            shadow = lerp(VL_SHADOW_TAP_NEAR, VL_SHADOW_TAP_MIDDLE, smoothstep(radii.x * blend, radii.x, distances.x));
-    }
-    else if (distances.y < radii.y) {
-        [branch] if (distances.y < radii.y * blend)
-            shadow = VL_SHADOW_TAP_MIDDLE;
-        else
-            shadow = lerp(VL_SHADOW_TAP_MIDDLE, VL_SHADOW_TAP_FAR, smoothstep(radii.y * blend, radii.y, distances.y));
-    }
-    else if (distances.z < radii.z) {
-        [branch] if (distances.z < radii.z * blend)
-            shadow = VL_SHADOW_TAP_FAR;
-        else
-            shadow = lerp(VL_SHADOW_TAP_FAR, VL_SHADOW_TAP_LOD, smoothstep(radii.z * blend, radii.z, distances.z));
-    }
-    else if (distances.w < radii.w) {
-        shadow = lerp(VL_SHADOW_TAP_LOD, 1.0f, smoothstep(radii.w * blend, radii.w, distances.w));
-    }
-
-#undef VL_SHADOW_TAP_NEAR
-#undef VL_SHADOW_TAP_MIDDLE
-#undef VL_SHADOW_TAP_FAR
-#undef VL_SHADOW_TAP_LOD
-
-    // Deliberately NOT faded by TESR_ShadowFade.x here, unlike every surface-shading consumer
-    // of these same cascades. That fade ramps to a full 1.0 (shadows entirely off) for any
-    // dayLight in [0.4, 0.6] -- see ShadowsExterior.cpp, smoothStep(0.5, 0.1, abs(dayLight-0.5)),
-    // whose bounds run backwards -- and stays partially faded across the rest of each sunrise and
-    // sunset ramp, reaching 0 only once dayLight pins at 1.0 (or 0.0). It exists to hide
-    // shadow acne on SURFACES at grazing sun angles, where a cascade texel spans a long run of
-    // receiver depth. The march samples free-floating points in open air: there is no surface to
-    // self-shadow, so there is no acne to hide, and the fade buys nothing.
+    // Cascade chosen by whether the point projects inside each map, nearest first -- not by
+    // distance to TESR_Shadow*Center as the deferred path does.
     //
-    // Applying it here forced this function to return exactly 1.0 on every sample of every ray
-    // at precisely the hours god rays exist for, collapsing the march to scatterTerm*distFalloff
-    // -- a uniform, geometry-independent haze. The atlas is still rendered and valid throughout
-    // (ShouldRenderShadowMaps never consults ShadowFade.x), so reading it here is sound.
-    // ShadowFade.y, the master "shadow maps active" toggle, is still honoured at the top.
+    // The distance form was silently selecting nothing. Debug mode 7, which runs those four
+    // sphere tests directly and touches neither the atlas nor this function, came back solid
+    // black over an entire exterior frame: not one cascade claimed a single pixel. Since this
+    // function starts at shadow = 1.0 and only assigns inside one of those tests, it was
+    // returning fully lit without ever sampling the shadow map, in every scene, which is why
+    // no amount of work on the sampling itself changed anything.
+    //
+    // Selecting on the projection removes the dependency on those constants entirely: a point
+    // is in a cascade exactly when it lands inside that cascade's map, which is the same test
+    // already needed to reject out-of-range samples, and is how the Oblivion source this was
+    // ported from cascades (GetLightAmount falling through to GetLightAmountFar). It is also
+    // strictly more correct -- a bounding sphere overlaps the map it approximates rather than
+    // matching it -- at the cost of the smooth cross-fade the radii allowed, which is worth
+    // losing to get occlusion at all.
+    float shadow = TryCascade(TESR_ShadowCameraToLightTransformNear,   coord, 0.0f, 0.0f, bias, 0.1f);
+    if (shadow < 0.0f) shadow = TryCascade(TESR_ShadowCameraToLightTransformMiddle, coord, 0.5f, 0.0f, bias, 0.2f);
+    if (shadow < 0.0f) shadow = TryCascade(TESR_ShadowCameraToLightTransformFar,    coord, 0.0f, 0.5f, bias, 0.6f);
+    if (shadow < 0.0f) shadow = TryCascade(TESR_ShadowCameraToLightTransformLod,    coord, 0.5f, 0.5f, bias, 0.8f);
+
+    // Outside every cascade there is no occlusion information, so lit is the only safe answer.
+    if (shadow < 0.0f) return 1.0f;
+
     return saturate(shadow);
 }
 
