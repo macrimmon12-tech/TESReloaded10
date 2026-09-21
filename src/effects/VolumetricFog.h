@@ -21,6 +21,7 @@ public:
 		D3DXVECTOR4		AerialTintColor; // xyz: manual aerial tint override
 		D3DXVECTOR4		Distant;         // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
 		D3DXVECTOR4		Global;          // x: Amount, y: NightAmbientStrength, z: MoonVisibility, w: unused
+		D3DXVECTOR4		Shaft;           // x: Strength (pre-gated by GodRays.Main's Quality==2), y: Steps, z: Range
 		Animator		WeatherFilterAnimator;
 	};
 	VolumetricFogStruct	Constants;

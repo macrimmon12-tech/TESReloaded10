@@ -961,6 +961,9 @@ DistantFogBlend = 0.3               # Blending power of the distant fog.
 DistantFogHeight = 0.3              # Height limit for the distant fog. If set to 0, uses the sky as a mask instead.
 EdgeAA = 0.4                        # Strength of the inverted distant-fog term that specifically feathers the terrain/sky silhouette edge, to hide aliasing there.
 NightAmbientStrength = 1.0          # Multiplier on the moon-phase-driven night ambient floor for fog color, so fog doesn't collapse toward black after dark (most weathers author near-black night sky colors with no moon/starlight term). Varies with the same lunar cycle as Shaders.ShadowsExteriors.Main's NightMinDarkness. 0 = disable, fog can go fully dark at night like before.
+VolumetricShaftStrength = 1.0       # Strength of the raymarched, shadow-sampled volumetric light shafts. Only active when Shaders.GodRays.Main's Quality is set to 2 (Volumetric) -- that's the single switch selecting between screen-space GodRays streaks and this fog-integrated raymarch. Real per-step shadow sampling, meaningfully more expensive than the rest of this shader; 0 disables it entirely regardless of Quality.
+VolumetricShaftSteps = 16           # Raymarch step count for the light shafts above. More steps = smoother beam shape and higher cost.
+VolumetricShaftRange = 0.5          # Normalized depth the light-shaft raymarch extends to before stopping -- kept shorter than the fog's own visible range since shafts are a near-to-mid-distance detail and marching all the way to the horizon buys little while costing a lot.
 
 
 [_Shaders.VolumetricFog.Interiors]
