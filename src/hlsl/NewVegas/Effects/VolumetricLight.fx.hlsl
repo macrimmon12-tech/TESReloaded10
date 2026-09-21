@@ -419,7 +419,15 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     //                the comparison rather than the addressing.
     [branch] if (debugMode > 3.5f) {
         float3 surfacePos = TESR_CameraPosition.xyz + cameraVector;
-        float4 lsc = ScreenCoordToTexCoord(mul(float4(surfacePos, 1.0f), TESR_ShadowCameraToLightTransformNear));
+        // The cascade the real lookup would select, not a hardcoded one. Pinning this to Near
+        // made the mode useless: Near spans ~212 units, so nearly every visible point projects
+        // outside it, saturate clamped to 0 or 1, and the result was flat colour-cube corners that
+        // looked like a broken transform while being entirely correct.
+        float4x4 sel = TESR_ShadowCameraToLightTransformLod;
+        if (length(surfacePos - TESR_ShadowNearCenter.xyz)   < TESR_ShadowNearCenter.w)   sel = TESR_ShadowCameraToLightTransformNear;
+        else if (length(surfacePos - TESR_ShadowMiddleCenter.xyz) < TESR_ShadowMiddleCenter.w) sel = TESR_ShadowCameraToLightTransformMiddle;
+        else if (length(surfacePos - TESR_ShadowFarCenter.xyz)    < TESR_ShadowFarCenter.w)    sel = TESR_ShadowCameraToLightTransformFar;
+        float4 lsc = ScreenCoordToTexCoord(mul(float4(surfacePos, 1.0f), sel));
         float2 atlasUV = lsc.xy * 0.5f;
         float moment = SampleShadowMoments(atlasUV).x;
         return float4(saturate(lsc.x), saturate(lsc.y), saturate(moment / exp(5.54f)), 1.0f);
