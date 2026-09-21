@@ -641,8 +641,8 @@ UsePointShadowsNight = false         # Whether to cast shadows from point lights
 SmoothSun = 1						 # Smooth the sun rotation by interpolating between positions.
 QuantizeSun = 1						 # Quantize the sun rotation by making sure the sun moves in constant size increments, instead of constantly.
 SmoothingFactor = 0.174			 # [0.0-1.0] Lower number means slower smoothing between positions, higher means more instantenous.
-YawStepSize = 15.0					 # [0.0-15.0] Step size for changes in the horizontal rotation of the sun, angle in degrees.
-PitchStepSize = 15.0				 # [0.0-15.0] Step size for changes in the vertical rotation of the sun, angle in degrees.
+YawStepSize = 3.0					 # [0.0-15.0] Step size for changes in the horizontal rotation of the sun, angle in degrees. Quantising the light direction keeps shadow texels stable as time advances, but the sun is still drawn at its true position, so the error shows up as shadows -- and volumetric shafts -- pointing somewhere the sun is not. At 15 the worst case is 7.5 degrees per axis, about 10.6 combined, which is roughly 270 pixels at 75 degrees FOV on a 1920 wide screen. 3 caps it near 2 degrees at the cost of some shimmer.
+PitchStepSize = 3.0				 # [0.0-15.0] Step size for changes in the vertical rotation of the sun, angle in degrees. See YawStepSize; the two errors compound, so both matter.
 MaxJumpAngle = 5.0					 # [5.0-30.0] A maximum angle difference for which smoothing works, if higher the jump is instaneous. Required for time jumps / waiting.
 
 [_Shaders.ShadowsExteriors.FormsNear]
