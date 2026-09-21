@@ -237,7 +237,7 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
-// 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface, 4 the lookup's intermediates. Mode 2 divides out everything
+// 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface, 4 the lookup's intermediates, 5-8 the sampling inputs. Mode 2 divides out everything
 // layered on top of occlusion -- the phase function, the distance falloff, Strength and
 // TESR_SunColor -- and shows only the average of GetSunShadowAmount along each ray. It answers
 // the one question the finished output cannot: whether the cascade lookup finds occluders at
@@ -367,6 +367,44 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
         accumLight += scatterTerm * Shadow * distFalloff;
         currentPosition += step;
     }
+
+    // Modes 5-8: the INPUTS to the sampling, not its result. Everything above debugs the
+    // shadow lookup while assuming what is fed to it is correct. These check that assumption,
+    // because a wrong input produces a plausible-looking wrong output and cannot be told apart
+    // from a wrong lookup by staring at the finished image.
+    //
+    // 5 DEPTH. readDepth(uv) over farZ, greyscale. Expect a smooth near-black to white gradient
+    //   with crisp object silhouettes. Flat, banded or inverted means the depth buffer or farZ is
+    //   wrong, and then every world position built from it is wrong too.
+    [branch] if (debugMode > 4.5f && debugMode < 5.5f)
+        return float4((readDepth(uv) / farZ).xxx, 1.0f);
+
+    // 6 WORLD POSITION. frac(pos / 512) as RGB: a world-aligned grid repeating every 512 units.
+    //   Expect coloured banding that stays welded to surfaces as the camera moves, and stays put
+    //   when only the camera rotates. Swimming with rotation means the reconstruction is wrong.
+    [branch] if (debugMode > 5.5f && debugMode < 6.5f)
+        return float4(frac((TESR_CameraPosition.xyz + cameraVector) / 512.0f), 1.0f);
+
+    // 7 CASCADE SELECTION for the surface point. red near, green middle, blue far, yellow lod,
+    //   BLACK none. This is the one that matters most: GetSunShadowAmount starts at shadow = 1.0
+    //   and only assigns if a cascade claims the point, so anything black here is returning lit
+    //   without sampling the atlas at all. Expect concentric bands, red nearest the camera.
+    [branch] if (debugMode > 6.5f && debugMode < 7.5f) {
+        float3 p = TESR_CameraPosition.xyz + cameraVector;
+        if (length(p - TESR_ShadowNearCenter.xyz)   < TESR_ShadowNearCenter.w)   return float4(1,0,0,1);
+        if (length(p - TESR_ShadowMiddleCenter.xyz) < TESR_ShadowMiddleCenter.w) return float4(0,1,0,1);
+        if (length(p - TESR_ShadowFarCenter.xyz)    < TESR_ShadowFarCenter.w)    return float4(0,0,1,1);
+        if (length(p - TESR_ShadowLodCenter.xyz)    < TESR_ShadowLodCenter.w)    return float4(1,1,0,1);
+        return float4(0,0,0,1);
+    }
+
+    // 8 GATING CONSTANTS, as one flat colour. red TESR_ShadowFade.y (0 disables the lookup
+    //   entirely and returns 1.0 before anything is sampled), green shadow mode over 2 so VSM,
+    //   EVSM2 and EVSM4 read as 0, 0.5 and 1, blue the format bit where 0 is the 16-bit atlas
+    //   whose clamped EVSM exponent costs the depth precision. Any red channel at zero means the
+    //   effect cannot produce shadow at all and nothing downstream is worth reading.
+    [branch] if (debugMode > 7.5f)
+        return float4(TESR_ShadowFade.y, ShadowMode * 0.5f, ShadowFormatBits, 1.0f);
 
     // Mode 4: the lookup's intermediates for the surface point, rather than its verdict.
     // Mode 3 came back white at surface positions too -- the positions SunShadows passes and
