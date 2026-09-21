@@ -828,7 +828,7 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	Effects.Specular->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.Underwater->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.VolumetricFog->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
-	Effects.GodRays->Render(Device, RenderTarget, RenderedSurface, 0, true, SourceSurface);
+	Effects.GodRays->Render(Device, RenderTarget, RenderedSurface, Effects.GodRays->selectedTechnique, true, SourceSurface);
 
 	// calculate average luma for use by shaders
 	if (avglumaRequired) {

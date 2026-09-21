@@ -364,16 +364,22 @@ ScaleZ = 1.0
 Enabled = true                        # Replaces the grass shaders.
 
 [_Shaders.GodRays.Main]
+Quality = 0                           # 0 = Classic (original screen-space streak+glare technique). 1 = Enhanced (raymarched shaft accumulation with real per-step decay, tangential blur cleanup, darkness-weighted soft-light combine -- see [_Shaders.GodRays.Enhanced]).
 DayMultiplier = 1.0                   # Strength of godrays during the day.
-LightShaftPasses = 8                  # Not used.
-Luminance = 0.8                       # Treshold for minimum luminosity of areas casting rays. Lower means more of the sky will cast rays.
+LightShaftPasses = 8                  # Raymarch step count for Enhanced's shaft accumulation. Not used by Classic.
+Luminance = 0.8                       # Treshold for minimum luminosity of areas casting rays. Lower means more of the sky will cast rays. Classic only.
 NightMultiplier = 0.5                 # Strength of godrays during the night.
-RayDensity = 1.0                      # Curve for reduction of the intensity of godrays near the sunglare.
+RayDensity = 1.0                      # Curve for reduction of the intensity of godrays near the sunglare. Classic only (currently has no live effect there either -- kept for compatibility).
 RayIntensity = 1.0                    # Multiplier for the intensity of the bright areas being blurred to create the rays.
-RayLength = 1.0                       # Multiplier for the length of rays.
-RayVisibility = 50.0                  # Exponent for the godrays contrast.
+RayLength = 1.0                       # Multiplier for the length of rays. Classic only.
+RayVisibility = 50.0                  # Exponent for the godrays contrast. Classic only (currently has no live effect there either -- kept for compatibility).
 SunGlareEnabled = true                # Strength of the effect will be scaled with the weather sunglare setting.
 TimeEnabled = false                    # Strength of the effect will be strongest around sunset/sunrise and not at all during noon.
+
+[_Shaders.GodRays.Enhanced]
+RayDecay = 0.97                       # Per-step illumination falloff for the raymarched shaft accumulation. Closer to 1.0 = rays extend further/persist longer before fading; lower = shorter, punchier shafts.
+RayStepScale = 1.0                    # Spacing between raymarch samples along the ray toward the sun.
+BlurStrength = 1.0                    # Strength of the tangential blur pass that smooths out raymarch step banding.
 
 [_Shaders.GodRays.Coloring]
 RayR = 1.0                            # Red channel for custom coloring of the godrays. Use Saturate setting to tweak the global influence.

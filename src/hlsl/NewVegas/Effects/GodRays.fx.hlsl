@@ -3,9 +3,14 @@
 float4 TESR_ReciprocalResolution;
 float4 TESR_GameTime;
 float4 TESR_SunColor;
-float4 TESR_GodRaysRay; // x: intensity, y:length, z: density, w: visibility
+float4 TESR_GodRaysRay; // x: intensity, y:length, z: density, w: visibility -- Classic only
 float4 TESR_GodRaysRayColor; // x:r, y:g, z:b, w:saturate
 float4 TESR_GodRaysData; // x: passes amount, y: luminance, z:multiplier, w: time enabled
+// Enhanced-only tuning. Kept separate from TESR_GodRaysRay rather than sharing its slots: Enhanced's
+// raymarch parameters (a per-step decay factor, a step spacing) don't share sensible value ranges
+// with Classic's RayLength/RayDensity (a blur step multiplier, an unused legacy slot), so reusing
+// those would make tuning one technique fight the other.
+float4 TESR_GodRaysEnhanced; // x: RayDecay, y: RayStepScale, z: BlurStrength, w: GlareStrength
 float4 TESR_ViewSpaceLightDir; // view space light vector
 float4 TESR_SunDirection; // worldspace sun light vector
 float4 TESR_SunPosition; // worldspace sundisk position
@@ -39,6 +44,14 @@ static const float stepLengthMult = TESR_GodRaysRay.y;
 static const float glareReduction = TESR_GodRaysRay.z;
 static const float godrayCurve = TESR_GodRaysRay.w;
 static const float sunHeight = 1 - shade(TESR_SunPosition.xyz, blue.xyz);
+
+// Enhanced technique tuning -- step count reuses TESR_GodRaysData.x (same field Classic leaves
+// unused; see its TOML doc), everything else comes from the dedicated TESR_GodRaysEnhanced vector.
+static const int GodRaysPasses = max(1, int(TESR_GodRaysData.x));
+static const float RayDecay = saturate(TESR_GodRaysEnhanced.x);
+static const float RayStepScale = max(0, TESR_GodRaysEnhanced.y);
+static const float BlurStrength = max(0, TESR_GodRaysEnhanced.z);
+static const float GlareStrength = max(0, TESR_GodRaysEnhanced.w);
 
 struct VSOUT {
 	float4 vertPos : POSITION;
@@ -175,42 +188,196 @@ float4 Combine(VSOUT IN) : COLOR0
 	color = delinearize(color);
 	return float4(color.rgb, 1);
 }
- 
-technique
+
+
+// ================= Enhanced: decayed-raymarch shaft accumulation =================
+// Adapted from an older NVR-era GodRays shader (real Kenny Mitchell/GPU Gems 3 "Volumetric Light
+// Scattering": per-step exponential illumination decay, not an averaged blur), reusing this file's
+// existing sun-screen-projection idiom (TESR_ViewSpaceLightDir + projectPosition, same as Classic's
+// RadialBlur/Combine above) instead of the old shader's own manual view/projection matrix math.
+
+float4 RayMaskEnhanced(VSOUT IN) : COLOR0 {
+	float2 uv = IN.UVCoord / scale;
+	clip((uv <= 1) - 1);
+
+	// Graduated by raw depth rather than a hard sky-only cutoff, so near-horizon terrain silhouettes
+	// contribute proportionally to the seed instead of an all-or-nothing sky mask.
+	float depth = readDepth(uv) / farZ;
+	float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
+	return float4(color * depth, 1.0f);
+}
+
+float4 LightShaftEnhanced(VSOUT IN) : COLOR0 {
+	float2 uv = IN.UVCoord;
+	clip((uv <= scale) - 1);
+	uv /= scale;
+
+	float2 sunPos = projectPosition(TESR_ViewSpaceLightDir.xyz * farZ).xy;
+	float2 blurDirection = (sunPos.xy - uv) * float2(1.0f, raspect);
+	float distanceToSun = length(blurDirection);
+	float2 dir = blurDirection / max(distanceToSun, 0.0001);
+
+	float stepSize = min(0.3, distanceToSun) * RayStepScale / GodRaysPasses;
+	float2 samplePos = uv;
+	float3 color = tex2D(TESR_RenderedBuffer, uv * scale).rgb;
+	float illuminationDecay = 1.0;
+
+	[unroll(64)]
+	for (int i = 0; i < GodRaysPasses; i++) {
+		samplePos -= (dir * stepSize) / float2(1.0f, raspect); // undo aspect correction to step in real UV space
+		float3 s = tex2D(TESR_RenderedBuffer, saturate(samplePos) * scale).rgb;
+		color += s * illuminationDecay;
+		illuminationDecay *= RayDecay;
+	}
+	color *= intensity / GodRaysPasses;
+
+	return float4(color, 1.0f);
+}
+
+float4 BlurEnhanced(VSOUT IN) : COLOR0 {
+	// Tangential (perpendicular-to-sun-direction) blur to hide the raymarch's step banding.
+	float2 uv = IN.UVCoord;
+	clip((uv <= scale) - 1);
+
+	float2 sunPos = projectPosition(TESR_ViewSpaceLightDir.xyz * farZ).xy * scale;
+	float2 tangent = normalize(uv - sunPos).yx * float2(TESR_ReciprocalResolution.y, -TESR_ReciprocalResolution.x) * BlurStrength;
+
+	float4 col = tex2D(TESR_RenderedBuffer, uv);
+	col += 0.67f * tex2D(TESR_RenderedBuffer, uv + tangent);
+	col += 0.67f * tex2D(TESR_RenderedBuffer, uv - tangent);
+	col += 0.33f * tex2D(TESR_RenderedBuffer, uv + 2.0f * tangent);
+	col += 0.33f * tex2D(TESR_RenderedBuffer, uv - 2.0f * tangent);
+
+	return float4(col.rgb * 0.333f, 1.0f);
+}
+
+float3 BlendSoftLight(float3 a, float3 b) {
+	float3 c = 2.0f * a * b * (1.0f + a * (1.0f - b));
+	float3 a_sqrt = sqrt(a);
+	float3 d = (a + b * (a_sqrt - a)) * 2.0f - a_sqrt;
+	return (b < 0.5f) ? c : d;
+}
+
+float4 CombineEnhanced(VSOUT IN) : COLOR0 {
+	float4 ori = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
+	float2 uv = IN.UVCoord * scale;
+	float4 rays = tex2D(TESR_RenderedBuffer, uv);
+
+	float3 eyeDir = normalize(reconstructPosition(IN.UVCoord));
+	float heightAttenuation = TESR_GodRaysData.w ? lerp(0.2, 4.0, pows(sunHeight, 4)) : 1.0;
+	float attenuation = pow(compress(shade(TESR_ViewSpaceLightDir.xyz, eyeDir)), 2.5) * heightAttenuation * (sunHeight < 1);
+
+	float3 sunColor = GetSunColor(shade(TESR_SunDirection.xyz, blue.xyz), 1, TESR_SunAmount.x, TESR_SunColor.rgb, TESR_SunsetColor.rgb);
+	float3 godRayColor = linearize(TESR_GodRaysRayColor).rgb;
+	float3 rayTint = lerp(sunColor, godRayColor, TESR_GodRaysRayColor.w);
+
+	// Darkness-weighted: rays read weaker over already-bright pixels, stronger over dark/shadowed
+	// ones, instead of a flat additive boost -- avoids blowing out highlights the way Classic's
+	// `color += rays * 5 * color + rays * 0.2` can. Soft-light composite instead of a plain add.
+	rays.rgb *= multiplier * rayTint * attenuation * saturate(1.0 - ori.rgb);
+
+	float4 color = ori + rays;
+	color.rgb = BlendSoftLight(color.rgb, rayTint * multiplier + 0.5f);
+	color.rgb = delinearize(color.rgb);
+	return float4(color.rgb, 1.0f);
+}
+
+
+// ================= GlareOnly: sun corona/glare, no streak passes =================
+// Extracted from Classic's SkyMask so it can render on its own, at full resolution, with none of
+// the multi-pass streak machinery -- used when the Volumetric (fog-integrated) light-shafts tier
+// is the active choice elsewhere, so the corona doesn't disappear just because streak duty moved
+// to the fog shader. Enhanced doesn't need this pass itself: unlike Classic, it has no separate
+// synthetic glare term -- its glow comes from the raymarch of the sun disc's own rendered brightness.
+
+float4 Glare(VSOUT IN) : COLOR0 {
+	float4 ori = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
+	if (sunHeight >= 1 || GlareStrength <= 0) return float4(delinearize(ori.rgb), 1.0f);
+
+	float sunset = pows(sunHeight, 8);
+	float3 sunColor = linearize(TESR_SunColor).rgb + lerp(linearize(TESR_SunsetColor.rgb), 0, sunset);
+	float glarePower = lerp(0.1, 8.0, sunset);
+
+	float3 eyeDir = normalize(reconstructPosition(IN.UVCoord));
+	float3 glare = pows(dot(TESR_ViewSpaceLightDir.xyz, eyeDir), 180) * glarePower;
+	glare *= smoothstep(0, 0.01, sunHeight) * GlareStrength;
+
+	float3 color = ori.rgb + glare * sunColor * multiplier;
+	return float4(delinearize(color), 1.0f);
+}
+
+
+technique Classic
 {
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 SkyMask(); 
+		PixelShader = compile ps_3_0 SkyMask();
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 LightMask(); 
+		PixelShader = compile ps_3_0 LightMask();
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 RadialBlur(stepLength); 
+		PixelShader = compile ps_3_0 RadialBlur(stepLength);
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 RadialBlur(stepLength * stepLength); 
+		PixelShader = compile ps_3_0 RadialBlur(stepLength * stepLength);
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 RadialBlur(stepLength * stepLength * stepLength); 
+		PixelShader = compile ps_3_0 RadialBlur(stepLength * stepLength * stepLength);
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
 		Pixelshader = compile ps_3_0 Combine();
+	}
+}
+
+technique Enhanced
+{
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 RayMaskEnhanced();
+	}
+
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 LightShaftEnhanced();
+	}
+
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 BlurEnhanced();
+	}
+
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 CombineEnhanced();
+	}
+}
+
+technique GlareOnly
+{
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 Glare();
 	}
 }
