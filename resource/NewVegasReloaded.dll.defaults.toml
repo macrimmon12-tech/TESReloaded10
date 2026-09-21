@@ -923,15 +923,13 @@ Enabled = true                      # Replaces shaders used by terrain, adding P
 [_Shaders.Underwater.Status]
 Enabled = true                      # Post Process underwater fog/godrays/caustics effect.
 
-# REQUIRES Shaders.ShadowsExteriors.ShadowMaps.Format = 1 (32-bit) to produce shafts outside the
-# near cascade. At Format = 0 the EVSM positive exponent is clamped from 40 to 5.54 (see
-# GetEVSMExponents in Effects/Includes/Shadows.hlsl), which leaves too little depth precision for
-# the Chebyshev comparison once a cascade spans any distance. With CascadeLambda = 0.9 the near
-# cascade covers only ~212 units and the lod cascade ~4300, so at 16-bit every occluder past a
-# couple of hundred units reads as unoccluded and the effect produces shafts only in tight spaces
-# such as a narrow street. Surface shadows are unaffected, because there the receiver sits a few
-# units behind its occluder and survives the precision loss; a ray march samples air hundreds of
-# units behind one, and does not.
+# Works on either shadow atlas format. At Shaders.ShadowsExteriors.ShadowMaps.Format = 0 (16-bit)
+# GetEVSMExponents clamps the EVSM positive exponent from 40 to 5.54, which loosens the Chebyshev
+# bound and biases occluded points toward lit; the shader compensates by strengthening its light
+# bleed reduction on that format (see BleedReduction in VolumetricLight.fx.hlsl). Format = 1 gives
+# a tighter bound and slightly cleaner shadow edges, at double the atlas bandwidth, but is not
+# required. An earlier note here claimed it was; that was written while a camera-space bug was
+# suppressing the shadow lookup entirely, and the format was never the cause.
 [_Shaders.VolumetricLight.Main]
 Strength = 1.0                      # Overall intensity multiplier for the light shaft.
 Anisotropy = 0.35                   # [0.0-0.9] Forward scattering bias (Henyey-Greenstein g). Controls how strongly the shafts favour the direction of the sun. At 0.1 the phase function is very nearly isotropic -- only about 1.8x brighter looking into the sun than away from it -- which reads as flat haze rather than shafts. 0.6 gives roughly a 60x ratio, so light gathers into the sun instead of covering the frame.
