@@ -364,7 +364,7 @@ ScaleZ = 1.0
 Enabled = true                        # Replaces the grass shaders.
 
 [_Shaders.GodRays.Main]
-Quality = 0                           # 0 = Classic (original screen-space streak+glare technique). 1 = Enhanced (raymarched shaft accumulation with real per-step decay, tangential blur cleanup, darkness-weighted soft-light combine -- see [_Shaders.GodRays.Enhanced]).
+Quality = 0                           # 0 = Classic (original screen-space streak+glare technique). 1 = Enhanced (raymarched shaft accumulation with real per-step decay, tangential blur cleanup, darkness-weighted soft-light combine -- see [_Shaders.GodRays.Enhanced]). 2 = Volumetric (real shadow-cascade-raymarched shafts, shaped by actual 3D occluders rather than a screen-space approximation -- see [_Shaders.GodRays.Volumetric]). Real per-step shadow sampling, meaningfully more expensive than 0/1.
 DayMultiplier = 1.0                   # Strength of godrays during the day.
 LightShaftPasses = 8                  # Raymarch step count for Enhanced's shaft accumulation. Not used by Classic.
 Luminance = 0.8                       # Treshold for minimum luminosity of areas casting rays. Lower means more of the sky will cast rays. Classic only.
@@ -380,6 +380,18 @@ TimeEnabled = false                    # Strength of the effect will be stronges
 RayDecay = 0.97                       # Per-step illumination falloff for the raymarched shaft accumulation. Closer to 1.0 = rays extend further/persist longer before fading; lower = shorter, punchier shafts.
 RayStepScale = 1.0                    # Spacing between raymarch samples along the ray toward the sun.
 BlurStrength = 1.0                    # Strength of the tangential blur pass that smooths out raymarch step banding.
+
+[_Shaders.GodRays.Volumetric]
+# All world-unit and world-Z values below are first-guess defaults, not yet validated in-game --
+# expect a tuning pass, especially HeightCutoff/LayerThickness, which depend on this game's actual
+# world-Z conventions.
+Steps = 24                            # Raymarch step count. Runs at quarter resolution (half in each dimension), so this is meaningfully cheaper per-step than Enhanced's full-res-adjacent raymarch -- can afford more steps.
+MaxDistance = 20000.0                 # World-unit distance the raymarch extends to before stopping.
+HeightCutoff = 1500.0                 # World-Z ceiling of the fog layer the shafts are marched through -- shafts only form within [HeightCutoff - LayerThickness, HeightCutoff], not the whole view ray.
+LayerThickness = 2500.0               # World-Z thickness of that fog layer, measured down from HeightCutoff.
+ShadowedCutoffDistance = 10000.0      # Distance beyond which a shadowed sample point stops contributing any residual light at all.
+NearWeightFalloff = 0.7               # How much less the raymarch's far steps count vs its near steps (0 = every step weighted equally, 1 = far steps contribute nothing) -- emphasizes near-camera detail, where haze is thickest.
+Strength = 1.0                        # Overall multiplier on the accumulated shaft light.
 
 [_Shaders.GodRays.Coloring]
 RayR = 1.0                            # Red channel for custom coloring of the godrays. Use Saturate setting to tweak the global influence.
@@ -961,9 +973,6 @@ DistantFogBlend = 0.3               # Blending power of the distant fog.
 DistantFogHeight = 0.3              # Height limit for the distant fog. If set to 0, uses the sky as a mask instead.
 EdgeAA = 0.4                        # Strength of the inverted distant-fog term that specifically feathers the terrain/sky silhouette edge, to hide aliasing there.
 NightAmbientStrength = 1.0          # Multiplier on the moon-phase-driven night ambient floor for fog color, so fog doesn't collapse toward black after dark (most weathers author near-black night sky colors with no moon/starlight term). Varies with the same lunar cycle as Shaders.ShadowsExteriors.Main's NightMinDarkness. 0 = disable, fog can go fully dark at night like before.
-VolumetricShaftStrength = 1.0       # Strength of the raymarched, shadow-sampled volumetric light shafts. Only active when Shaders.GodRays.Main's Quality is set to 2 (Volumetric) -- that's the single switch selecting between screen-space GodRays streaks and this fog-integrated raymarch. Real per-step shadow sampling, meaningfully more expensive than the rest of this shader; 0 disables it entirely regardless of Quality.
-VolumetricShaftSteps = 16           # Raymarch step count for the light shafts above. More steps = smoother beam shape and higher cost.
-VolumetricShaftRange = 0.5          # Normalized depth the light-shaft raymarch extends to before stopping -- kept shorter than the fog's own visible range since shafts are a near-to-mid-distance detail and marching all the way to the horizon buys little while costing a lot.
 
 
 [_Shaders.VolumetricFog.Interiors]

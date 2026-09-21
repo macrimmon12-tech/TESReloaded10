@@ -48,10 +48,6 @@ float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, 
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
 float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NightAmbientStrength, z: MoonVisibility
-// Volumetric light-shaft raymarch. Strength is pre-gated in C++ by Shaders.GodRays.Main's Quality
-// setting (only nonzero at Quality=2/"Volumetric") -- see VolumetricFog.cpp -- so this whole feature
-// costs nothing at Quality 0/1 without the shader needing to know about GodRays' setting itself.
-float4 TESR_VolumetricFogShaft;      // x: Strength, y: Steps, z: Range
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -94,12 +90,6 @@ static const float NoiseStrength = saturate(TESR_VolumetricFogScatter.z);
 // density shaped purely by distance -- for interiors, where MaxHeight has no consistent meaning
 // across arbitrary cell geometry unless an author explicitly tunes it for a known space.
 static const float HeightInfluence = saturate(TESR_VolumetricFogScatter.w);
-
-// Volumetric light-shaft raymarch tuning -- see GetVolumetricShaft below. ShaftStrength is already
-// zeroed in C++ unless Quality=2/"Volumetric" is selected.
-static const float ShaftStrength = max(0, TESR_VolumetricFogShaft.x);
-static const int ShaftSteps = clamp(int(TESR_VolumetricFogShaft.y), 1, 32); // capped to match [unroll(32)] in GetVolumetricShaft
-static const float ShaftRange = saturate(TESR_VolumetricFogShaft.z);
 
 static const float WeatherFilterBlend = saturate(TESR_VolumetricFogWeather.x);
 static const float isExterior = TESR_VolumetricFogWeather.y; // 0 or 1 to activate/cancel fog in interiors
@@ -344,32 +334,6 @@ float GetFogShadowVisibility(float4 positionWS, float3 normal) {
 	return 1.0f;
 }
 
-// Volumetric light shafts: unlike shadowVisibility above (a single shadow sample at the fog's
-// terminating point, shaping the overall sun-scattering intensity), this marches ShaftSteps points
-// along the same camera-to-surface ray and shadow-samples each one via GetFogShadowVisibility --
-// capturing where the ray passes in and out of shadow along its length, not just whether its
-// endpoint is lit. That's what actually produces a visible beam shape rather than a uniform glow.
-// Reuses the surface pixel's own worldNormal for every step's shadow-bias offset rather than
-// computing one per step (there's no real "normal" in open air) -- a minor bias approximation,
-// harmless since shadow filtering already softens the cascades.
-float3 GetVolumetricShaft(float3 rayStart, float3 rayDir, float rayLength, float3 worldNormal) {
-	float marchLength = min(rayLength, ShaftRange * farZ);
-	float stepDist = marchLength / ShaftSteps;
-	float transmittance = 1.0;
-	float accum = 0.0;
-
-	[unroll(32)]
-	for (int i = 0; i < ShaftSteps; i++) {
-		float t = (i + 0.5) * stepDist;
-		float3 stepPos = rayStart + rayDir * t;
-		float shadowVis = GetFogShadowVisibility(float4(stepPos, 1.0), worldNormal);
-		transmittance *= exp(-Extinction * 0.0001 * stepDist);
-		accum += shadowVis * transmittance * stepDist;
-	}
-	return accum * ShaftStrength * 0.0001;
-}
-
-
 float4 VolumetricFog(VSOUT IN) : COLOR0
 {
 	float4 color = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
@@ -435,7 +399,6 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float distantFog = 0.0, distantHeightFade = 0.0;
 	float4 skyColor = pureFogColor;
 	float4 sun = black;
-	float4 sunColorV = black; // hoisted out of the isExterior block below so the volumetric shaft raymarch can reuse it
 
 	// sun/sky/distant fog coloring specific to exteriors
 	if (isExterior){
@@ -443,7 +406,7 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 		float sunHeight = shade(TESR_SunPosition.xyz, up);
 		float sunDir = dot(eyeDirection, TESR_SunPosition.xyz);
 		float sunInfluence = pows(compress(sunDir), SUNINFLUENCE);
-		sunColorV = float4(GetSunColor(sunHeight, 1, TESR_SunAmount.x, TESR_SunDiskColor.rgb, TESR_SunsetColor.rgb), 1);
+		float4 sunColorV = float4(GetSunColor(sunHeight, 1, TESR_SunAmount.x, TESR_SunDiskColor.rgb, TESR_SunsetColor.rgb), 1);
 		sunColorV *= isDayTime * isExterior;
 
 		skyColor.rgb = GetSkyColor(0.5, 1, sunHeight, sunInfluence, TESR_SkyData.z, TESR_SkyColor.rgb, TESR_SkyLowColor.rgb, TESR_HorizonColor.rgb, black.rgb) * TESR_SunsetColor.w;
@@ -491,25 +454,6 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float3 heightFogged = mixHeightFog(color.rgb, fogColorFinal.rgb, Extinction, Inscattering, fogDepth, strength, falloffArg, worldPos, MaxHeight);
 	float3 fogged = lerp(flatFogged, heightFogged, HeightInfluence);
 	float4 finalColor = float4(lerp(color.rgb, fogged, skyMaskFactor), 1);
-
-	// ---- volumetric light shafts: raymarched shadow-sampled in-scattering along the view ray ----
-	// Distinct from shadowVisibility/sun above (a single sample shaping overall sun-scattering
-	// intensity) -- this produces the actual visible beam shape from partial shadow occlusion along
-	// the ray, which a single endpoint sample can't. ShaftStrength is already zero unless the
-	// Volumetric quality tier is selected (see TESR_VolumetricFogShaft's declaration), so this
-	// entire branch -- the expensive part -- doesn't execute at all for Classic/Enhanced users.
-	// Excluded from the sky itself (isSkyDome) since it's light scattering in front of something,
-	// not a property of the sky pixel; scaled by skyMaskFactor so heavy overcast/rain suppresses it
-	// the same way it already suppresses the rest of the NVR-driven density. Also gated on isDayTime
-	// directly, not just via sunColorV's own isDayTime factor further down -- without this the
-	// raymarch still ran (and paid its full per-step shadow-sampling cost) all night for a result
-	// that was always going to be multiplied to zero by sunColorV, same day/night behavior as
-	// Classic/Enhanced GodRays but without actually skipping the expensive part at night.
-	[branch]
-	if (isExterior > 0.5 && ShaftStrength > 0.0 && TESR_ShadowFade.y > 0.5 && isDayTime > 0.0) {
-		float3 volumetricShaft = GetVolumetricShaft(TESR_CameraPosition.xyz, eyeDirection, length(eyeVector), worldNormal);
-		finalColor.rgb += volumetricShaft * sunColorV.rgb * TESR_PBRData.z * (1 - isSkyDome) * skyMaskFactor;
-	}
 
 	// ---- aerial perspective: mid-to-far distance tint on non-sky terrain ----
 	// Own day-fade curve, wider than isDayTimeFog's: aerial haze is a daylight-scattering

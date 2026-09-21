@@ -11,7 +11,9 @@ public:
 		D3DXVECTOR4		Ray;
 		D3DXVECTOR4		RayColor;
 		D3DXVECTOR4		Data;
-		D3DXVECTOR4		Enhanced; // x: RayDecay, y: RayStepScale, z: BlurStrength, w: GlareStrength
+		D3DXVECTOR4		Enhanced;     // x: RayDecay, y: RayStepScale, z: BlurStrength, w: GlareStrength
+		D3DXVECTOR4		Volumetric1;  // x: Steps, y: MaxDistance, z: HeightCutoff, w: LayerThickness
+		D3DXVECTOR4		Volumetric2;  // x: ShadowedCutoffDistance, y: NearWeightFalloff, z: Strength, w: unused
 	};
 	GodRaysStruct	Constants;
 
@@ -26,7 +28,7 @@ public:
 	float rayVisibility;
 
 	// which of GodRays.fx.hlsl's named techniques to render (0: Classic, 1: Enhanced,
-	// 2: GlareOnly -- reserved for when the fog-integrated Volumetric light-shafts tier is active
-	// elsewhere and streak duty moves there), mirroring FlashlightEffect::selectedPass
+	// 2: Volumetric -- real shadow-raymarched shafts + glare, no separate streak passes),
+	// mirroring FlashlightEffect::selectedPass
 	int selectedTechnique;
 };

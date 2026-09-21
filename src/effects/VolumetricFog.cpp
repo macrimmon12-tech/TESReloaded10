@@ -97,15 +97,6 @@ void VolumetricFogEffect::UpdateSettings(){
 		// shared with ShadowsExterior's own moon-phase shadow fade -- keeps fog's night-ambient
 		// ceiling consistent with the shadow system's, rather than a second, disconnected knob.
 		nightMinDarkness = 1.0f - TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "NightMinDarkness");
-
-		// Volumetric light-shaft raymarch. Strength is read from Shaders.GodRays.Main's own Quality
-		// setting (0: Classic, 1: Enhanced, 2: Volumetric) rather than a separate enable flag here --
-		// that's the single master switch shared with GodRaysEffect::selectedTechnique, so the two
-		// stay in sync without fog needing to know GodRays' internals beyond that one setting.
-		int lightShaftsQuality = TheSettingManager->GetSettingI("Shaders.GodRays.Main", "Quality");
-		Constants.Shaft.x = (lightShaftsQuality == 2) ? TheSettingManager->GetSettingF(SettingCategory, "VolumetricShaftStrength") : 0.0f;
-		Constants.Shaft.y = TheSettingManager->GetSettingF(SettingCategory, "VolumetricShaftSteps");
-		Constants.Shaft.z = TheSettingManager->GetSettingF(SettingCategory, "VolumetricShaftRange");
 	}
 	else {
 		// these settings don't do anything in interiors: no sun, no horizon, no distant view
@@ -120,7 +111,6 @@ void VolumetricFogEffect::UpdateSettings(){
 		Constants.Distant = D3DXVECTOR4(0, 0, 0, 0);
 
 		Constants.Global.y = 0.0f;
-		Constants.Shaft = D3DXVECTOR4(0, 0, 0, 0);
 	}
 }
 
@@ -134,7 +124,6 @@ void VolumetricFogEffect::RegisterConstants(){
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogAerialTint", &Constants.AerialTintColor);
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogDistant", &Constants.Distant);
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogGlobal", &Constants.Global);
-	TheShaderManager->RegisterConstant("TESR_VolumetricFogShaft", &Constants.Shaft);
 }
 
 

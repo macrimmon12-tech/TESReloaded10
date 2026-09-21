@@ -19,14 +19,39 @@ float4 TESR_SunAmount;
 float4 TESR_SunsetColor;
 float4 TESR_DebugVar;
 
+// Volumetric-only tuning. Two vectors since Ray/RayColor/Data/Enhanced are all already full, and
+// Volumetric's parameters (raymarch step count, fade distances, a fog-layer height band, a
+// shadowed-point falloff) don't share sensible ranges with any of those either.
+float4 TESR_GodRaysVolumetric1; // x: Steps, y: MaxDistance, z: HeightCutoff, w: LayerThickness
+float4 TESR_GodRaysVolumetric2; // x: ShadowedCutoffDistance, y: NearWeightFalloff, z: Strength, w: unused
+
+// Sun shadow cascade data, duplicated from VolumetricFog.fx.hlsl (same globals ShadowsExteriorEffect
+// registers, same GetFogShadowVisibility) -- separate effects compile independently, so this can't be
+// shared directly between the two files, same reason SunShadows.fx.hlsl's own copy exists.
+float4x4 TESR_ShadowCameraToLightTransformNear;
+float4x4 TESR_ShadowCameraToLightTransformMiddle;
+float4x4 TESR_ShadowCameraToLightTransformFar;
+float4x4 TESR_ShadowCameraToLightTransformLod;
+float4 TESR_ShadowNearCenter;   // xyz: center (world space), w: radius
+float4 TESR_ShadowMiddleCenter;
+float4 TESR_ShadowFarCenter;
+float4 TESR_ShadowLodCenter;
+float4 TESR_ShadowFormatData; // x: mode (0 VSM, 1 EVSM2, 2 EVSM4), y: format bits per pixel
+float4 TESR_ShadowBlur;       // x: 1 / atlas resolution
+float4 TESR_SmoothedSunDir;
+
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_SourceBuffer : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_AvgLumaBuffer : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+sampler2D TESR_ShadowAtlas : register(s4) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+sampler2D TESR_NormalsBuffer : register(s5) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 
 #include "Includes/Helpers.hlsl"
 #include "Includes/Depth.hlsl"
+#include "Includes/Shadows.hlsl"
 #include "Includes/Sky.hlsl"
+#include "Includes/Normals.hlsl"
 
 static const float raspect = 1.0f / TESR_ReciprocalResolution.z;
 static const float samples = 10;
@@ -52,6 +77,15 @@ static const float RayDecay = saturate(TESR_GodRaysEnhanced.x);
 static const float RayStepScale = max(0, TESR_GodRaysEnhanced.y);
 static const float BlurStrength = max(0, TESR_GodRaysEnhanced.z);
 static const float GlareStrength = max(0, TESR_GodRaysEnhanced.w);
+
+// Volumetric technique tuning -- see VolumetricRaymarch/VolumetricCombine below.
+static const int VolumetricSteps = clamp(int(TESR_GodRaysVolumetric1.x), 1, 32); // capped to match [unroll(32)]
+static const float VolumetricMaxDistance = max(1, TESR_GodRaysVolumetric1.y);
+static const float VolumetricHeightCutoff = TESR_GodRaysVolumetric1.z;
+static const float VolumetricLayerThickness = max(1, TESR_GodRaysVolumetric1.w);
+static const float VolumetricShadowedCutoffDistance = max(0, TESR_GodRaysVolumetric2.x);
+static const float VolumetricNearWeightFalloff = saturate(TESR_GodRaysVolumetric2.y);
+static const float VolumetricStrength = max(0, TESR_GodRaysVolumetric2.z);
 
 struct VSOUT {
 	float4 vertPos : POSITION;
@@ -283,27 +317,207 @@ float4 CombineEnhanced(VSOUT IN) : COLOR0 {
 }
 
 
-// ================= GlareOnly: sun corona/glare, no streak passes =================
-// Extracted from Classic's SkyMask so it can render on its own, at full resolution, with none of
-// the multi-pass streak machinery -- used when the Volumetric (fog-integrated) light-shafts tier
-// is the active choice elsewhere, so the corona doesn't disappear just because streak duty moved
-// to the fog shader. Enhanced doesn't need this pass itself: unlike Classic, it has no separate
-// synthetic glare term -- its glow comes from the raymarch of the sun disc's own rendered brightness.
+// ================= Volumetric: real shadow-raymarched shafts + glare =================
+// Ported from VolumetricFog.fx.hlsl's own GetFogShadowVisibility (same globals ShadowsExteriorEffect
+// registers) rather than the simpler 2-cascade hard-bias test an Oblivion Reloaded reference version
+// of this technique uses -- ours is already 4-cascade, VSM/EVSM-filtered, and proven (it drives the
+// existing single-sample shadowVisibility term in fog). Separate effects compile independently, so
+// this is a second copy of the same ~60 lines, not a shared include -- same reason SunShadows.fx.hlsl
+// and VolumetricFog.fx.hlsl each carry their own copy already.
 
-float4 Glare(VSOUT IN) : COLOR0 {
-	float4 ori = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
-	if (sunHeight >= 1 || GlareStrength <= 0) return float4(delinearize(ori.rgb), 1.0f);
+float4 ScreenCoordToTexCoord(float4 coord) {
+	coord.xyz /= coord.w;
+	coord.x = coord.x * 0.5f + 0.5f;
+	coord.y = coord.y * -0.5f + 0.5f;
+	return coord;
+}
+
+float GetFogShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float offsetY, float bias) {
+	float4 LightSpaceCoord = ScreenCoordToTexCoord(mul(coord, lightTransform));
+	LightSpaceCoord.xy *= 0.5;
+	LightSpaceCoord.x += offsetX;
+	LightSpaceCoord.y += offsetY;
+
+	float4 moments = tex2Dlod(TESR_ShadowAtlas, float4(LightSpaceCoord.xy, 0.0f, 0.0f));
+
+	float Mode = TESR_ShadowFormatData.x;
+	float FormatBits = TESR_ShadowFormatData.y;
+
+	[branch]
+	if (Mode == 0.0f)
+		return GetLightAmountValueVSM(moments.xy, LightSpaceCoord.z, bias, 0.2f);
+	else if (Mode == 1.0f)
+		return GetLightAmountValueEVSM2(moments.xy, LightSpaceCoord.z, bias, 0.2f, FormatBits);
+	else
+		return GetLightAmountValueEVSM4(moments, LightSpaceCoord.z, bias, 0.2f, FormatBits);
+}
+
+float GetFogShadowVisibility(float4 positionWS, float3 normal) {
+	float NdotL = dot(normal, TESR_SmoothedSunDir.xyz);
+	float offsetScale = saturate(1 - NdotL);
+
+	float4 radii = { TESR_ShadowNearCenter.w, TESR_ShadowMiddleCenter.w, TESR_ShadowFarCenter.w, TESR_ShadowLodCenter.w };
+	float4 texelWorld = 4.0f * radii * max(TESR_ShadowBlur.x, 1.0f / 16384.0f);
+	float4 offsetDistance = offsetScale * 2.5f * texelWorld;
+
+	float bias = (TESR_ShadowFormatData.x == 0.0f ? 0.00001f : 0.01f) * (1.0f + offsetScale);
+	const float blend = 0.9f;
+
+	float4 shadows = {
+		GetFogShadowValue(TESR_ShadowCameraToLightTransformNear,   float4(positionWS.xyz + offsetDistance.x * normal, 1.0f), 0.0, 0.0, bias),
+		GetFogShadowValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS.xyz + offsetDistance.y * normal, 1.0f), 0.5, 0.0, bias),
+		GetFogShadowValue(TESR_ShadowCameraToLightTransformFar,    float4(positionWS.xyz + offsetDistance.z * normal, 1.0f), 0.0, 0.5, bias),
+		GetFogShadowValue(TESR_ShadowCameraToLightTransformLod,    float4(positionWS.xyz + offsetDistance.w * normal, 1.0f), 0.5, 0.5, bias),
+	};
+
+	float4 distances = {
+		length(positionWS.xyz - TESR_ShadowNearCenter.xyz),
+		length(positionWS.xyz - TESR_ShadowMiddleCenter.xyz),
+		length(positionWS.xyz - TESR_ShadowFarCenter.xyz),
+		length(positionWS.xyz - TESR_ShadowLodCenter.xyz),
+	};
+
+	if (distances.x < TESR_ShadowNearCenter.w) {
+		if (distances.x < TESR_ShadowNearCenter.w * blend) return shadows.x;
+		return lerp(shadows.x, shadows.y, smoothstep(TESR_ShadowNearCenter.w * blend, TESR_ShadowNearCenter.w, distances.x));
+	}
+	else if (distances.y < TESR_ShadowMiddleCenter.w) {
+		if (distances.y < TESR_ShadowMiddleCenter.w * blend) return shadows.y;
+		return lerp(shadows.y, shadows.z, smoothstep(TESR_ShadowMiddleCenter.w * blend, TESR_ShadowMiddleCenter.w, distances.y));
+	}
+	else if (distances.z < TESR_ShadowFarCenter.w) {
+		if (distances.z < TESR_ShadowFarCenter.w * blend) return shadows.z;
+		return lerp(shadows.z, shadows.w, smoothstep(TESR_ShadowFarCenter.w * blend, TESR_ShadowFarCenter.w, distances.z));
+	}
+	else if (distances.w < TESR_ShadowLodCenter.w) {
+		if (distances.w < TESR_ShadowLodCenter.w * blend) return shadows.w;
+		return lerp(shadows.w, 1.0f, smoothstep(TESR_ShadowLodCenter.w * blend, TESR_ShadowLodCenter.w, distances.w));
+	}
+	return 1.0f;
+}
+
+// 4x4 ordered dither matrix (ported from Oblivion Reloaded's VolumetricLight.fx.hlsl), indexed by
+// screen pixel coordinates -- offsets each pixel's raymarch start position by a fraction of one
+// step, so neighbouring pixels sample different points along their own ray. Preferred over an ad-hoc
+// hash function: a known, standard ordered-dither pattern rather than a guessed one.
+static const float4x4 DITHER_PATTERN = {
+	0.0f,    0.5f,    0.125f,  0.625f,
+	0.75f,   0.22f,   0.875f,  0.375f,
+	0.1875f, 0.6875f, 0.0625f, 0.5625f,
+	0.9375f, 0.4375f, 0.8125f, 0.3125f
+};
+
+// Glare's core math, extracted so both the standalone corona term and VolumetricCombine below can
+// share it without duplicating it -- Volumetric no longer has its own separate glare technique the
+// way GlareOnly used to be one; the corona is just one of the light contributions Combine adds in.
+float3 ComputeGlare(float2 uv) {
+	if (sunHeight >= 1 || GlareStrength <= 0) return 0;
 
 	float sunset = pows(sunHeight, 8);
 	float3 sunColor = linearize(TESR_SunColor).rgb + lerp(linearize(TESR_SunsetColor.rgb), 0, sunset);
 	float glarePower = lerp(0.1, 8.0, sunset);
 
-	float3 eyeDir = normalize(reconstructPosition(IN.UVCoord));
+	float3 eyeDir = normalize(reconstructPosition(uv));
 	float3 glare = pows(dot(TESR_ViewSpaceLightDir.xyz, eyeDir), 180) * glarePower;
 	glare *= smoothstep(0, 0.01, sunHeight) * GlareStrength;
 
-	float3 color = ori.rgb + glare * sunColor * multiplier;
-	return float4(delinearize(color), 1.0f);
+	return glare * sunColor * multiplier;
+}
+
+float4 VolumetricRaymarch(VSOUT IN) : COLOR0 {
+	float2 uv = IN.UVCoord / scale;
+	clip((uv <= 1) - 1);
+
+	float depth = readDepth(uv);
+	float3 eyeVector = toWorld(uv);
+	float3 rayDir = normalize(eyeVector);
+	eyeVector *= depth;
+	float3 rayStart = TESR_CameraPosition.xyz;
+	// Reuses the surface pixel's own world normal for every step's shadow-bias offset rather than
+	// computing one per step -- there's no real normal in open air, and the bias only affects a
+	// small anti-acne offset, harmless given the cascades are already filtered.
+	float3 worldNormal = GetWorldNormal(uv);
+
+	float rayLength = min(length(eyeVector), VolumetricMaxDistance);
+
+	// Bound the march to the fog layer's height band [HeightCutoff - LayerThickness, HeightCutoff]
+	// rather than the whole view ray -- most of a typical ray passes well above any ground-hugging
+	// mist layer, so this concentrates samples where they're actually visible. Ray-plane intersection
+	// against both band edges, sign-safe for looking up, down, or (near-)horizontally.
+	float bandTop = VolumetricHeightCutoff;
+	float bandBottom = VolumetricHeightCutoff - VolumetricLayerThickness;
+	float dz = rayDir.z;
+	float t0, t1;
+	if (abs(dz) < 0.0001) {
+		bool inBand = (rayStart.z >= bandBottom && rayStart.z <= bandTop);
+		t0 = 0;
+		t1 = inBand ? rayLength : 0;
+	}
+	else {
+		float tBottom = (bandBottom - rayStart.z) / dz;
+		float tTop = (bandTop - rayStart.z) / dz;
+		t0 = clamp(min(tBottom, tTop), 0, rayLength);
+		t1 = clamp(max(tBottom, tTop), 0, rayLength);
+	}
+	float bandLength = max(0, t1 - t0);
+	float stepDist = bandLength / VolumetricSteps;
+
+	float2 screenPos = uv / TESR_ReciprocalResolution.xy;
+	float ditherOffset = DITHER_PATTERN[int(screenPos.x) % 4][int(screenPos.y) % 4];
+
+	float accumLight = 0;
+	float nearWeight = 1.0;
+	[unroll(32)]
+	for (int i = 0; i < VolumetricSteps; i++) {
+		float t = t0 + (i + ditherOffset) * stepDist;
+		float3 stepPos = rayStart + rayDir * t;
+		float shadowVis = GetFogShadowVisibility(float4(stepPos, 1.0), worldNormal);
+
+		if (shadowVis >= 1.0) {
+			accumLight += nearWeight;
+		}
+		else {
+			// Shadowed points still contribute a reduced, distance-limited amount rather than
+			// nothing -- represents indirect/ambient scattering within the fog instead of a hard
+			// binary lit/unlit switch.
+			accumLight += nearWeight * saturate(1 - t / max(VolumetricShadowedCutoffDistance, 1));
+		}
+		nearWeight = max(0, nearWeight - VolumetricNearWeightFalloff / VolumetricSteps);
+	}
+	accumLight /= VolumetricSteps;
+	accumLight *= VolumetricStrength;
+
+	return float4(accumLight.xxx, 1.0f);
+}
+
+float4 VolumetricExpand(VSOUT IN) : COLOR0 {
+	// Plain bilinear upsample, no depth-awareness -- matches Oblivion Reloaded's own Expand() pass,
+	// which gets away without a depth-aware/edge-aware version. Worth revisiting only if halos show
+	// up in practice.
+	return tex2D(TESR_RenderedBuffer, IN.UVCoord * scale);
+}
+
+float4 VolumetricCombine(VSOUT IN) : COLOR0 {
+	float2 uv = IN.UVCoord;
+	float4 scene = linearize(tex2D(TESR_SourceBuffer, uv));
+	float shaftLight = tex2D(TESR_RenderedBuffer, uv).r;
+
+	float3 sunColor = GetSunColor(shade(TESR_SunDirection.xyz, blue.xyz), 1, TESR_SunAmount.x, TESR_SunColor.rgb, TESR_SunsetColor.rgb);
+	float3 tintedShaft = shaftLight * sunColor;
+	float3 glareLight = ComputeGlare(uv);
+
+	// Small output dither -- separate from VolumetricRaymarch's own per-pixel start-offset dither
+	// above, which addresses step banding, not render-target quantization banding in the final value.
+	float ditherNoise = (frac(sin(dot(uv, float2(12.9898, 78.233))) * 43758.5453) - 0.5) * (0.5 / 255.0);
+
+	float3 light = max(0, tintedShaft + glareLight + ditherNoise);
+
+	// Screen/over composite, not additive: light partially replaces the scene rather than only
+	// adding to it, so it can't blow out highlights the way `color += light` can (matches Oblivion
+	// Reloaded's own CombineLight -- deliberately not saturating `light` first, same as that source).
+	float3 color = scene.rgb * (1 - light) + light;
+	color = delinearize(color);
+	return float4(color, 1.0f);
 }
 
 
@@ -373,11 +587,23 @@ technique Enhanced
 	}
 }
 
-technique GlareOnly
+technique Volumetric
 {
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 Glare();
+		PixelShader = compile ps_3_0 VolumetricRaymarch();
+	}
+
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 VolumetricExpand();
+	}
+
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 VolumetricCombine();
 	}
 }
