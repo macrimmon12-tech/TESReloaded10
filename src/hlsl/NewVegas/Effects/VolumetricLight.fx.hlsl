@@ -246,13 +246,30 @@ static const float heightFalloff = TESR_VolumetricLightData4.z;
 // screen space. This is the same reasoning behind the exponential depth slices a froxel volume
 // uses, applied to a per-pixel march.
 //
-// The steps have to sum to rayLength, so ds_0 = rayLength * (r - 1) / (r^N - 1). At r = 1.03 and
-// N = 64, r^N = 6.632, giving 0.0053264 -- a first step of 0.53% of the ray against a uniform
-// 1.56%, and a last step of 3.4%. Written out rather than evaluated with pow() in a global
-// initialiser: this file has already killed the D3DX9 compiler once over a change that looked
-// just as harmless (see MARCH_NUM).
-static const float STEP_GROWTH = 1.03f;
-static const float STEP_FIRST_FRACTION = 0.0053264f;
+// The steps have to sum to rayLength, so ds_0 = rayLength * (r - 1) / (r^N - 1). At r = 1.05 and
+// N = 64, r^N = 22.7047, giving 0.0023037 -- a first step of 0.23% of the ray and a last step of
+// 4.98%, against a uniform 1.56% throughout.
+//
+// r is set from what the march has to resolve, which MARCH_NUM above already documents: a tree
+// trunk's shadow volume is 25-45 units across and a pole's is 15-30, while a building wall's is
+// 300+. At AccumDistance 6000 that makes the first and last steps
+//
+//     r = 1.03   32.0 -> 205.8 units     first step steps over a pole, barely samples a trunk
+//     r = 1.05   13.8 -> 298.9 units
+//     r = 1.06    8.9 -> 348.0 units
+//
+// so 1.03 was spending its resolution in the wrong place: too coarse near the camera to catch the
+// occluders that produce most of the visible shafts, while the far end was already finer than the
+// building-scale shadows out there need. 1.05 is 2.3x finer near the camera for the same 64
+// samples and the same range, paying for it where the occluders are large anyway. 1.06 goes
+// further but the far steps start to outrun a building wall, and the dither jitters within each
+// step, so the far field gets noisier as they grow.
+//
+// Written out rather than evaluated with pow() in a global initialiser: this file has already
+// killed the D3DX9 compiler once over a change that looked just as harmless (see MARCH_NUM).
+// If r changes, recompute BOTH -- they are not independent.
+static const float STEP_GROWTH = 1.05f;
+static const float STEP_FIRST_FRACTION = 0.0023037f;
 
 // Scattering medium density taken from the weather's own fog.
 //
