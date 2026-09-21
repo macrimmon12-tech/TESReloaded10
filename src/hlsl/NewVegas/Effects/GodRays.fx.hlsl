@@ -28,14 +28,21 @@ float4 TESR_GodRaysVolumetric2; // x: ShadowedCutoffDistance, y: NearWeightFallo
 // Sun shadow cascade data, duplicated from VolumetricFog.fx.hlsl (same globals ShadowsExteriorEffect
 // registers, same GetFogShadowVisibility) -- separate effects compile independently, so this can't be
 // shared directly between the two files, same reason SunShadows.fx.hlsl's own copy exists.
+// Only Near+Far here, not all 4 cascades VolumetricFog.fx.hlsl tests: GodRays.fx.hlsl pools Classic +
+// Enhanced + Volumetric's globals into one shared ps_3_0 224-register budget (D3DX Effects allocate a
+// register per declared global for the whole file, not per technique), and the full 4-cascade copy
+// pushed this file over that limit (error X4507). Middle/Lod dropped rather than Near/Far to match
+// the actual Oblivion Reloaded reference implementation of this technique, which also only tests 2
+// cascades (GetLightAmount/GetLightAmountFar). Safe because cascades nest (Near subset of Middle
+// subset of Far subset of Lod, each a larger radius): dropping Middle costs precision, not coverage,
+// in the range it used to serve, since Far's larger radius already covers it. The one real gap is
+// samples beyond Far's radius (near VolumetricMaxDistance's outer edge) now falling back to "always
+// lit" instead of Lod's coverage -- acceptable since VolumetricRaymarch's own NearWeightFalloff
+// already de-emphasizes those far samples' contribution to the accumulated light.
 float4x4 TESR_ShadowCameraToLightTransformNear;
-float4x4 TESR_ShadowCameraToLightTransformMiddle;
 float4x4 TESR_ShadowCameraToLightTransformFar;
-float4x4 TESR_ShadowCameraToLightTransformLod;
 float4 TESR_ShadowNearCenter;   // xyz: center (world space), w: radius
-float4 TESR_ShadowMiddleCenter;
 float4 TESR_ShadowFarCenter;
-float4 TESR_ShadowLodCenter;
 float4 TESR_ShadowFormatData; // x: mode (0 VSM, 1 EVSM2, 2 EVSM4), y: format bits per pixel
 float4 TESR_ShadowBlur;       // x: 1 / atlas resolution
 float4 TESR_SmoothedSunDir;
@@ -318,12 +325,13 @@ float4 CombineEnhanced(VSOUT IN) : COLOR0 {
 
 
 // ================= Volumetric: real shadow-raymarched shafts + glare =================
-// Ported from VolumetricFog.fx.hlsl's own GetFogShadowVisibility (same globals ShadowsExteriorEffect
-// registers) rather than the simpler 2-cascade hard-bias test an Oblivion Reloaded reference version
-// of this technique uses -- ours is already 4-cascade, VSM/EVSM-filtered, and proven (it drives the
-// existing single-sample shadowVisibility term in fog). Separate effects compile independently, so
-// this is a second copy of the same ~60 lines, not a shared include -- same reason SunShadows.fx.hlsl
-// and VolumetricFog.fx.hlsl each carry their own copy already.
+// Adapted from VolumetricFog.fx.hlsl's own GetFogShadowVisibility (same globals ShadowsExteriorEffect
+// registers, same VSM/EVSM-filtered GetFogShadowValue), but trimmed to 2 cascades (Near/Far) instead
+// of fog's own 4 (Near/Middle/Far/Lod) -- see the TESR_ShadowCameraToLightTransformNear/Far comment
+// above for why (a ps_3_0 224-register budget this file was pushed over). This also happens to match
+// what the actual Oblivion Reloaded reference implementation of this technique uses. Separate effects
+// compile independently, so this is a second copy of this shadow lookup, not a shared include -- same
+// reason SunShadows.fx.hlsl and VolumetricFog.fx.hlsl each carry their own copy already.
 
 float4 ScreenCoordToTexCoord(float4 coord) {
 	coord.xyz /= coord.w;
@@ -356,42 +364,30 @@ float GetFogShadowVisibility(float4 positionWS, float3 normal) {
 	float NdotL = dot(normal, TESR_SmoothedSunDir.xyz);
 	float offsetScale = saturate(1 - NdotL);
 
-	float4 radii = { TESR_ShadowNearCenter.w, TESR_ShadowMiddleCenter.w, TESR_ShadowFarCenter.w, TESR_ShadowLodCenter.w };
-	float4 texelWorld = 4.0f * radii * max(TESR_ShadowBlur.x, 1.0f / 16384.0f);
-	float4 offsetDistance = offsetScale * 2.5f * texelWorld;
+	float2 radii = { TESR_ShadowNearCenter.w, TESR_ShadowFarCenter.w };
+	float2 texelWorld = 4.0f * radii * max(TESR_ShadowBlur.x, 1.0f / 16384.0f);
+	float2 offsetDistance = offsetScale * 2.5f * texelWorld;
 
 	float bias = (TESR_ShadowFormatData.x == 0.0f ? 0.00001f : 0.01f) * (1.0f + offsetScale);
 	const float blend = 0.9f;
 
-	float4 shadows = {
-		GetFogShadowValue(TESR_ShadowCameraToLightTransformNear,   float4(positionWS.xyz + offsetDistance.x * normal, 1.0f), 0.0, 0.0, bias),
-		GetFogShadowValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS.xyz + offsetDistance.y * normal, 1.0f), 0.5, 0.0, bias),
-		GetFogShadowValue(TESR_ShadowCameraToLightTransformFar,    float4(positionWS.xyz + offsetDistance.z * normal, 1.0f), 0.0, 0.5, bias),
-		GetFogShadowValue(TESR_ShadowCameraToLightTransformLod,    float4(positionWS.xyz + offsetDistance.w * normal, 1.0f), 0.5, 0.5, bias),
+	float2 shadows = {
+		GetFogShadowValue(TESR_ShadowCameraToLightTransformNear, float4(positionWS.xyz + offsetDistance.x * normal, 1.0f), 0.0, 0.0, bias),
+		GetFogShadowValue(TESR_ShadowCameraToLightTransformFar,  float4(positionWS.xyz + offsetDistance.y * normal, 1.0f), 0.0, 0.5, bias),
 	};
 
-	float4 distances = {
+	float2 distances = {
 		length(positionWS.xyz - TESR_ShadowNearCenter.xyz),
-		length(positionWS.xyz - TESR_ShadowMiddleCenter.xyz),
 		length(positionWS.xyz - TESR_ShadowFarCenter.xyz),
-		length(positionWS.xyz - TESR_ShadowLodCenter.xyz),
 	};
 
 	if (distances.x < TESR_ShadowNearCenter.w) {
 		if (distances.x < TESR_ShadowNearCenter.w * blend) return shadows.x;
 		return lerp(shadows.x, shadows.y, smoothstep(TESR_ShadowNearCenter.w * blend, TESR_ShadowNearCenter.w, distances.x));
 	}
-	else if (distances.y < TESR_ShadowMiddleCenter.w) {
-		if (distances.y < TESR_ShadowMiddleCenter.w * blend) return shadows.y;
-		return lerp(shadows.y, shadows.z, smoothstep(TESR_ShadowMiddleCenter.w * blend, TESR_ShadowMiddleCenter.w, distances.y));
-	}
-	else if (distances.z < TESR_ShadowFarCenter.w) {
-		if (distances.z < TESR_ShadowFarCenter.w * blend) return shadows.z;
-		return lerp(shadows.z, shadows.w, smoothstep(TESR_ShadowFarCenter.w * blend, TESR_ShadowFarCenter.w, distances.z));
-	}
-	else if (distances.w < TESR_ShadowLodCenter.w) {
-		if (distances.w < TESR_ShadowLodCenter.w * blend) return shadows.w;
-		return lerp(shadows.w, 1.0f, smoothstep(TESR_ShadowLodCenter.w * blend, TESR_ShadowLodCenter.w, distances.w));
+	else if (distances.y < TESR_ShadowFarCenter.w) {
+		if (distances.y < TESR_ShadowFarCenter.w * blend) return shadows.y;
+		return lerp(shadows.y, 1.0f, smoothstep(TESR_ShadowFarCenter.w * blend, TESR_ShadowFarCenter.w, distances.y));
 	}
 	return 1.0f;
 }
