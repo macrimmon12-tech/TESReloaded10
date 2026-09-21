@@ -65,6 +65,13 @@ public:
 		float NoiseScale;
 		float NoiseTile;
 	};
+	// Stochastic tiling. Enabled and Layers are compile-time (ShaderRecord.cpp turns them into
+	// TERRAIN_VARIATION / TERRAIN_VARIATION_LAYERS), so they are not mirrored into a constant --
+	// only the two values the shader reads at runtime are.
+	struct VariationSettingsStruct {
+		float Scale;
+		float HeightInfluence;
+	};
 	struct TerrainSettingsStruct {
 		TerrainSettings Default;
 		TerrainSettings Rain;
@@ -74,12 +81,14 @@ public:
 	TerrainSettingsStruct Settings;
 	ParallaxSettingsStruct ParallaxSettings;
 	LODSettingsStruct LODSettings;
+	VariationSettingsStruct VariationSettings;
 
 	struct TerrainStruct {
 		D3DXVECTOR4		Data;
 		D3DXVECTOR4		ExtraData;
 		// TerrainExtraData is full: x usePBR, y saturation, z NoiseScale, w NoiseTile.
 		D3DXVECTOR4		SkyData;      // x: skylight strength, y: sample directionality
+		D3DXVECTOR4		VariationData;  // x: lattice scale, y: height influence
 	};
 	TerrainStruct	Constants;
 
