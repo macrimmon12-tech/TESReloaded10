@@ -770,12 +770,26 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     // essentially untouched however bright the shaft gets, and a genuinely thick one (heavy fog
     // weather, high Extinction) attenuates it whether or not the sun is behind an occluder.
     //
-    // No linearize() on the in-scattered term. It is built from TESR_SunColor, which is linear
-    // HDR in this engine, not an sRGB-encoded colour -- running it through the sRGB decode was
-    // gamma-decoding a value that had never been encoded. See accumLightStrength for what that
-    // cost and why removing it changes the calibration.
+    // The in-scattered term goes through linearize() as well, which is DELIBERATE and is not what
+    // it looks like. It is not a colour-space conversion: the march output is built from
+    // TESR_SunColor, which is already linear HDR in this engine, so this is an sRGB decode applied
+    // to a value that was never sRGB-encoded. It was removed once for exactly that reason and then
+    // asked for back, because what it does to the picture is wanted.
+    //
+    // What it actually is, is a 2.4-power response curve on the shaft:
+    //
+    //   - Strength stops being linear. Doubling it more than quadruples the result in the range
+    //     this runs at, so the slider has a soft bottom end and ramps hard.
+    //   - Dim scattering is crushed harder than bright scattering, which pulls the general haze
+    //     down relative to the bright shaft cores. That is the contrast the curve is wanted for.
+    //   - It also SATURATES the shaft, which is the part that is easy to miss. The decode is
+    //     per-channel, so the ScatterR/G/B tint spreads: 1.0 / 0.9 / 0.78 comes out nearer
+    //     1.0 / 0.80 / 0.59. Warm tints get warmer. Retune the tint, not this, if that goes too far.
+    //
+    // At the calibrated settings it costs roughly 2x brightness overall, so Strength wants raising
+    // to compensate -- see accumLightStrength.
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
-    float3 result = color * (1.0f - volumeLight.a) + volumeLight.rgb;
+    float3 result = color * (1.0f - volumeLight.a) + linearize(volumeLight.rgb);
     return delinearize(float4(result, 1.0f));
 }
 
