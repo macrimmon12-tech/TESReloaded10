@@ -500,9 +500,13 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// entire branch -- the expensive part -- doesn't execute at all for Classic/Enhanced users.
 	// Excluded from the sky itself (isSkyDome) since it's light scattering in front of something,
 	// not a property of the sky pixel; scaled by skyMaskFactor so heavy overcast/rain suppresses it
-	// the same way it already suppresses the rest of the NVR-driven density.
+	// the same way it already suppresses the rest of the NVR-driven density. Also gated on isDayTime
+	// directly, not just via sunColorV's own isDayTime factor further down -- without this the
+	// raymarch still ran (and paid its full per-step shadow-sampling cost) all night for a result
+	// that was always going to be multiplied to zero by sunColorV, same day/night behavior as
+	// Classic/Enhanced GodRays but without actually skipping the expensive part at night.
 	[branch]
-	if (isExterior > 0.5 && ShaftStrength > 0.0 && TESR_ShadowFade.y > 0.5) {
+	if (isExterior > 0.5 && ShaftStrength > 0.0 && TESR_ShadowFade.y > 0.5 && isDayTime > 0.0) {
 		float3 volumetricShaft = GetVolumetricShaft(TESR_CameraPosition.xyz, eyeDirection, length(eyeVector), worldNormal);
 		finalColor.rgb += volumetricShaft * sunColorV.rgb * TESR_PBRData.z * (1 - isSkyDome) * skyMaskFactor;
 	}
