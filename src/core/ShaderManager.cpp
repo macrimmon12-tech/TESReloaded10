@@ -192,6 +192,19 @@ template <typename T> void ShaderManager::RegisterShaderCollection(T** Pointer)
  */
 void ShaderManager::ClearShaderSamplers(const char* TextureName, size_t Length)
 {
+	// Effects as well as game shaders. This used to walk ShaderNames alone, so effects had to be
+	// cleared individually by name at each call site -- and only SunShadows ever was. Any other
+	// effect sampling a recreated texture kept its dangling pointer, which the device still
+	// references, so it silently went on reading whatever was last rendered into the dead one.
+	// VolumetricLight samples TESR_ShadowAtlas and hit exactly that: after any shadow setting
+	// change its shafts were carved by a frozen copy of the atlas and no longer matched the
+	// scene. Covering every effect here fixes it for all of them rather than adding one more
+	// name to a list that has to be maintained by hand.
+	for (const auto& Entry : EffectsNames) {
+		EffectRecord* Effect = Entry.second ? *Entry.second : nullptr;
+		if (Effect) Effect->ClearSampler(TextureName, Length);
+	}
+
 	for (const auto& Entry : ShaderNames) {
 		ShaderCollection* Collection = Entry.second ? *Entry.second : nullptr;
 		if (!Collection) continue;
