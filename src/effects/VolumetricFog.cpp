@@ -26,6 +26,18 @@ void VolumetricFogEffect::UpdateConstants() {
 	// SkyAmbientRadiance's TESR_SkyIrradiance is only refreshed while Shaders.Sky is enabled;
 	// fall back to flat sky color in the shader when it's off rather than reading stale/zero data.
 	Constants.Weather.z = TheShaderManager->Shaders.Sky->Enabled ? 1.0f : 0.0f;
+
+	// Moon-phase-driven night ambient ceiling, mirroring ShadowsExterior.cpp's own moon-phase
+	// shadow-fade formula (same day-count/phaseLength inputs, same cosine curve) so fog's night
+	// floor tracks the same lunar cycle the shadow system already uses. The day/night fade itself
+	// is left to the shader's own continuous isDayTime curve rather than duplicated here, so the
+	// transition stays smooth instead of snapping at a hard cutoff. Harmless to compute for
+	// interiors too -- NightAmbientStrength is zeroed there in UpdateSettings, so it has no effect.
+	TimeGlobals* GameTimeGlobals = TimeGlobals::Get();
+	float DaysPassed = GameTimeGlobals->GameDaysPassed ? GameTimeGlobals->GameDaysPassed->data : 1.0f;
+	float MoonPhase = (fmod(DaysPassed, 8 * Tes->sky->firstClimate->phaseLength & 0x3F)) / (Tes->sky->firstClimate->phaseLength & 0x3F);
+	MoonPhase = std::lerp(-D3DX_PI, D3DX_PI, MoonPhase / 8) - D3DX_PI / 4;
+	Constants.Global.z = std::lerp(0.0f, nightMinDarkness, cosf(MoonPhase) * 0.5f + 0.5f);
 }
 
 void VolumetricFogEffect::UpdateSettings(){
@@ -80,6 +92,11 @@ void VolumetricFogEffect::UpdateSettings(){
 		Constants.Distant.y = TheSettingManager->GetSettingF(SettingCategory, "DistantFogBlend");
 		Constants.Distant.z = TheSettingManager->GetSettingF(SettingCategory, "DistantFogHeight");
 		Constants.Distant.w = TheSettingManager->GetSettingF(SettingCategory, "EdgeAA");
+
+		Constants.Global.y = TheSettingManager->GetSettingF(SettingCategory, "NightAmbientStrength");
+		// shared with ShadowsExterior's own moon-phase shadow fade -- keeps fog's night-ambient
+		// ceiling consistent with the shadow system's, rather than a second, disconnected knob.
+		nightMinDarkness = 1.0f - TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "NightMinDarkness");
 	}
 	else {
 		// these settings don't do anything in interiors: no sun, no horizon, no distant view
@@ -92,6 +109,8 @@ void VolumetricFogEffect::UpdateSettings(){
 		Constants.Aerial = D3DXVECTOR4(0, 0, 0, 0);
 		Constants.AerialTintColor = D3DXVECTOR4(0, 0, 0, 0);
 		Constants.Distant = D3DXVECTOR4(0, 0, 0, 0);
+
+		Constants.Global.y = 0.0f;
 	}
 }
 

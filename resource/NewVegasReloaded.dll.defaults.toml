@@ -954,6 +954,7 @@ DistantFogRange = 0.9               # Range of the distance fog that blends moun
 DistantFogBlend = 0.3               # Blending power of the distant fog.
 DistantFogHeight = 0.3              # Height limit for the distant fog. If set to 0, uses the sky as a mask instead.
 EdgeAA = 0.4                        # Strength of the inverted distant-fog term that specifically feathers the terrain/sky silhouette edge, to hide aliasing there.
+NightAmbientStrength = 1.0          # Multiplier on the moon-phase-driven night ambient floor for fog color, so fog doesn't collapse toward black after dark (most weathers author near-black night sky colors with no moon/starlight term). Varies with the same lunar cycle as Shaders.ShadowsExteriors.Main's NightMinDarkness. 0 = disable, fog can go fully dark at night like before.
 
 
 [_Shaders.VolumetricFog.Interiors]

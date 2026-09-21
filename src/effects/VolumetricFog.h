@@ -8,6 +8,7 @@ public:
 		weatherFilterWasActive = true;
 		rainyDisablesSkyFilter = true;
 		cloudyDisablesSkyFilter = true;
+		nightMinDarkness = 1.0f - 0.35f; // matches ShadowsExteriors.Main's own NightMinDarkness default (0.35), until the first exterior settings pass sets it for real
 	};
 
 	struct VolumetricFogStruct {
@@ -19,7 +20,7 @@ public:
 		D3DXVECTOR4		Aerial;          // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 		D3DXVECTOR4		AerialTintColor; // xyz: manual aerial tint override
 		D3DXVECTOR4		Distant;         // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-		D3DXVECTOR4		Global;          // x: Amount, y: unused, z: unused, w: unused
+		D3DXVECTOR4		Global;          // x: Amount, y: NightAmbientStrength, z: MoonVisibility, w: unused
 		Animator		WeatherFilterAnimator;
 	};
 	VolumetricFogStruct	Constants;
@@ -33,4 +34,8 @@ public:
 	bool	rainyDisablesSkyFilter;
 	bool	cloudyDisablesSkyFilter;
 	bool	weatherFilterWasActive; // edge-detect for the animator, mirrors RainAnimator.switched
+
+	// cached from UpdateSettings (Shaders.ShadowsExteriors.Main/NightMinDarkness), consumed by
+	// UpdateConstants to drive the moon-phase night-ambient ceiling
+	float	nightMinDarkness;
 };

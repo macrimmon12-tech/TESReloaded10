@@ -47,7 +47,7 @@ float4 TESR_VolumetricFogWeather;    // x: WeatherFilterBlend (animated 0-1), y:
 float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-float4 TESR_VolumetricFogGlobal;     // x: Amount
+float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NightAmbientStrength, z: MoonVisibility
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -64,6 +64,10 @@ static const float FogPower = TESR_FogData.w;
 
 // scale settings for easier tuning
 static const float FogAmount = max(0, TESR_VolumetricFogGlobal.x);
+// Multiplier on the moon-phase-driven night ambient floor (see MoonVisibility/ambientColor below).
+static const float NightAmbientStrength = max(0, TESR_VolumetricFogGlobal.y);
+// Computed in C++ (VolumetricFog.cpp), mirrors ShadowsExterior's own moon-phase shadow-fade curve.
+static const float MoonVisibility = saturate(TESR_VolumetricFogGlobal.z);
 
 static const float BaseDensity = max(0, TESR_VolumetricFogDensity.x);
 static const float WeatherImpact = max(0, TESR_VolumetricFogDensity.y);
@@ -425,6 +429,18 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 		? SkyIrradianceLinear(float3(0, 0, 1))
 		: linearize(TESR_SkyColor).rgb;
 	ambientColor *= TESR_PBRData.w;
+
+	// Moon-phase night ambient floor: skyUpper/skyLowColor/horizonColor (what ambientColor above
+	// is built from) go near-black at night for most vanilla weathers, since none of them account
+	// for moon/starlight -- without this, fog collapses toward black after dark regardless of
+	// density/color tuning. TESR_SunAmbient is the weather's own Ambient color (already time-blended
+	// by the vanilla engine), scaled by MoonVisibility (the current lunar-cycle brightness) and
+	// NightAmbientStrength, faded in via (1-isDayTime) so the transition is smooth rather than a
+	// hard cutoff. max(), not lerp/add: at night ambientColor is already near-zero in every channel,
+	// so this only raises the floor; at (1-isDayTime)=0 nightAmbient is exactly zero, so daytime
+	// ambientColor is completely unaffected regardless of MoonVisibility/NightAmbientStrength.
+	float3 nightAmbient = linearize(TESR_SunAmbient).rgb * MoonVisibility * NightAmbientStrength * (1 - isDayTime);
+	ambientColor = max(ambientColor, nightAmbient);
 
 	float4 ambientSkyColor = float4(lerp(ambientColor, skyColor.rgb, saturate(WeatherImpact)), 1);
 
