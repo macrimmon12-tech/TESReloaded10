@@ -398,12 +398,30 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
         return float4(0,0,0,1);
     }
 
+    // 9 CASCADE RADII, as one flat colour: TESR_Shadow{Near,Middle,Far}Center.w over 250,
+    //   1000 and 3000. Mode 7 came back solid black, meaning not one of the four cascade tests
+    //   passed anywhere on screen -- and those tests read these constants directly, without
+    //   touching the atlas or GetSunShadowAmount. So either the radii are zero or the centres
+    //   are nowhere near the camera, and every theory about precision, slab bounds and atlas
+    //   format was downstream of a lookup that never ran. Black here means the constants are
+    //   arriving as zero, which is a binding failure rather than anything in the shader maths.
+    [branch] if (debugMode > 8.5f)
+        return float4(saturate(TESR_ShadowNearCenter.w / 250.0f),
+                      saturate(TESR_ShadowMiddleCenter.w / 1000.0f),
+                      saturate(TESR_ShadowFarCenter.w / 3000.0f), 1.0f);
+
+    // 10 DISTANCE from the surface point to the near cascade centre, over 2000. A smooth
+    //   gradient means the centre is a real world position near the camera. Uniform white means
+    //   it is far away or at the origin, which is what a zeroed constant looks like.
+    [branch] if (debugMode > 9.5f)
+        return float4(saturate(length((TESR_CameraPosition.xyz + cameraVector) - TESR_ShadowNearCenter.xyz) / 2000.0f).xxx, 1.0f);
+
     // 8 GATING CONSTANTS, as one flat colour. red TESR_ShadowFade.y (0 disables the lookup
     //   entirely and returns 1.0 before anything is sampled), green shadow mode over 2 so VSM,
     //   EVSM2 and EVSM4 read as 0, 0.5 and 1, blue the format bit where 0 is the 16-bit atlas
     //   whose clamped EVSM exponent costs the depth precision. Any red channel at zero means the
     //   effect cannot produce shadow at all and nothing downstream is worth reading.
-    [branch] if (debugMode > 7.5f)
+    [branch] if (debugMode > 7.5f && debugMode < 8.5f)
         return float4(TESR_ShadowFade.y, ShadowMode * 0.5f, ShadowFormatBits, 1.0f);
 
     // Mode 4: the lookup's intermediates for the surface point, rather than its verdict.
