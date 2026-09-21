@@ -310,27 +310,28 @@ static const bool ditherMotion = TESR_VolumetricLightData4.w > 0.5f;
 // means the lookup returns a constant and no occluder is being detected.
 static const float debugMode = TESR_VolumetricLightData4.x;
 
-// Calibration constant, so that Strength = 1.0 lands near where it did before the transmittance
-// rewrite. It is small because two things above it got their scale corrected:
+// Calibration constant, so that Strength = 1.0 is the usable setting.
 //
-//   - CompositeLight used to run the march output through linearize() as though it were an
-//     sRGB-encoded colour. It is not: it is built from TESR_SunColor, which carries real linear
-//     HDR magnitude in this engine (the same PBR pipeline ObjectTemplate.hlsl's PBRSun consumes,
-//     not a display-range [0,1] colour). So the shaft was being gamma-decoded a second time,
-//     which crushed it by roughly 8x at the levels it actually ran at -- and, worse, made the
-//     response to Strength a 2.4-power curve, so doubling the setting near-quintupled the result.
-//     Removing that makes Strength linear, which is the only reason this number can be a
-//     calibration at all rather than a point on a curve.
+// MEASURED, not derived. The previous value of 0.04 was reasoned out on paper from the claim --
+// made in a comment elsewhere in this file -- that TESR_SunColor "carries real HDR magnitude".
+// Working backwards from a tuned in-game frame, it does not: it sits somewhere around 0.5, so
+// everything downstream was scaled down with it and the effect only became visible with Strength
+// up around 55. That is the whole of the 55x between the two numbers. Anyone recalibrating this
+// again should do it from a screenshot, not from arithmetic about what the sun colour ought to be.
 //
-//   - The old value of 0.3 was itself cut from the source shader's 3.0 to stop a fully lit ray
-//     clipping past 1.0, because above 1.0 the old composite blend inverted. That ceiling is
-//     gone: the composite now tracks transmittance separately, so in-scattered light is additive
-//     over the scene and a value above 1.0 is just a bright shaft, not a corrupted frame.
+// It is also no longer a ceiling. Two things that used to cap it are gone:
 //
-// linearize(0.15) is 0.0193 in sRGB, and the march's full-ray integral at typical density is
-// about 0.5, so 0.0193 / 0.5 rounds to this. Strength is still the knob to reach for, and it can
-// now safely go above 1.0.
-static const float accumLightStrength = 0.04f;
+//   - CompositeLight ran the march output through linearize() as though it were an sRGB-encoded
+//     colour. It is not -- it is linear light -- so the shaft was gamma-decoded a second time,
+//     which crushed it and made the response to Strength a 2.4-power curve. Strength is linear
+//     now, which is what lets this be a calibration point at all rather than a point on a curve.
+//
+//   - The old value was cut from the source shader's 3.0 to stop a fully lit ray clipping past
+//     1.0, because above 1.0 the old composite blend inverted. The composite tracks transmittance
+//     separately now, so in-scattered light is additive and a value above 1.0 is just a bright
+//     shaft. The buffers are FP16 all the way to the tonemapper, so it survives to be rolled off
+//     rather than clipped.
+static const float accumLightStrength = 2.2f;
 
 struct VSOUT {
     float4 vertPos : POSITION;
