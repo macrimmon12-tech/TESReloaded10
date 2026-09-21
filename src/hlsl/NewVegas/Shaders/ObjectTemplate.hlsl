@@ -152,12 +152,6 @@
 #include "includes/Object.hlsl"
 #include "includes/Shadow.hlsl"
 
-// Depth-based object/terrain blending. Declaring TESR_DepthBuffer is what makes
-// ShaderRecord::SetCT RESZ-resolve the live depth buffer before this shader draws.
-#ifdef TERRAIN_BLEND
-    #include "includes/TerrainBlend.hlsl"
-#endif
-
 // Forward sun shadows. Enabled at COMPILE TIME via FORWARD_SHADOWS in Includes/Shadow.hlsl,
 // deliberately not via a runtime constant -- see the note there.
 
@@ -517,11 +511,6 @@ struct PS_INPUT {
 #ifdef PROJ_SHADOW
     float4 shadowUVs : TEXCOORD7;
 #endif
-#ifdef TERRAIN_BLEND
-    // VPOS, not an interpolator: TEXCOORD0-7 are all spoken for here, and the rasteriser
-    // supplies pixel coordinates in ps_3_0 at no interpolator cost.
-    float2 vpos : VPOS;
-#endif
 };
 
 struct PS_OUTPUT {
@@ -722,15 +711,6 @@ PS_OUTPUT main(PS_INPUT IN) {
     #else
         OUT.color.a = baseColor.a * AmbientColor.a;
     #endif
-
-#if defined(TERRAIN_BLEND) && TERRAIN_BLEND_DEBUG
-    // Probe only: show the factor instead of applying it. White where this object approaches
-    // the surface behind it, black where it stands clear. If this tracks the ground the depth
-    // read is landing at the right point in the frame and the rest of the feature is viable;
-    // if it ignores the ground, objects are drawing before terrain and no blend is possible
-    // without reordering the pass, which is the part FNV gives no easy hook for.
-    OUT.color.rgb = GetTerrainBlendFactor(IN.shadowWorldPos.xyz, IN.vpos).xxx;
-#endif
 
     return OUT;
 }

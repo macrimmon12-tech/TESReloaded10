@@ -178,13 +178,6 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	AppendDefine("FORWARD_SHADOWS",
 		TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows") ? "1" : "0");
 
-	// Depth-based object/terrain blending. Compile time, because it costs an extra sampler, a
-	// VPOS input and -- decisively -- makes every object shader declare TESR_DepthBuffer, which
-	// is what triggers the per-bind RESZ depth resolve in SetCT below. A build that does not
-	// want the feature should not pay for that resolve, so it cannot be a runtime branch.
-	AppendDefine("TERRAIN_BLEND",
-		TheSettingManager->GetSettingI("Shaders.TerrainBlend.Main", "Enabled") ? "1" : "0");
-
 	// Which skylighting model is compiled in. 0 = spherical harmonic irradiance, 1 = the older
 	// single directional sample. Compile time rather than a runtime branch: ps_3_0 flattens
 	// branches like this, so a runtime switch would make every lit pixel pay for BOTH paths.
