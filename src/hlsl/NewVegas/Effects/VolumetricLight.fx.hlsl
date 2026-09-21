@@ -19,6 +19,20 @@
 // never invert the composite blend. General atmospheric haze is VolumetricFog.fx.hlsl's job, not
 // this one's.
 
+// The bug that made this produce nothing for most of its development was a camera mismatch,
+// not anything in the scattering or the shadow sampling. RenderManager::SetupSceneCamera builds
+// the view matrices from *Pointers::Generic::CameraLocation but sets CameraPosition from
+// WorldSceneGraph->camera->m_worldTransform.pos. The march took its direction from toWorld(),
+// which is built on the first, and its origin from TESR_CameraPosition, which is the second, so
+// every marched world position carried the offset between them -- enough to fall outside the
+// 212-unit near cascade everywhere, so the shadow lookup returned lit almost always. See
+// GetRayOrigin below. Anything here that looks like it is compensating for missing occlusion
+// probably is, and should be re-derived rather than trusted.
+//
+// That offset is also nearly invisible to inspection: an offset position still yields a
+// coherent frac() grid, a correct depth image, and correct cascade radii. It was found by
+// dumping the lookup's inputs rather than reasoning about its output.
+
 float4 TESR_ReciprocalResolution;
 float4 TESR_SmoothedSunDir;
 float4 TESR_SunColor;
