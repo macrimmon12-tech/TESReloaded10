@@ -487,8 +487,20 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     AccumulateTap(uv + float2(-offset.x,  offset.y), centerDepth, sum, weightSum);
     AccumulateTap(uv + float2( offset.x,  offset.y), centerDepth, sum, weightSum);
 
-    // Guarded: on a thin feature every tap can land on a different surface and drop out.
-    float3 volumeLight = sum / max(weightSum, 0.0001f);
+    // When every tap is rejected -- a thin feature, or a strong depth discontinuity where all
+    // four neighbours sit on the far side of an edge -- dividing by the epsilon floor returns
+    // black, not a neutral result. That painted single-pixel black speckle along every
+    // silhouette in the frame, and because it rides on top of whatever the march produced it
+    // corrupted the diagnostic modes too: debug mode 9 outputs one flat colour with no uv term
+    // at all and still came back speckled, which is how it was found. Earlier readings of those
+    // specks as genuine occlusion were wrong; they were this.
+    //
+    // Falling back to the nearest single tap keeps the pixel's own value instead of inventing
+    // a black one. It is the right answer as well as a safe one: if no neighbour shares this
+    // pixel's depth, the unfiltered sample is exactly what should be used.
+    float3 volumeLight = weightSum < 0.0001f
+        ? tex2D(TESR_VolumetricLightBuffer, uv).rgb
+        : sum / weightSum;
 
     // Debug view: the march's own output with no scene under it, so what the effect actually
     // computes can be read directly instead of inferred from how it tints the frame. Blown-out
