@@ -341,7 +341,7 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     //   with crisp object silhouettes. Flat, banded or inverted means the depth buffer or farZ is
     //   wrong, and then every world position built from it is wrong too.
     [branch] if (debugMode > 4.5f && debugMode < 5.5f)
-        return float4((readDepth(uv) / farZ).xxx, 1.0f);
+        return float4(saturate(readDepth(uv) / accumDistance).xxx, 1.0f);
 
     // 6 WORLD POSITION. frac(pos / 512) as RGB: a world-aligned grid repeating every 512 units.
     //   Expect coloured banding that stays welded to surfaces as the camera moves, and stays put
@@ -377,8 +377,25 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // 10 DISTANCE from the surface point to the near cascade centre, over 2000. A smooth
     //   gradient means the centre is a real world position near the camera. Uniform white means
     //   it is far away or at the origin, which is what a zeroed constant looks like.
-    [branch] if (debugMode > 9.5f)
+    [branch] if (debugMode > 9.5f && debugMode < 10.5f)
         return float4(saturate(length((TESR_CameraPosition.xyz + cameraVector) - TESR_ShadowNearCenter.xyz) / 2000.0f).xxx, 1.0f);
+
+    // 11 CASCADE SELECTION AT A MARCH SAMPLE -- the midpoint of the ray, not the visible
+    //   surface. This is the test mode 7 should have been. Mode 7 and mode 10 both use the
+    //   uncapped surface position, and for a sky pixel that is toWorld * farZ, some 250000
+    //   units out and correctly outside every cascade. Their black and saturated results were
+    //   therefore consistent with the lookup working, and reading them as proof it never ran
+    //   was wrong. March samples are capped at accumDistance from the camera, so unlike the
+    //   surface they should land inside a cascade, and anything black here is a real failure.
+    //   red near, green middle, blue far, yellow lod, black none.
+    [branch] if (debugMode > 10.5f) {
+        float3 m = TESR_CameraPosition.xyz + rayDirection * (rayLength * 0.5f);
+        if (length(m - TESR_ShadowNearCenter.xyz)   < TESR_ShadowNearCenter.w)   return float4(1,0,0,1);
+        if (length(m - TESR_ShadowMiddleCenter.xyz) < TESR_ShadowMiddleCenter.w) return float4(0,1,0,1);
+        if (length(m - TESR_ShadowFarCenter.xyz)    < TESR_ShadowFarCenter.w)    return float4(0,0,1,1);
+        if (length(m - TESR_ShadowLodCenter.xyz)    < TESR_ShadowLodCenter.w)    return float4(1,1,0,1);
+        return float4(0,0,0,1);
+    }
 
     // 8 GATING CONSTANTS, as one flat colour. red TESR_ShadowFade.y (0 disables the lookup
     //   entirely and returns 1.0 before anything is sampled), green shadow mode over 2 so VSM,
