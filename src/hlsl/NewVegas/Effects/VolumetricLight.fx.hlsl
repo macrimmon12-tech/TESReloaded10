@@ -38,10 +38,11 @@ float4 TESR_SmoothedSunDir;
 float4 TESR_SunColor;
 float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
+float4 TESR_GameTime; // z: seconds since startup -- used only to advance the dither per frame
 float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
-float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
-float4 TESR_VolumetricLightData3; // x: strength, z: fog influence, w: anisotropy (y unused)
-float4 TESR_VolumetricLightData4; // x: debug view toggle, y: dither toggle (z, w unused)
+float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: reference path length / march range
+float4 TESR_VolumetricLightData3; // x: strength, y: extinction, z: fog influence, w: anisotropy
+float4 TESR_VolumetricLightData4; // x: debug view, y: dither toggle, z: height falloff, w: dither motion
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -235,6 +236,23 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const float fogInfluence = TESR_VolumetricLightData3.z;
+static const float extinction = TESR_VolumetricLightData3.y;
+static const float heightFalloff = TESR_VolumetricLightData4.z;
+
+// Geometric step growth: ds_i = ds_0 * r^i, so samples crowd near the camera and spread out with
+// distance. A uniform march has to spend the same resolution on air 4000 units away, where one
+// step covers a whole building, as on air 40 units away where it covers a fence post -- and the
+// near air is both where the medium is densest and where a shadow volume subtends the most
+// screen space. This is the same reasoning behind the exponential depth slices a froxel volume
+// uses, applied to a per-pixel march.
+//
+// The steps have to sum to rayLength, so ds_0 = rayLength * (r - 1) / (r^N - 1). At r = 1.03 and
+// N = 64, r^N = 6.632, giving 0.0053264 -- a first step of 0.53% of the ray against a uniform
+// 1.56%, and a last step of 3.4%. Written out rather than evaluated with pow() in a global
+// initialiser: this file has already killed the D3DX9 compiler once over a change that looked
+// just as harmless (see MARCH_NUM).
+static const float STEP_GROWTH = 1.03f;
+static const float STEP_FIRST_FRACTION = 0.0053264f;
 
 // Scattering medium density taken from the weather's own fog.
 //
@@ -255,7 +273,33 @@ float GetFogDensity() {
     return saturate(FOG_REFERENCE_SPAN / span);
 }
 
+// Medium density falls off exponentially with altitude, measured from the ray origin.
+//
+// A uniform medium scatters the same amount at any height, so a shaft is as bright 300 feet up
+// as it is at ground level and the frame reads as an even glow. Real haze is stratified -- dense
+// low, thin above -- and that gradient is what makes a shaft read as a beam punching through a
+// layer rather than as light smeared over the whole view.
+//
+// This is NOT the height-bounded fog volume the header describes removing. That one added light
+// of its own: a fully lit ray inside the volume glowed with no occluder anywhere in view, which
+// is why it read as ambient haze. Density here only scales a term already multiplied by
+// GetSunShadowAmount, so no occluder still means no light, and the effect stays what it is.
+//
+// Referenced to the ray origin rather than to an absolute world Z. Absolute height is the
+// physically right datum, but FNV has no single ground level -- every worldspace and DLC sits at
+// its own Z -- so a fixed reference would need retuning per cell and be wrong everywhere it had
+// not been. The camera is self-calibrating: stand on the ground and the air around you is at full
+// density, thinning above.
+//
+// max(dz, 0) rather than dz, so looking down from a clifftop does not amplify the density below
+// the camera without bound. Below the reference the medium simply stays at full density.
+float GetHeightDensity(float positionZ, float originZ) {
+    if (heightFalloff <= 0.0f) return 1.0f;
+    return exp(-max(positionZ - originZ, 0.0f) / heightFalloff);
+}
+
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
+static const bool ditherMotion = TESR_VolumetricLightData4.w > 0.5f;
 // 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface, 4 the lookup's intermediates, 5-8 the sampling inputs. Mode 2 divides out everything
 // layered on top of occlusion -- the phase function, the distance falloff, Strength and
 // TESR_SunColor -- and shows only the average of GetSunShadowAmount along each ray. It answers
@@ -266,17 +310,27 @@ static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
 // means the lookup returns a constant and no occluder is being detected.
 static const float debugMode = TESR_VolumetricLightData4.x;
 
-// Every uniform-wash screenshot so far shares one signature: the sky (correctly suppressed by
-// the distance falloff) looks fine while everything nearby is a flat, undifferentiated plateau
-// -- not literally inverted (that bug is already fixed by the saturate() below), just genuinely
-// hitting 1.0 and staying there regardless of shadow state, which erases whatever contrast the
-// shadow value would otherwise produce. TESR_SunColor carries real HDR magnitude in this engine
-// (this is the same PBR pipeline ObjectTemplate.hlsl's PBRSun/PBRDiffuse consume, not a display-
-// range [0,1] color), so a fully-lit ray was almost certainly clipping well before the shadow
-// term ever got a chance to pull it back down. Cut hard from the source shader's 3.0 so a
-// fully-lit ray has headroom below 1.0 for the shadow value to actually carve a visible gap out
-// of, and treat Strength (the user-facing setting) as the knob to raise from here, not this.
-static const float accumLightStrength = 0.3f;
+// Calibration constant, so that Strength = 1.0 lands near where it did before the transmittance
+// rewrite. It is small because two things above it got their scale corrected:
+//
+//   - CompositeLight used to run the march output through linearize() as though it were an
+//     sRGB-encoded colour. It is not: it is built from TESR_SunColor, which carries real linear
+//     HDR magnitude in this engine (the same PBR pipeline ObjectTemplate.hlsl's PBRSun consumes,
+//     not a display-range [0,1] colour). So the shaft was being gamma-decoded a second time,
+//     which crushed it by roughly 8x at the levels it actually ran at -- and, worse, made the
+//     response to Strength a 2.4-power curve, so doubling the setting near-quintupled the result.
+//     Removing that makes Strength linear, which is the only reason this number can be a
+//     calibration at all rather than a point on a curve.
+//
+//   - The old value of 0.3 was itself cut from the source shader's 3.0 to stop a fully lit ray
+//     clipping past 1.0, because above 1.0 the old composite blend inverted. That ceiling is
+//     gone: the composite now tracks transmittance separately, so in-scattered light is additive
+//     over the scene and a value above 1.0 is just a bright shaft, not a corrupted frame.
+//
+// linearize(0.15) is 0.0193 in sRGB, and the march's full-ray integral at typical density is
+// about 0.5, so 0.0193 / 0.5 rounds to this. Strength is still the knob to reach for, and it can
+// now safely go above 1.0.
+static const float accumLightStrength = 0.04f;
 
 struct VSOUT {
     float4 vertPos : POSITION;
@@ -364,7 +418,6 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // hanging in mid-air, untethered from any geometry.
     float accumDistance = max(TESR_VolumetricLightData1.w, 1.0f);
     float rayLength = isSky ? accumDistance : min(length(cameraVector), accumDistance);
-    float3 step = rayDirection * (rayLength / MARCH_NUM);
 
     // Blue noise, not the 4x4 ordered pattern this used to use.
     //
@@ -379,7 +432,17 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // blue noise mask has to be read to keep its spectral properties.
     float2 noiseUV = uv * (0.5f / TESR_ReciprocalResolution.xy) / 256.0f;
     float ditherOffset = ditherEnabled ? tex2D(TESR_NoiseSampler, noiseUV).r : 0.5f;
-    float3 currentPosition = rayOrigin + step * ditherOffset;
+
+    // Optionally advance the mask every frame so the sample pattern is not frozen in place. The
+    // multiplier puts the per-frame step near the golden ratio at 60fps (0.0167s * 37 = 0.62),
+    // which is the sequence that decorrelates fastest; any other framerate lands on a different
+    // irrational-ish step, which works just as well.
+    //
+    // Off by default, and this is a real trade rather than a free win: with no temporal filter
+    // to average the frames back together, animating the dither swaps a fixed pattern for
+    // shimmer. It pays off once frames are accumulated -- the fixed pattern is exactly what
+    // temporal accumulation cannot remove, because every frame reproduces it.
+    if (ditherMotion) ditherOffset = frac(ditherOffset + TESR_GameTime.z * 37.0f);
 
     float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
     float3 lightColor = TESR_VolumetricLightData1.xyz * TESR_SunColor.rgb;
@@ -387,29 +450,75 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // Weather fog scales the medium density. FogInfluence at 0 keeps a constant medium and the
     // previous behaviour exactly; at 1 the shafts track the fog the player can actually see.
     float3 scatterTerm = ComputeScattering(lightDotView, scatterCeiling).xxx * lightColor;
-    scatterTerm *= lerp(1.0f, GetFogDensity(), saturate(fogInfluence));
+    // Weather fog sets the baseline density of the medium; GetHeightDensity varies it per sample.
+    float baseDensity = lerp(1.0f, GetFogDensity(), saturate(fogInfluence));
+
+    // Both coefficients are per world unit, expressed against accumDistance as the reference
+    // path. So a full-length ray through undiminished medium accumulates unit scattering, and
+    // Extinction reads as "optical depth over that same reference path" -- 1.0 meaning the scene
+    // behind it is attenuated to 1/e. Without this normalisation the coefficients would be
+    // raw per-unit numbers in the 1e-4 range and every setting would need retuning by three
+    // orders of magnitude.
+    float invReference = 1.0f / accumDistance;
 
     float3 accumLight = 0.0f.xxx;
     float accumShadow = 0.0f;
+    // Transmittance of the medium between the camera and the current sample. Tracked separately
+    // from the in-scattered light, which is the whole point of the rewrite -- see CompositeLight.
+    float transmittance = 1.0f;
+
+    float t = 0.0f;
+    float ds = rayLength * STEP_FIRST_FRACTION;
 
     [loop]
     for (int i = 0; i < MARCH_NUM; i++) {
+        // Jittered within its own step, not just at the ray start. With uniform steps a single
+        // start offset was enough, because every step was the same length and the jitter carried
+        // down the ray. Steps now grow, so an offset applied once decays to nothing in relative
+        // terms by the far end and the step boundaries out there band again.
+        float3 currentPosition = rayOrigin + rayDirection * (t + ds * ditherOffset);
+
         // 1.0 where this step sees the sun, towards 0 behind an occluder.
         float Shadow = GetSunShadowAmount(currentPosition);
         accumShadow += Shadow;
 
-        // Per-step distance falloff, not a single value based on the ray's endpoint: a step near
-        // the camera should contribute the same whether the ray eventually hits a nearby wall or
-        // continues on to open sky far beyond it. Keying the falloff to the ray's endpoint
-        // distance instead (an earlier version of this) made the effect only ever visible
-        // painted onto whatever solid surface a given ray happened to hit -- since a sky-bound
-        // ray's endpoint was always the far cap and got crushed to ~0, while a nearby object's
-        // endpoint was always close and got the "full strength" falloff uniformly across its
-        // whole silhouette -- and never as a glow genuinely hanging in open air.
-        float distFalloff = 1.0f - saturate(distance(currentPosition, rayOrigin) / accumDistance);
+        // Beer-Lambert, integrated analytically over the step rather than sampled at a point.
+        //
+        // What stood here was a Riemann sum with a linear 1 - dist/accumDistance ramp standing in
+        // for extinction. Two problems. The ramp reaches a hard zero at accumDistance, so light
+        // stopped at a plane in open air instead of fading, which caps how far a shaft can reach no
+        // matter how the range is set. And a plain sum is only as accurate as its step count,
+        // which is why this needed 64 samples.
+        //
+        // The closed form below is exact for constant in-scattering across the step, so it holds
+        // its accuracy as the steps grow long at the far end of the march -- which the geometric
+        // growth above relies on. It is the standard form: over a step of length ds, the light
+        // reaching the camera from that step is S * (1 - exp(-sigmaT*ds)) / sigmaT, attenuated by
+        // the transmittance accumulated so far.
+        float density = baseDensity * GetHeightDensity(currentPosition.z, rayOrigin.z);
+        float sigmaS = density * invReference;
+        float sigmaT = max(density * extinction * invReference, 1e-8f);
 
-        accumLight += scatterTerm * Shadow * distFalloff;
-        currentPosition += step;
+        float opticalDepth = sigmaT * ds;
+        float stepTransmittance = exp(-opticalDepth);
+
+        // (1 - exp(-x)) / sigmaT is the integral, but it cancels catastrophically for small x:
+        // in a thin medium x can be 1e-6, and float32 computing 1.0 - 0.999999 keeps barely one
+        // significant digit, so the segment length comes back quantised and the march picks up
+        // noise that has nothing to do with the scene. Below the crossover the second-order
+        // series ds * (1 - x/2) is both exact to the precision available and cheaper than the
+        // divide. Extinction near zero is a setting anyone might reasonably pick -- it means
+        // "shafts that light the air without veiling what is behind them" -- so this path is
+        // normal operation, not a degenerate guard.
+        float segment = opticalDepth > 1e-3f
+            ? (1.0f - stepTransmittance) / sigmaT
+            : ds * (1.0f - 0.5f * opticalDepth);
+
+        accumLight += transmittance * scatterTerm * Shadow * sigmaS * segment;
+        transmittance *= stepTransmittance;
+
+        t += ds;
+        ds *= STEP_GROWTH;
     }
 
     // Modes 5-8: the INPUTS to the sampling, not its result. Everything above debugs the
@@ -535,23 +644,31 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // Shadow term on its own, before anything is layered over it -- see debugMode.
     [branch] if (debugMode > 1.5f) return float4((accumShadow / MARCH_NUM).xxx, 1.0f);
 
-    // Mean sample value, then back to a path integral: the physical quantity is the integral of
-    // scattered light along the ray, sum(f) * stepLength, and stepLength is rayLength/MARCH_NUM.
-    // Dividing by the sample count alone yields a mean with NO dependence on how far the ray
-    // travelled, so 20 units of air in front of a near wall accumulated exactly as much light as
-    // 4000 units of open sky -- every surface in the frame got the same wash regardless of how
-    // much air was really in front of it, which is what read as haze paint on nearby geometry
-    // rather than depth. Normalised by accumDistance so a full-length ray keeps the magnitude
-    // this was calibrated at and Strength stays meaningful.
-    accumLight *= rayLength / (accumDistance * MARCH_NUM);
+    // No path-length normalisation here any more. The loop's segment term carries real world
+    // units, so how far the ray travelled is already in the result -- which is what the old
+    // "mean sample value" form had to be corrected back to by hand.
     accumLight *= accumLightStrength * strength;
     accumLight += lerp(-NOISE_GRANULARITY, NOISE_GRANULARITY, rand(uv));
 
-    // Saturated here, once, at the source: CompositeLight's blend (color*(1-v)+v) only behaves
-    // as a blend for v in [0,1] -- above that it inverts and swamps the scene color entirely,
-    // which is exactly the "everything erased to a flat wash" failure an earlier, unclamped
-    // version of this produced in debris-dense areas with lots of small sky gaps.
-    return float4(saturate(accumLight), 1.0f);
+    // Clamped, but not to 1.0. The old saturate() was there because CompositeLight's blend
+    // inverted above 1.0 and swamped the scene -- the "everything erased to a flat wash" failure
+    // in debris-dense areas. The composite no longer has that failure mode, and this effect runs
+    // in the pre-tonemapping chain, where a value above 1.0 is a legitimate HDR highlight that
+    // the tonemapper is there to roll off. Clamping to 1.0 instead of letting it through is what
+    // makes a shaft look like paint rather than like light. The ceiling that remains is only to
+    // keep a pathological value out of the FP16 buffer.
+    //
+    // Alpha carries the medium's OPACITY, 1 - transmittance, rather than transmittance itself.
+    // The buffer is A16B16G16R16F, so it is a real float channel and costs nothing extra -- no
+    // second render target needed to get both quantities to the composite.
+    //
+    // Opacity rather than transmittance because of what an all-zero buffer then means. The
+    // composite reconstructs the scene as color * (1 - alpha) + rgb, so zeros read as "no medium,
+    // no light" and the frame passes through untouched. Storing transmittance directly would make
+    // the same zeros read as "the medium absorbs everything", and any frame that reached the
+    // composite without the march having written the buffer -- the first frame after a device
+    // reset recreates it, most obviously -- would come out black rather than merely un-shafted.
+    return float4(min(accumLight, 16.0f), 1.0f - transmittance);
 }
 
 // One tap of the depth-aware upsample. exp2 falls off fast enough that a tap on the far side
@@ -559,10 +676,13 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
 // continuous surface (even a steeply raked one) stays well inside the kernel. Relative to
 // centerDepth, not absolute: the same slope spans a far larger absolute depth range at 4000
 // units than at 40, and an absolute tolerance would either bleed up close or over-reject far off.
-void AccumulateTap(float2 tapUV, float centerDepth, inout float3 sum, inout float weightSum) {
+// Weights all four channels together: transmittance rides in alpha and has to be reconstructed
+// against the same depth test as the colour, or a silhouette pixel takes its in-scattered light
+// from one side of the edge and its attenuation from the other.
+void AccumulateTap(float2 tapUV, float centerDepth, inout float4 sum, inout float weightSum) {
     float tapDepth = readDepth(tapUV);
     float weight = exp2(-32.0f * abs(tapDepth - centerDepth) / max(centerDepth, 1.0f));
-    sum += tex2D(TESR_VolumetricLightBuffer, tapUV).rgb * weight;
+    sum += tex2D(TESR_VolumetricLightBuffer, tapUV) * weight;
     weightSum += weight;
 }
 
@@ -584,7 +704,7 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     float2 offset = TESR_ReciprocalResolution.xy;
     float centerDepth = readDepth(uv);
 
-    float3 sum = 0.0f.xxx;
+    float4 sum = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float weightSum = 0.0f;
     AccumulateTap(uv + float2(-offset.x, -offset.y), centerDepth, sum, weightSum);
     AccumulateTap(uv + float2( offset.x, -offset.y), centerDepth, sum, weightSum);
@@ -602,18 +722,38 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     // Falling back to the nearest single tap keeps the pixel's own value instead of inventing
     // a black one. It is the right answer as well as a safe one: if no neighbour shares this
     // pixel's depth, the unfiltered sample is exactly what should be used.
-    float3 volumeLight = weightSum < 0.0001f
-        ? tex2D(TESR_VolumetricLightBuffer, uv).rgb
+    float4 volumeLight = weightSum < 0.0001f
+        ? tex2D(TESR_VolumetricLightBuffer, uv)
         : sum / weightSum;
 
     // Debug view: the march's own output with no scene under it, so what the effect actually
     // computes can be read directly instead of inferred from how it tints the frame. Blown-out
     // highlights and a correctly shaped but over-bright shaft look identical once blended.
-    if (debugMode > 0.5f) return float4(volumeLight, 1.0f);
+    if (debugMode > 0.5f) return float4(volumeLight.rgb, 1.0f);
 
+    // The volumetric rendering equation: what reaches the eye is the scene behind the medium,
+    // attenuated by the medium's transmittance, plus the light the medium scattered into the ray.
+    //
+    //     result = color * T + L        (alpha holds 1 - T; see the march's return)
+    //
+    // What stood here was color * (1 - L) + L, a premultiplied "over" blend that makes
+    // transmittance a function of shaft BRIGHTNESS. Those are independent quantities: a sunbeam
+    // scatters a great deal of light toward you while absorbing almost none of what is behind it,
+    // because the air it runs through is thin. Tying them together meant a bright shaft had to
+    // veil the scene behind it in exact proportion to how bright it was, so the effect could
+    // never be light added to the frame -- only paint laid over it. Every clamp and ceiling that
+    // used to sit upstream of here existed to stop that veiling becoming total.
+    //
+    // T comes from the march's own extinction integral, so a thin medium passes the scene through
+    // essentially untouched however bright the shaft gets, and a genuinely thick one (heavy fog
+    // weather, high Extinction) attenuates it whether or not the sun is behind an occluder.
+    //
+    // No linearize() on the in-scattered term. It is built from TESR_SunColor, which is linear
+    // HDR in this engine, not an sRGB-encoded colour -- running it through the sRGB decode was
+    // gamma-decoding a value that had never been encoded. See accumLightStrength for what that
+    // cost and why removing it changes the calibration.
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
-    volumeLight = linearize(volumeLight);
-    float3 result = color * (1 - volumeLight) + volumeLight;
+    float3 result = color * (1.0f - volumeLight.a) + volumeLight.rgb;
     return delinearize(float4(result, 1.0f));
 }
 

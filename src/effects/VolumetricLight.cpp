@@ -9,14 +9,23 @@ void VolumetricLightEffect::UpdateSettings() {
 	Settings.DebugView = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "DebugView");
 	Settings.AccumDistance = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "AccumDistance");
 	Settings.FogInfluence = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "FogInfluence");
+	Settings.Extinction = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Extinction");
+	Settings.HeightFalloff = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "HeightFalloff");
+	Settings.DitherMotion = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "DitherMotion");
 
 	Settings.ScatterColor.x = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Coloring", "ScatterR");
 	Settings.ScatterColor.y = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Coloring", "ScatterG");
 	Settings.ScatterColor.z = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Coloring", "ScatterB");
 
 	Constants.Data1 = D3DXVECTOR4(Settings.ScatterColor.x, Settings.ScatterColor.y, Settings.ScatterColor.z, Settings.AccumDistance);
-	Constants.Data3 = D3DXVECTOR4(Settings.Strength, 0.0f, Settings.FogInfluence, Settings.Anisotropy);
-	Constants.Data4 = D3DXVECTOR4((float)Settings.DebugView, Settings.Dither ? 1.0f : 0.0f, 0.0f, 0.0f);
+	// Extinction floored above zero rather than at it: the shader divides by sigmaT to integrate
+	// each step analytically. It carries its own epsilon for that, but keeping a real value here
+	// means the medium always has some attenuation, which is what makes transmittance meaningful.
+	Constants.Data3 = D3DXVECTOR4(Settings.Strength, max(Settings.Extinction, 0.001f), Settings.FogInfluence, Settings.Anisotropy);
+	// HeightFalloff passes through unclamped: 0 is a real setting, meaning a uniform medium with
+	// no altitude gradient, and the shader tests for it explicitly.
+	Constants.Data4 = D3DXVECTOR4((float)Settings.DebugView, Settings.Dither ? 1.0f : 0.0f,
+		max(Settings.HeightFalloff, 0.0f), Settings.DitherMotion ? 1.0f : 0.0f);
 }
 
 void VolumetricLightEffect::RegisterConstants() {
