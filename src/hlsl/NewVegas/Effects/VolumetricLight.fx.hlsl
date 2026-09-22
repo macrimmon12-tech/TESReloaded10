@@ -398,9 +398,12 @@ static const bool ditherMotion = TESR_VolumetricLightData4.w > 0.5f;
 // It is not a ceiling either way. Two things that used to cap it are gone:
 //
 //   - CompositeLight ran the march output through linearize() as though it were an sRGB-encoded
-//     colour. It is not -- it is linear light -- so the shaft was gamma-decoded a second time,
-//     which crushed it and made the response to Strength a 2.4-power curve. Strength is linear
-//     now, so it scales predictably however this is calibrated.
+//     colour. It is not -- it is linear light -- so the shaft was gamma-decoded a second time.
+//     That decode was removed and then asked for back, because the contrast it gives is wanted;
+//     it is now an explicit pow() at SHAFT_RESPONSE_POWER instead of a colour-space call that
+//     happened to have the right shape. Strength therefore responds on that power curve, not
+//     linearly, but it does so by the same factor at every brightness -- which the sRGB decode
+//     did not, its effective exponent drifting with the shaft's own magnitude.
 //
 //   - The old value was cut from the source shader's 3.0 to stop a fully lit ray clipping past
 //     1.0, because above 1.0 the old composite blend inverted. The composite tracks transmittance
@@ -408,6 +411,11 @@ static const bool ditherMotion = TESR_VolumetricLightData4.w > 0.5f;
 //     shaft. The buffers are FP16 all the way to the tonemapper, so it survives to be rolled off
 //     rather than clipped.
 static const float accumLightStrength = 0.04f;
+
+// Response curve applied to the shaft in the composite. Strength feeds the march linearly, so
+// the overall response is Strength^2.1. See the long note at the composite for what the curve
+// buys and why it is an explicit power rather than the sRGB decode it used to be.
+static const float SHAFT_RESPONSE_POWER = 2.1f;
 
 struct VSOUT {
     float4 vertPos : POSITION;
@@ -703,26 +711,32 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     // essentially untouched however bright the shaft gets, and a genuinely thick one (heavy fog
     // weather, high Extinction) attenuates it whether or not the sun is behind an occluder.
     //
-    // The in-scattered term goes through linearize() as well, which is DELIBERATE and is not what
-    // it looks like. It is not a colour-space conversion: the march output is built from
-    // TESR_SunColor, which is already linear HDR in this engine, so this is an sRGB decode applied
-    // to a value that was never sRGB-encoded. It was removed once for exactly that reason and then
-    // asked for back, because what it does to the picture is wanted.
+    // The in-scattered term is raised to SHAFT_RESPONSE_POWER, which is DELIBERATE and is not a
+    // colour-space conversion. The march output is built from TESR_SunColor, already linear HDR
+    // in this engine, so there is nothing here to decode. It is a response curve, and what it
+    // does to the picture is wanted:
     //
-    // What it actually is, is a 2.4-power response curve on the shaft:
-    //
-    //   - Strength stops being linear. Doubling it more than quadruples the result in the range
-    //     this runs at, so the slider has a soft bottom end and ramps hard.
+    //   - Strength stops being linear. Doubling it gives 2^2.1 = 4.3x, so the slider has a soft
+    //     bottom end and ramps hard.
     //   - Dim scattering is crushed harder than bright scattering, which pulls the general haze
     //     down relative to the bright shaft cores. That is the contrast the curve is wanted for.
-    //   - It also SATURATES the shaft, which is the part that is easy to miss. The decode is
+    //   - It also SATURATES the shaft, which is the part that is easy to miss. The curve is
     //     per-channel, so the ScatterR/G/B tint spreads: 1.0 / 0.9 / 0.78 comes out nearer
     //     1.0 / 0.80 / 0.59. Warm tints get warmer. Retune the tint, not this, if that goes too far.
     //
-    // At the calibrated settings it costs roughly 2x brightness overall, so Strength wants raising
-    // to compensate -- see accumLightStrength.
+    // This was linearize() -- the real sRGB EOTF -- and is now an explicit power, because sRGB is
+    // not a fixed power curve. Its local exponent is 2.4 * c / (c + 0.055), which runs from about
+    // 1.88 at c = 0.2 to 2.34 at c = 2.0, so the slider's feel changed with how bright the shaft
+    // already was. A constant 2.1 sits inside that range and behaves the same everywhere; at the
+    // values this runs at the two differ by under about 10% in magnitude, so this is a change of
+    // slope, not of exposure, and Strength does not need recalibrating for it.
+    //
+    // The one real difference is at the very bottom. sRGB has a linear segment below 0.04045
+    // (c / 12.92) that this does not, so the faintest haze is crushed harder than before -- which
+    // is the direction the curve is wanted in anyway.
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
-    float3 result = color * (1.0f - volumeLight.a) + linearize(volumeLight.rgb);
+    float3 shaft = pow(max(volumeLight.rgb, 0.0f), SHAFT_RESPONSE_POWER);
+    float3 result = color * (1.0f - volumeLight.a) + shaft;
     return delinearize(float4(result, 1.0f));
 }
 
