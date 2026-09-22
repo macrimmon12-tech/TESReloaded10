@@ -38,11 +38,24 @@ float4 TESR_SmoothedSunDir;
 float4 TESR_SunColor;
 float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
-float4 TESR_GameTime; // z: seconds since startup -- used only to advance the dither per frame
+float4 TESR_GameTime; // y: game hour (0-24), z: seconds since startup
 float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: reference path length / march range
 float4 TESR_VolumetricLightData3; // x: strength, y: extinction, z: fog influence, w: anisotropy
 float4 TESR_VolumetricLightData4; // x: unused, y: dither toggle, z: height falloff, w: dither motion
+
+float4 TESR_SunAmount; // x: daylight ramp, 0 through the night up to 1 at full day
+
+// VolumetricFog's own density constants. Read here so the two effects agree on how thick the
+// air is rather than each deriving its own answer -- see GetFogDensity below.
+//
+// Safe to read whether or not VolumetricFog is enabled. Density comes from that effect's
+// UpdateSettings, which ShaderManager runs for every effect regardless of Enabled; Weather
+// comes from its UpdateConstants, which normally runs only while enabled, so ShaderManager
+// calls it explicitly when VolumetricLight is on and VolumetricFog is off (the same pattern
+// already used there for PBR, Water and the shadow effects).
+float4 TESR_VolumetricFogDensity; // x: BaseDensity, y: WeatherImpact, z: MorningFogDip, w: SunriseSunsetBoost
+float4 TESR_VolumetricFogWeather; // x: WeatherFilterBlend (animated 0-1), y: isExterior, z: sky irradiance available, w: FogSaturation
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -271,23 +284,55 @@ static const float heightFalloff = TESR_VolumetricLightData4.z;
 static const float STEP_GROWTH = 1.05f;
 static const float STEP_FIRST_FRACTION = 0.0023037f;
 
-// Scattering medium density taken from the weather's own fog.
+// Scattering medium density, taken from VolumetricFog's density model.
 //
 // Scattered light is proportional to how much medium the ray crosses, so a constant density
 // gives identical shafts in clear desert air and in thick fog, which is wrong in both
 // directions: too strong when there is nothing to scatter off, too weak when the air is full
-// of it. The game already varies fog per weather, so that is the density to use rather than
-// inventing a second one that disagrees with the fog the player can see.
+// of it. Density has to come from somewhere real.
 //
-// TESR_FogData carries the near and far fog distances. Denser fog reaches full opacity over a
-// shorter span, so the span is an inverse density; FOG_REFERENCE_SPAN is the span treated as
-// fully dense. Typical clear weather runs tens of thousands of units and lands near 0.1, while
-// a fog weather closes to a few thousand and approaches 1.
-static const float FOG_REFERENCE_SPAN = 4000.0f;
+// It used to come from TESR_FogData alone: the span between the weather's near and far fog
+// distances is an inverse density, so a fixed reference span over it gave a 0-1 figure. That
+// was the best available reading of "how thick is the air" while the fog effect was a simple
+// distance blend. It is no longer, and that heuristic now disagrees with what the player sees:
+// VolumetricFog derives its own density from the same vanilla numbers PLUS a time-of-day curve,
+// a sunrise/sunset boost, an animated 3D noise field and a weather-driven blend, then paints the
+// frame with the result. A shaft whose thickness tracks the raw fog span while the visible haze
+// tracks all of that will contradict it -- brightest shafts at noon, when VolumetricFog's
+// MorningFogDip has just thinned the air they are supposedly scattering through.
+//
+// So this reproduces VolumetricFog's `strength` instead, from the same constants, with one
+// deliberate omission: the fbm3 noise field. Evaluating three octaves of value noise at every
+// one of MARCH_NUM samples is far outside the ps_3_0 instruction budget, and unlike the rest
+// of the terms it varies per sample rather than per frame, so it cannot be hoisted. The shafts
+// therefore track the fog's mean density and not its per-point pockets -- they thicken and thin
+// with weather and time of day, but do not shimmer as a noise cell drifts through them.
+//
+// FOG_REFERENCE_STRENGTH is the strength treated as a fully dense medium, the direct analogue
+// of the old reference span. At 1.0 the default exterior settings put clear weather near 0.1-0.2
+// and heavy fog near 0.3-0.5, so a FogInfluence tuned against the old span heuristic lands in
+// roughly the same place for clear weather -- the case worth preserving -- while the thick end
+// no longer saturates as hard as the span reciprocal did.
+static const float FOG_REFERENCE_STRENGTH = 1.0f;
+static const float FOG_PI = 3.14159265f;
 
 float GetFogDensity() {
-    float span = max(TESR_FogData.y - TESR_FogData.x, 1.0f);
-    return saturate(FOG_REFERENCE_SPAN / span);
+    // Vanilla weather term. Matches VolumetricFog's vanillaStrength exactly, including the
+    // (FogPower + 1) divisor: both fog distances are read as fractions of the far plane, so a
+    // weather that closes the fog in raises this and a clear one leaves it near zero.
+    float vanillaStrength = pows((saturate(1.0f - TESR_FogData.y / farZ) + saturate(1.0f - TESR_FogData.x / farZ)) * 0.5f, 2.0f) / (TESR_FogData.w + 1.0f);
+
+    // NVR-authored term. Same curve shapes as VolumetricFog, minus the noise.
+    float noonTrough = 1.0f - saturate(abs(TESR_GameTime.y - 12.0f) / 6.0f); // 0 at 6am/6pm, 1 at solar noon
+    float timeOfDayScale = lerp(1.0f, 1.0f - saturate(TESR_VolumetricFogDensity.z), noonTrough);
+    float sunsetBump = sin(saturate(TESR_SunAmount.x) * FOG_PI);
+    float weatherBlend = saturate(TESR_VolumetricFogWeather.x);
+
+    float nvrDensity = max(TESR_VolumetricFogDensity.x, 0.0f) * timeOfDayScale * weatherBlend
+                     + max(TESR_VolumetricFogDensity.w, 0.0f) * sunsetBump * weatherBlend;
+
+    float strength = max(nvrDensity + max(TESR_VolumetricFogDensity.y, 0.0f) * vanillaStrength, 0.0f);
+    return saturate(strength / FOG_REFERENCE_STRENGTH);
 }
 
 // Medium density falls off exponentially with altitude, measured from the ray origin.
@@ -460,10 +505,10 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
     float3 lightColor = TESR_VolumetricLightData1.xyz * TESR_SunColor.rgb;
     float scatterCeiling = isSky ? 1.0f : 0.5f;
-    // Weather fog scales the medium density. FogInfluence at 0 keeps a constant medium and the
-    // previous behaviour exactly; at 1 the shafts track the fog the player can actually see.
     float3 scatterTerm = ComputeScattering(lightDotView, scatterCeiling).xxx * lightColor;
-    // Weather fog sets the baseline density of the medium; GetHeightDensity varies it per sample.
+    // VolumetricFog's density sets the baseline thickness of the medium; GetHeightDensity varies
+    // it per sample. FogInfluence at 0 keeps a constant medium regardless of weather; at 1 the
+    // shafts thicken and thin with the same haze the player can see.
     float baseDensity = lerp(1.0f, GetFogDensity(), saturate(fogInfluence));
 
     // Both coefficients are per world unit, expressed against accumDistance as the reference

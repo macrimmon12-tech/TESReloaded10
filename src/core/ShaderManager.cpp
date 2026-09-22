@@ -497,6 +497,14 @@ void ShaderManager::UpdateConstants() {
 	if (Effects.Underwater->Enabled && !Shaders.Water->Enabled) Shaders.Water->UpdateConstants();
 	if (!Effects.ShadowsExteriors->Enabled && Effects.ShadowsInteriors->Enabled) Effects.ShadowsExteriors->UpdateConstants(); // Interior and exterior shadows share settings
 
+	// VolumetricLight's FogInfluence reads VolumetricFog's density model (see GetFogDensity in
+	// VolumetricLight.fx.hlsl) so the shafts and the visible haze agree on how thick the air is.
+	// The density constants come from UpdateSettings, which runs for every effect above whether
+	// or not it is enabled, but TESR_VolumetricFogWeather is published by UpdateConstants -- and
+	// a stale zero there reads as "weather has fully cleared the fog" and silently drops the
+	// NVR-authored half of the density. So keep it current when the light is on and the fog is off.
+	if (!Effects.VolumetricFog->Enabled && Effects.VolumetricLight->Enabled) Effects.VolumetricFog->UpdateConstants();
+
 	TheSettingManager->SettingsChanged = false;
 	timer.LogTime("ShaderManager::UpdateConstants");
 }
