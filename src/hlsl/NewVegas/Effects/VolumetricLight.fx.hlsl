@@ -41,7 +41,7 @@ float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 float4 TESR_GameTime; // y: game hour (0-24), z: seconds since startup
 float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: reference path length / march range
-float4 TESR_VolumetricLightData3; // x: strength, y: extinction, z: fog influence, w: anisotropy
+float4 TESR_VolumetricLightData3; // x: strength, y: unused, z: fog influence, w: anisotropy
 float4 TESR_VolumetricLightData4; // x: unused, y: dither toggle, z: height falloff, w: dither motion
 
 float4 TESR_SunAmount; // x: daylight ramp, 0 through the night up to 1 at full day
@@ -55,6 +55,7 @@ float4 TESR_SunAmount; // x: daylight ramp, 0 through the night up to 1 at full 
 // calls it explicitly when VolumetricLight is on and VolumetricFog is off (the same pattern
 // already used there for PBR, Water and the shadow effects).
 float4 TESR_VolumetricFogDensity; // x: BaseDensity, y: WeatherImpact, z: MorningFogDip, w: SunriseSunsetBoost
+float4 TESR_VolumetricFogShape;   // z: Extinction (raw setting; fog scales it by 0.1 internally)
 float4 TESR_VolumetricFogWeather; // x: WeatherFilterBlend (animated 0-1), y: isExterior, z: sky irradiance available, w: FogSaturation
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
@@ -249,7 +250,25 @@ static const float NOISE_GRANULARITY = 0.5 / 255.0;
 static const float strength = TESR_VolumetricLightData3.x;
 static const float anisotropy = TESR_VolumetricLightData3.w;
 static const float fogInfluence = TESR_VolumetricLightData3.z;
-static const float extinction = TESR_VolumetricLightData3.y;
+// Extinction is VolumetricFog's setting, not a second one of this effect's own.
+//
+// Both effects attenuate the scene behind them and there is only one atmosphere, so two
+// independent numbers could only ever disagree. They are not interchangeable as written,
+// though: fog removes strength * 1e-6 * distance * Extinction of the scene, growing linearly
+// all the way to the far plane, while this effect expresses extinction as optical depth over
+// one AccumDistance and stops there. Over the 6000 units this marches, fog's default settings
+// remove well under one percent -- so simply reading fog's number raw would switch this
+// effect's attenuation off rather than unify it.
+//
+// GROUND_LAYER_SCALE is the conversion, and it has a physical reading: the low haze this
+// effect marches through (stratified by HeightFalloff, which fog's own height term does not
+// meaningfully do at its defaults) is denser than the long-range average fog integrates over
+// the whole view. 1/12 puts fog's default Extinction of 3.0 at the 0.25 this effect was tuned
+// to, so the look is unchanged and one knob now moves both: thicker distance haze comes with
+// a thicker medium for the beams to sit in, and setting fog's Extinction to 0 makes the shafts
+// purely additive.
+static const float GROUND_LAYER_SCALE = 1.0f / 12.0f;
+static const float extinction = max(TESR_VolumetricFogShape.z, 0.001f) * GROUND_LAYER_SCALE;
 static const float heightFalloff = TESR_VolumetricLightData4.z;
 
 // Geometric step growth: ds_i = ds_0 * r^i, so samples crowd near the camera and spread out with
