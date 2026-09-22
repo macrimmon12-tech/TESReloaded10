@@ -86,7 +86,7 @@ static const float BlurStrength = max(0, TESR_GodRaysEnhanced.z);
 static const float GlareStrength = max(0, TESR_GodRaysEnhanced.w);
 
 // Volumetric technique tuning -- see VolumetricRaymarch/VolumetricCombine below.
-static const int VolumetricSteps = clamp(int(TESR_GodRaysVolumetric1.x), 1, 32); // capped to match [unroll(32)]
+static const int VolumetricSteps = clamp(int(TESR_GodRaysVolumetric1.x), 1, 32); // sane upper bound on a dynamic [loop] trip count, not an unroll limit
 static const float VolumetricMaxDistance = max(1, TESR_GodRaysVolumetric1.y);
 static const float VolumetricHeightCutoff = TESR_GodRaysVolumetric1.z;
 static const float VolumetricLayerThickness = max(1, TESR_GodRaysVolumetric1.w);
@@ -463,7 +463,12 @@ float4 VolumetricRaymarch(VSOUT IN) : COLOR0 {
 
 	float accumLight = 0;
 	float nearWeight = 1.0;
-	[unroll(32)]
+	// A real dynamic loop, not [unroll]: unrolling duplicated this loop's body -- two inlined
+	// GetFogShadowValue calls, each with its own VSM/EVSM2/EVSM4 branch and float literals -- once
+	// per step, and THAT (not the cascade count) is what was actually blowing the ps_3_0 224
+	// constant-register budget (X4507). FlashlightBeam.fx.hlsl's own shadow/cookie raymarch already
+	// uses [loop] for the same reason at a similar step count.
+	[loop]
 	for (int i = 0; i < VolumetricSteps; i++) {
 		float t = t0 + (i + ditherOffset) * stepDist;
 		float3 stepPos = rayStart + rayDir * t;
