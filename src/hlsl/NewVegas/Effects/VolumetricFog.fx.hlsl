@@ -231,7 +231,25 @@ float getHeightFog(float distance, float falloff, float3 worldPos, float heightO
 		fog += exp(-falloff * pos.z) * stepDist;
 	}
 
-	return fog * (length(eyeVector) / distance); // apply distance modifiers from weather/settings
+	// distance here is fogDepth, the caller's vanilla-weather-warped pseudo-distance (raised to
+	// FogPower, not the real one) -- everywhere else in this shader (getFogFlat, vanillaStrength)
+	// extinction is built to grow with THAT warped value, not with true world distance. fog above
+	// is the raw height-weighted path integral, which scales with the REAL distance traveled
+	// (length(eyeVector)), so converting it to the same convention means shrinking it by
+	// distance/length(eyeVector), not growing it by the inverse. The previous orientation divided
+	// by fogDepth instead of multiplying by it: when FogPower > 1, fogDepth shrinks much faster
+	// than real distance as the camera gets close (fogDepth/trueDistance = normalizedDepth^(FogPower-1)
+	// -> 0), so dividing by it blew up toward infinity right next to the camera -- a solid white
+	// fog wall -- instead of tapering off the way the flat/vanilla path already does.
+	//
+	// Flipping it only relocates the same instability to FogPower < 1 weathers, where this ratio
+	// is now the one that grows unbounded as eyeVector -> 0 (and is a literal 0/0 exactly at the
+	// camera). saturate() caps it at 1 -- the ratio's own value at the far clip plane, where it's
+	// always exactly 1 regardless of FogPower -- so the height term can never be rescaled to more
+	// than its raw, already-well-behaved (tapers to 0 at the camera on its own) magnitude, on any
+	// weather's FogPower.
+	float distanceModifier = saturate(distance / max(length(eyeVector), 0.0001));
+	return fog * distanceModifier;
 }
 
 // Raw extinction/inscattering terms, not yet composited onto the scene -- MinDensityFloor (see the
