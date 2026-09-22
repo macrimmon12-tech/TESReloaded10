@@ -21,15 +21,17 @@ void CrepuscularRaysEffect::UpdateSettings() {
 }
 
 void CrepuscularRaysEffect::RegisterConstants() {
-	TheShaderManager->RegisterConstant("TESR_CrepuscularRaysTint", &Constants.Tint);
-	TheShaderManager->RegisterConstant("TESR_CrepuscularRaysData", &Constants.Data);
-	TheShaderManager->RegisterConstant("TESR_CrepuscularRaysDebug", &Constants.Debug);
+	// Names match CrepuscularRays.fx.hlsl verbatim (see CrepuscularRaysStruct's own comment).
+	TheShaderManager->RegisterConstant("TESR_VolumetricLightData1", &Constants.Tint);
+	TheShaderManager->RegisterConstant("TESR_VolumetricLightData3", &Constants.Data);
+	TheShaderManager->RegisterConstant("TESR_VolumetricLightData4", &Constants.Debug);
 }
 
 void CrepuscularRaysEffect::RegisterTextures() {
 	// Half resolution: the march is the expensive part (64 shadow-atlas samples per pixel) and
-	// the shaft has no fine detail the depth-aware composite upsample can't recover.
-	TheTextureManager->InitTexture("TESR_CrepuscularRaysBuffer", &Textures.MarchTexture, &Textures.MarchSurface,
+	// the shaft has no fine detail the depth-aware composite upsample can't recover. Texture name
+	// matches CrepuscularRays.fx.hlsl's own TESR_VolumetricLightBuffer sampler declaration verbatim.
+	TheTextureManager->InitTexture("TESR_VolumetricLightBuffer", &Textures.MarchTexture, &Textures.MarchSurface,
 		TheRenderManager->width / 2, TheRenderManager->height / 2, D3DFMT_A16B16G16R16F);
 }
 
