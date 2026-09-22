@@ -97,6 +97,8 @@ void VolumetricFogEffect::UpdateSettings(){
 		// shared with ShadowsExterior's own moon-phase shadow fade -- keeps fog's night-ambient
 		// ceiling consistent with the shadow system's, rather than a second, disconnected knob.
 		nightMinDarkness = 1.0f - TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "NightMinDarkness");
+
+		Constants.Global.w = TheSettingManager->GetSettingF(SettingCategory, "MinDensityFloor");
 	}
 	else {
 		// these settings don't do anything in interiors: no sun, no horizon, no distant view
@@ -111,7 +113,14 @@ void VolumetricFogEffect::UpdateSettings(){
 		Constants.Distant = D3DXVECTOR4(0, 0, 0, 0);
 
 		Constants.Global.y = 0.0f;
+		Constants.Global.w = 0.0f;
 	}
+
+	// Own section (not Main/Interiors-switched via SettingCategory), so it gets its own settings-UI
+	// tab instead of crowding Main. Harmless to read unconditionally for interiors too -- the shader
+	// gates its actual effect on isExterior the same way it already does for MorningFogDip's
+	// timeOfDayScale, so it has no effect there regardless of what's read here.
+	Constants.Night.x = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "DensityScale");
 }
 
 void VolumetricFogEffect::RegisterConstants(){
@@ -124,6 +133,7 @@ void VolumetricFogEffect::RegisterConstants(){
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogAerialTint", &Constants.AerialTintColor);
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogDistant", &Constants.Distant);
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogGlobal", &Constants.Global);
+	TheShaderManager->RegisterConstant("TESR_VolumetricFogNight", &Constants.Night);
 }
 
 

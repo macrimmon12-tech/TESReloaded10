@@ -47,7 +47,8 @@ float4 TESR_VolumetricFogWeather;    // x: WeatherFilterBlend (animated 0-1), y:
 float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NightAmbientStrength, z: MoonVisibility
+float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NightAmbientStrength, z: MoonVisibility, w: MinDensityFloor
+float4 TESR_VolumetricFogNight;      // x: DensityScale (own settings-UI section/tab, not Main/Interiors)
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -68,6 +69,13 @@ static const float FogAmount = max(0, TESR_VolumetricFogGlobal.x);
 static const float NightAmbientStrength = max(0, TESR_VolumetricFogGlobal.y);
 // Computed in C++ (VolumetricFog.cpp), mirrors ShadowsExterior's own moon-phase shadow-fade curve.
 static const float MoonVisibility = saturate(TESR_VolumetricFogGlobal.z);
+// Height-agnostic floor on density -- see MinDensityFloor's use near the height/flat fog blend
+// below for why this exists (a single exponential height falloff can't be tuned to read as rich
+// ground fog in low-lying terrain AND still have any presence well above that reference).
+static const float MinDensityFloor = saturate(TESR_VolumetricFogGlobal.w);
+// Multiplier on nvrDensity specifically at night, faded in via (1-isDayTime) the same way
+// NightAmbientStrength is -- see timeOfDayScale below. 1.0 is a no-op (identical to today).
+static const float NightDensityScale = max(0, TESR_VolumetricFogNight.x);
 
 static const float BaseDensity = max(0, TESR_VolumetricFogDensity.x);
 static const float WeatherImpact = max(0, TESR_VolumetricFogDensity.y);
@@ -209,25 +217,27 @@ float getHeightFog(float distance, float falloff, float3 worldPos, float heightO
 	return fog * (length(eyeVector) / distance); // apply distance modifiers from weather/settings
 }
 
-float3 mixHeightFog(float3 color, float3 fogColor, float3 extinctionColor, float3 inscatteringColor, float distance, float density, float falloff, float3 worldPos, float offset){
+// Raw extinction/inscattering terms, not yet composited onto the scene -- MinDensityFloor (see the
+// call site) needs to combine these with the flat/distance-only terms below via max() before any
+// compositing happens, since maxing two already-scene-composited colors together isn't the same as
+// fogging by the max of the two underlying densities.
+void getHeightFogTerms(float distance, float3 extinctionColor, float3 inscatteringColor, float density, float falloff, float3 worldPos, float offset, out float3 extColor, out float3 insColor){
 	float fog = density * 0.00001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset);
-	float3 extColor = fog * extinctionColor;
-	float3 insColor = fog * inscatteringColor;
-	return color * saturate(1 - extColor) + fogColor * saturate(insColor);
+	extColor = fog * extinctionColor;
+	insColor = fog * inscatteringColor;
 }
 
 // Flat, distance-only density -- no height term at all. This is the HeightInfluence=0 endpoint;
-// it is NOT the same as feeding falloff=0 into getHeightFog/mixHeightFog above, since that
+// it is NOT the same as feeding falloff=0 into getHeightFog/getHeightFogTerms above, since that
 // function's outer (length(eyeVector)/distance) normalization is built assuming the integral is
 // doing real work and doesn't collapse to a clean distance-only result at falloff=0.
 float3 getFogFlat(float distance, float3 density){
 	return 1 - exp(-distance * density * 0.0001);
 }
 
-float3 mixFogFlat(float3 color, float3 fogColor, float3 extinctionColor, float3 inscatteringColor, float distance, float density){
-	float3 extColor = getFogFlat(distance, density * extinctionColor);
-	float3 insColor = getFogFlat(distance, density * inscatteringColor);
-	return color * saturate(1 - extColor) + fogColor * saturate(insColor);
+void getFlatFogTerms(float distance, float3 extinctionColor, float3 inscatteringColor, float density, out float3 extColor, out float3 insColor){
+	extColor = getFogFlat(distance, density * extinctionColor);
+	insColor = getFogFlat(distance, density * inscatteringColor);
 }
 
 
@@ -371,6 +381,11 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float sunsetBump = sin(saturate(TESR_SunAmount.x) * PI) * isExterior;
 	float noonTrough = 1 - saturate(abs(TESR_GameTime.y - 12) / 6); // 0 at 6am/6pm, 1 at solar noon
 	float timeOfDayScale = lerp(1.0, lerp(1.0, 1.0 - MorningFogDip, noonTrough), isExterior);
+	// Same isExterior-gated shape as timeOfDayScale above (interiors get exactly 1.0, no dependence
+	// on isDayTime, since "night" has no consistent meaning for an interior cell), and the same
+	// (1-isDayTime) fade NightAmbientStrength already uses so the transition is smooth rather than
+	// a hard cutoff at dusk/dawn. 1.0 (the default) is a no-op, identical to today's behavior.
+	float nightDensityScale = lerp(1.0, lerp(1.0, NightDensityScale, 1 - isDayTime), isExterior);
 
 	float3 windOffset = float3(WindDirection * WindSpeed * TESR_GameTime.x * 0.002, 0);
 	float noiseVal = fbm3((worldPos + windOffset) / (1500 * NoiseScale));
@@ -383,7 +398,7 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// non-sky surfaces (sunlit terrain, snow), crushing the noise's animated look almost everywhere
 	// in daylight instead of just on the sky. isSkyDome has no such false positives.
 	float noiseSkyMask = 1 - isSkyDome;
-	float nvrDensity = BaseDensity * timeOfDayScale * lerp(1.0, noiseVal, NoiseStrength * noiseSkyMask);
+	float nvrDensity = BaseDensity * timeOfDayScale * nightDensityScale * lerp(1.0, noiseVal, NoiseStrength * noiseSkyMask);
 	nvrDensity = nvrDensity * WeatherFilterBlend + SunriseSunsetBoost * sunsetBump * WeatherFilterBlend;
 
 	float strength = max(0, nvrDensity + WeatherImpact * vanillaStrength);
@@ -450,10 +465,26 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// HeightInfluence=0 (interior default) gives uniform density regardless of MaxHeight, safe
 	// for a generic preset with no per-cell tuning. Per-cell presets can raise HeightInfluence
 	// alongside a hand-tuned MaxHeight for spaces where a real gradient is known to make sense.
-	float3 flatFogged = mixFogFlat(color.rgb, fogColorFinal.rgb, Extinction, Inscattering, fogDepth, strength);
+	float3 flatExt, flatIns, heightExt, heightIns;
+	getFlatFogTerms(fogDepth, Extinction, Inscattering, strength, flatExt, flatIns);
 	float falloffArg = 1.5 / (fogPower * HeightFalloff);
-	float3 heightFogged = mixHeightFog(color.rgb, fogColorFinal.rgb, Extinction, Inscattering, fogDepth, strength, falloffArg, worldPos, MaxHeight);
-	float3 fogged = lerp(flatFogged, heightFogged, HeightInfluence);
+	getHeightFogTerms(fogDepth, Extinction, Inscattering, strength, falloffArg, worldPos, MaxHeight, heightExt, heightIns);
+
+	float3 blendedExt = lerp(flatExt, heightExt, HeightInfluence);
+	float3 blendedIns = lerp(flatIns, heightIns, HeightInfluence);
+
+	// Height-agnostic floor: a single exponential height falloff can't be tuned to read as rich,
+	// pooling ground fog in low-lying terrain (Extinction/HeightFalloff/MaxHeight tuned for that)
+	// AND still have any presence on terrain well above that reference -- the same curve that makes
+	// low ground look convincing crushes density toward zero a few multiples of 1/HeightFalloff
+	// above it. max(), not another lerp: it only ever raises density where the height-shaped term
+	// has decayed below MinDensityFloor's fraction of the flat/distance-only term, so it guarantees
+	// a baseline everywhere without diluting the height curve's shape near the ground, where the
+	// height term is already higher than the floor and this is a no-op.
+	float3 finalExt = max(blendedExt, flatExt * MinDensityFloor);
+	float3 finalIns = max(blendedIns, flatIns * MinDensityFloor);
+
+	float3 fogged = color.rgb * saturate(1 - finalExt) + fogColorFinal.rgb * saturate(finalIns);
 	float4 finalColor = float4(lerp(color.rgb, fogged, skyMaskFactor), 1);
 
 	// ---- aerial perspective: mid-to-far distance tint on non-sky terrain ----

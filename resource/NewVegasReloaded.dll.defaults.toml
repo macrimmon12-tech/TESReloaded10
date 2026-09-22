@@ -955,6 +955,10 @@ DistantFogBlend = 0.3               # Blending power of the distant fog.
 DistantFogHeight = 0.3              # Height limit for the distant fog. If set to 0, uses the sky as a mask instead.
 EdgeAA = 0.4                        # Strength of the inverted distant-fog term that specifically feathers the terrain/sky silhouette edge, to hide aliasing there.
 NightAmbientStrength = 1.0          # Multiplier on the moon-phase-driven night ambient floor for fog color, so fog doesn't collapse toward black after dark (most weathers author near-black night sky colors with no moon/starlight term). Varies with the same lunar cycle as Shaders.ShadowsExteriors.Main's NightMinDarkness. 0 = disable, fog can go fully dark at night like before.
+MinDensityFloor = 0.0               # Guarantees at least this fraction of the flat/distance-only density everywhere, regardless of height -- a single height falloff tuned to look right in low-lying terrain (river valleys, lowlands) can crush to unnaturally clear air on terrain well above that reference (hills, mountains, plateaus elsewhere on the map). Raising this adds a height-agnostic baseline haze there without diluting the height-based falloff's own shape near the ground, where it's already denser than the floor. 0 = disabled, matches prior behavior exactly.
+
+[_Shaders.VolumetricFog.Night]
+DensityScale = 1.0                  # Multiplier on the NVR-authored density (BaseDensity and its noise/wind animation) specifically at night, fading in smoothly through dusk the same way NightAmbientStrength does. 1.0 = no change from daytime. Raise for moodier, thicker night fog; lower for clearer nights. Has no effect on the vanilla-weather-anchored portion of density (WeatherImpact) or in interiors.
 
 
 [_Shaders.VolumetricFog.Interiors]
