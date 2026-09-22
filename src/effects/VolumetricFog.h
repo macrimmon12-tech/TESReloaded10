@@ -23,7 +23,9 @@ public:
 		D3DXVECTOR4		Global;          // x: Amount, y: NightAmbientStrength, z: MoonVisibility, w: MinDensityFloor
 		// Its own section/settings-UI tab (Shaders.VolumetricFog.Night), separate from Main, so
 		// night-specific controls don't crowd the exterior tab as more of them get added.
-		D3DXVECTOR4		Night;           // x: DensityScale, y/z/w: unused, reserved for future night-specific controls
+		D3DXVECTOR4		Night;           // x: DensityScale, y: AmountScale, z: HeightFalloffScale, w: MaxHeightOffset
+		D3DXVECTOR4		NightScatter;    // x: NoiseStrengthScale, y: WindSpeedScale, z: ExtinctionScale, w: InscatteringScale
+		D3DXVECTOR4		NightTint;       // xyz: multiplicative night fog color tint, w: unused
 		Animator		WeatherFilterAnimator;
 	};
 	VolumetricFogStruct	Constants;

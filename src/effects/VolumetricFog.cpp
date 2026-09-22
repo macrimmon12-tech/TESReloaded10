@@ -121,6 +121,18 @@ void VolumetricFogEffect::UpdateSettings(){
 	// gates its actual effect on isExterior the same way it already does for MorningFogDip's
 	// timeOfDayScale, so it has no effect there regardless of what's read here.
 	Constants.Night.x = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "DensityScale");
+	Constants.Night.y = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "AmountScale");
+	Constants.Night.z = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "HeightFalloffScale");
+	Constants.Night.w = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "MaxHeightOffset");
+
+	Constants.NightScatter.x = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "NoiseStrengthScale");
+	Constants.NightScatter.y = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "WindSpeedScale");
+	Constants.NightScatter.z = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "ExtinctionScale");
+	Constants.NightScatter.w = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "InscatteringScale");
+
+	Constants.NightTint.x = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "TintR");
+	Constants.NightTint.y = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "TintG");
+	Constants.NightTint.z = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "TintB");
 }
 
 void VolumetricFogEffect::RegisterConstants(){
@@ -134,6 +146,8 @@ void VolumetricFogEffect::RegisterConstants(){
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogDistant", &Constants.Distant);
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogGlobal", &Constants.Global);
 	TheShaderManager->RegisterConstant("TESR_VolumetricFogNight", &Constants.Night);
+	TheShaderManager->RegisterConstant("TESR_VolumetricFogNightScatter", &Constants.NightScatter);
+	TheShaderManager->RegisterConstant("TESR_VolumetricFogNightTint", &Constants.NightTint);
 }
 
 

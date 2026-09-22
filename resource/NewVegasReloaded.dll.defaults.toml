@@ -959,6 +959,16 @@ MinDensityFloor = 0.0               # Guarantees at least this fraction of the f
 
 [_Shaders.VolumetricFog.Night]
 DensityScale = 1.0                  # Multiplier on the NVR-authored density (BaseDensity and its noise/wind animation) specifically at night, fading in smoothly through dusk the same way NightAmbientStrength does. 1.0 = no change from daytime. Raise for moodier, thicker night fog; lower for clearer nights. Has no effect on the vanilla-weather-anchored portion of density (WeatherImpact) or in interiors.
+AmountScale = 1.0                   # Multiplier on the final fog Amount (Main's) specifically at night, fading in the same way as DensityScale. 1.0 = no change. Use this for an overall night fog opacity push/pull independent of density shape.
+HeightFalloffScale = 1.0            # Multiplier on HeightFalloff specifically at night, fading in the same way as DensityScale. 1.0 = no change. Raise for fog that hugs the ground tighter at night; lower to let it spread higher.
+MaxHeightOffset = 0.0                # Additive offset (same thousands-of-units convenience scale as Main's MaxHeight) applied to the height-fog reference specifically at night, fading in the same way as DensityScale. 0.0 = no change. Raise to have fog appear to pool higher at night ("sea level" rising after dark); lower to sink it.
+NoiseStrengthScale = 1.0            # Multiplier on NoiseStrength specifically at night, fading in the same way as DensityScale. 1.0 = no change. Raise for patchier, more uneven night fog; lower for a flatter, more uniform night layer.
+WindSpeedScale = 1.0                # Multiplier on WindSpeed specifically at night, fading in the same way as DensityScale. 1.0 = no change. Lower for stiller, more settled-looking night fog; raise for faster night drift.
+ExtinctionScale = 1.0               # Multiplier on Extinction specifically at night, fading in the same way as DensityScale. 1.0 = no change. Raise to make night fog obscure more of what's behind it; lower to keep it thinner/more see-through.
+InscatteringScale = 1.0             # Multiplier on Inscattering specifically at night, fading in the same way as DensityScale. 1.0 = no change. Raise for brighter, more self-luminous-looking night fog; lower for darker, more light-absorbing fog.
+TintR = 1.0                         # Red channel of a multiplicative color tint applied to the fog color specifically at night, fading in the same way as DensityScale. 1.0/1.0/1.0 (with TintG/TintB) = no change. Lower to push night fog color away from white, e.g. toward blue/grey.
+TintG = 1.0                         # Green channel of the night fog color tint. See TintR.
+TintB = 1.0                         # Blue channel of the night fog color tint. See TintR.
 
 
 [_Shaders.VolumetricFog.Interiors]

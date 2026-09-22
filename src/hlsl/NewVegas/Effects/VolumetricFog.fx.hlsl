@@ -48,7 +48,11 @@ float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, 
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
 float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NightAmbientStrength, z: MoonVisibility, w: MinDensityFloor
-float4 TESR_VolumetricFogNight;      // x: DensityScale (own settings-UI section/tab, not Main/Interiors)
+// Own settings-UI section/tab (Shaders.VolumetricFog.Night), not Main/Interiors-switched, so these
+// don't crowd Main as more of them get added.
+float4 TESR_VolumetricFogNight;        // x: DensityScale, y: AmountScale, z: HeightFalloffScale, w: MaxHeightOffset
+float4 TESR_VolumetricFogNightScatter; // x: NoiseStrengthScale, y: WindSpeedScale, z: ExtinctionScale, w: InscatteringScale
+float4 TESR_VolumetricFogNightTint;    // xyz: multiplicative night fog color tint, w: unused
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_RenderedBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
@@ -73,9 +77,19 @@ static const float MoonVisibility = saturate(TESR_VolumetricFogGlobal.z);
 // below for why this exists (a single exponential height falloff can't be tuned to read as rich
 // ground fog in low-lying terrain AND still have any presence well above that reference).
 static const float MinDensityFloor = saturate(TESR_VolumetricFogGlobal.w);
-// Multiplier on nvrDensity specifically at night, faded in via (1-isDayTime) the same way
-// NightAmbientStrength is -- see timeOfDayScale below. 1.0 is a no-op (identical to today).
+// Every Night* constant below fades in the same way, via the shared nightFactor computed at the
+// top of VolumetricFog() (isExterior-gated, ramping through dusk via (1-isDayTime)) -- see there.
+// All default to a neutral no-op (1.0 for scales/tint, 0.0 for the additive height offset), so
+// none of this changes anything until a setting is actually moved off its default.
 static const float NightDensityScale = max(0, TESR_VolumetricFogNight.x);
+static const float NightAmountScale = max(0, TESR_VolumetricFogNight.y);
+static const float NightHeightFalloffScale = max(0, TESR_VolumetricFogNight.z);
+static const float NightMaxHeightOffset = TESR_VolumetricFogNight.w;
+static const float NightNoiseStrengthScale = max(0, TESR_VolumetricFogNightScatter.x);
+static const float NightWindSpeedScale = max(0, TESR_VolumetricFogNightScatter.y);
+static const float NightExtinctionScale = max(0, TESR_VolumetricFogNightScatter.z);
+static const float NightInscatteringScale = max(0, TESR_VolumetricFogNightScatter.w);
+static const float3 NightTint = max(0, TESR_VolumetricFogNightTint.xyz);
 
 static const float BaseDensity = max(0, TESR_VolumetricFogDensity.x);
 static const float WeatherImpact = max(0, TESR_VolumetricFogDensity.y);
@@ -353,6 +367,10 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float depth = readDepth(IN.UVCoord);
 	float isDayTime = smoothstep(0.4, 0.8, TESR_SunAmount.x);
 	float isDayTimeFog = smoothstep(0.1, 0.6, TESR_SunAmount.x);
+	// 0 for interiors (no consistent day/night concept) or full daylight; ramps toward 1 through
+	// dusk for exteriors. Shared by every Night* setting so they all fade in together, in step,
+	// rather than each re-deriving its own slightly-different version of the same curve.
+	float nightFactor = isExterior * (1 - isDayTime);
 
 	float3 eyeVector = toWorld(IN.UVCoord);
 	float3 eyeDirection = normalize(eyeVector);
@@ -381,14 +399,12 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float sunsetBump = sin(saturate(TESR_SunAmount.x) * PI) * isExterior;
 	float noonTrough = 1 - saturate(abs(TESR_GameTime.y - 12) / 6); // 0 at 6am/6pm, 1 at solar noon
 	float timeOfDayScale = lerp(1.0, lerp(1.0, 1.0 - MorningFogDip, noonTrough), isExterior);
-	// Same isExterior-gated shape as timeOfDayScale above (interiors get exactly 1.0, no dependence
-	// on isDayTime, since "night" has no consistent meaning for an interior cell), and the same
-	// (1-isDayTime) fade NightAmbientStrength already uses so the transition is smooth rather than
-	// a hard cutoff at dusk/dawn. 1.0 (the default) is a no-op, identical to today's behavior.
-	float nightDensityScale = lerp(1.0, lerp(1.0, NightDensityScale, 1 - isDayTime), isExterior);
+	float nightDensityScale = lerp(1.0, NightDensityScale, nightFactor);
 
-	float3 windOffset = float3(WindDirection * WindSpeed * TESR_GameTime.x * 0.002, 0);
+	float nightWindSpeed = WindSpeed * lerp(1.0, NightWindSpeedScale, nightFactor);
+	float3 windOffset = float3(WindDirection * nightWindSpeed * TESR_GameTime.x * 0.002, 0);
 	float noiseVal = fbm3((worldPos + windOffset) / (1500 * NoiseScale));
+	float nightNoiseStrength = NoiseStrength * lerp(1.0, NightNoiseStrengthScale, nightFactor);
 
 	// Zero the noise's contribution to density on true sky pixels via isSkyDome (a hard depth
 	// test, not brightness-based) -- strength still feeds the exterior sun-scattering term even
@@ -398,7 +414,7 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// non-sky surfaces (sunlit terrain, snow), crushing the noise's animated look almost everywhere
 	// in daylight instead of just on the sky. isSkyDome has no such false positives.
 	float noiseSkyMask = 1 - isSkyDome;
-	float nvrDensity = BaseDensity * timeOfDayScale * nightDensityScale * lerp(1.0, noiseVal, NoiseStrength * noiseSkyMask);
+	float nvrDensity = BaseDensity * timeOfDayScale * nightDensityScale * lerp(1.0, noiseVal, nightNoiseStrength * noiseSkyMask);
 	nvrDensity = nvrDensity * WeatherFilterBlend + SunriseSunsetBoost * sunsetBump * WeatherFilterBlend;
 
 	float strength = max(0, nvrDensity + WeatherImpact * vanillaStrength);
@@ -460,15 +476,24 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	float4 ambientSkyColor = float4(lerp(ambientColor, skyColor.rgb, saturate(WeatherImpact)), 1);
 
 	float4 fogColorFinal = fogColor(ambientSkyColor, pureFogColor, strength, FogSkyColorCoeff, sun, FogSaturation);
+	// Multiplicative recolor, same idea as aerialTint below -- fades in via nightFactor, so daytime
+	// color is completely unaffected and NightTint's default (1,1,1) is a no-op at any time.
+	fogColorFinal.rgb *= lerp(float3(1, 1, 1), NightTint, nightFactor);
+
 	// Blend between flat (distance-only, no height dependence) and height-integrated density.
 	// HeightInfluence=1 (exterior default) reduces to exactly the prior height-only behavior;
 	// HeightInfluence=0 (interior default) gives uniform density regardless of MaxHeight, safe
 	// for a generic preset with no per-cell tuning. Per-cell presets can raise HeightInfluence
 	// alongside a hand-tuned MaxHeight for spaces where a real gradient is known to make sense.
+	float nightExtinction = Extinction * lerp(1.0, NightExtinctionScale, nightFactor);
+	float nightInscattering = Inscattering * lerp(1.0, NightInscatteringScale, nightFactor);
+	float nightHeightFalloff = HeightFalloff * lerp(1.0, NightHeightFalloffScale, nightFactor);
+	float nightMaxHeight = MaxHeight + NightMaxHeightOffset * nightFactor;
+
 	float3 flatExt, flatIns, heightExt, heightIns;
-	getFlatFogTerms(fogDepth, Extinction, Inscattering, strength, flatExt, flatIns);
-	float falloffArg = 1.5 / (fogPower * HeightFalloff);
-	getHeightFogTerms(fogDepth, Extinction, Inscattering, strength, falloffArg, worldPos, MaxHeight, heightExt, heightIns);
+	getFlatFogTerms(fogDepth, nightExtinction, nightInscattering, strength, flatExt, flatIns);
+	float falloffArg = 1.5 / (fogPower * nightHeightFalloff);
+	getHeightFogTerms(fogDepth, nightExtinction, nightInscattering, strength, falloffArg, worldPos, nightMaxHeight, heightExt, heightIns);
 
 	float3 blendedExt = lerp(flatExt, heightExt, HeightInfluence);
 	float3 blendedIns = lerp(flatIns, heightIns, HeightInfluence);
@@ -519,7 +544,8 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// density effect -- it should keep working in rain/overcast just as much as on clear days.
 	finalColor.rgb = lerp(finalColor.rgb, skyColor.rgb, isSky * EdgeAA * isExterior);
 
-	finalColor = max(lerp(color, finalColor, FogAmount), 0.0f);
+	float nightAmount = FogAmount * lerp(1.0, NightAmountScale, nightFactor);
+	finalColor = max(lerp(color, finalColor, nightAmount), 0.0f);
 
 	return delinearize(finalColor);
 }
