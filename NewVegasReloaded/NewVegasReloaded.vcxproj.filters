@@ -91,9 +91,6 @@
     <ClInclude Include="..\src\effects\GodRays.h">
       <Filter>Effects</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\effects\CrepuscularRays.h">
-      <Filter>Effects</Filter>
-    </ClInclude>
     <ClInclude Include="..\src\effects\Grass.h">
       <Filter>Effects</Filter>
     </ClInclude>
@@ -370,9 +367,6 @@
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\GodRays.cpp">
-      <Filter>Effects</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\effects\CrepuscularRays.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\ImageAdjust.cpp">

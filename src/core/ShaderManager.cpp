@@ -58,7 +58,6 @@ void ShaderManager::Initialize() {
 	TheShaderManager->RegisterEffect<FlashlightEffect>(&TheShaderManager->Effects.Flashlight);
 	TheShaderManager->RegisterEffect<FlashlightBeamEffect>(&TheShaderManager->Effects.FlashlightBeam);
 	TheShaderManager->RegisterEffect<GodRaysEffect>(&TheShaderManager->Effects.GodRays);
-	TheShaderManager->RegisterEffect<CrepuscularRaysEffect>(&TheShaderManager->Effects.CrepuscularRays);
 	TheShaderManager->RegisterEffect<ImageAdjustEffect>(&TheShaderManager->Effects.ImageAdjust);
 	TheShaderManager->RegisterEffect<LensEffect>(&TheShaderManager->Effects.Lens);
 	TheShaderManager->RegisterEffect<LowHFEffect>(&TheShaderManager->Effects.LowHF);
@@ -829,18 +828,7 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	Effects.Specular->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.Underwater->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.VolumetricFog->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
-	// GodRays.Main.Quality picks one of two entirely separate effects, not a technique index into
-	// one file: 0 renders GodRays' own (now Classic-only) technique, 1 renders CrepuscularRays
-	// instead -- its March pass first, into its own dedicated half-res buffer (same pattern as
-	// FlashlightBeam's own march above), then its Composite pass at full resolution.
-	if (Effects.GodRays->quality == 0) {
-		Effects.GodRays->Render(Device, RenderTarget, RenderedSurface, 0, true, SourceSurface);
-	}
-	else if (Effects.CrepuscularRays->Enabled) {
-		RenderEffectToRT(Effects.CrepuscularRays->Textures.MarchSurface, Effects.CrepuscularRays, true);
-		Device->SetRenderTarget(0, RenderTarget);
-		Effects.CrepuscularRays->Render(Device, RenderTarget, RenderedSurface, 1, true, SourceSurface);
-	}
+	Effects.GodRays->Render(Device, RenderTarget, RenderedSurface, 0, true, SourceSurface);
 
 	// calculate average luma for use by shaders
 	if (avglumaRequired) {

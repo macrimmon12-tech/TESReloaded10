@@ -44,12 +44,12 @@ struct VSOUT {
 	float4 vertPos : POSITION;
 	float2 UVCoord : TEXCOORD0;
 };
-
+ 
 struct VSIN {
 	float4 vertPos : POSITION0;
 	float2 UVCoord : TEXCOORD0;
 };
-
+ 
 VSOUT FrameVS(VSIN IN) {
 	VSOUT OUT = (VSOUT)0.0f;
 	OUT.vertPos = IN.vertPos;
@@ -58,7 +58,7 @@ VSOUT FrameVS(VSIN IN) {
 }
 
 float4 SkyMask(VSOUT IN) : COLOR0 {
-
+	
 	float2 uv = IN.UVCoord / scale;
 	clip((uv <= 1) - 1);
 
@@ -78,7 +78,7 @@ float4 SkyMask(VSOUT IN) : COLOR0 {
 
 float4 LightMask(VSOUT IN) : COLOR0 {
 	// isolates the brightest parts of the sky to only use those for radial blur
-
+	
 	float2 uv = IN.UVCoord;
 	clip((uv <= scale) - 1);
 
@@ -142,7 +142,7 @@ float4 Combine(VSOUT IN) : COLOR0
 	float4 color = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
 	float2 uv = IN.UVCoord;
 	float3 eyeDir = normalize(reconstructPosition(uv));
-
+	
 	// calculate vector from pixel to sun to get the distance
 	float2 sunPos = projectPosition(TESR_ViewSpaceLightDir.xyz * farZ).xy;
 	float2 blurDirection = (sunPos.xy - uv) * float2(1.0f, raspect); // apply aspect ratio correction
@@ -175,38 +175,37 @@ float4 Combine(VSOUT IN) : COLOR0
 	color = delinearize(color);
 	return float4(color.rgb, 1);
 }
-
-
-technique Classic
+ 
+technique
 {
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 SkyMask();
+		PixelShader = compile ps_3_0 SkyMask(); 
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 LightMask();
+		PixelShader = compile ps_3_0 LightMask(); 
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 RadialBlur(stepLength);
+		PixelShader = compile ps_3_0 RadialBlur(stepLength); 
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 RadialBlur(stepLength * stepLength);
+		PixelShader = compile ps_3_0 RadialBlur(stepLength * stepLength); 
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 RadialBlur(stepLength * stepLength * stepLength);
+		PixelShader = compile ps_3_0 RadialBlur(stepLength * stepLength * stepLength); 
 	}
 
 	pass

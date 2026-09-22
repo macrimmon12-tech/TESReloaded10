@@ -10,7 +10,6 @@
 #include "Coloring.h"
 #include "LUT.h"
 #include "CombineDepth.h"
-#include "CrepuscularRays.h"
 #include "DepthOfField.h"
 #include "Exposure.h"
 #include "Debug.h"

@@ -334,6 +334,7 @@ float GetFogShadowVisibility(float4 positionWS, float3 normal) {
 	return 1.0f;
 }
 
+
 float4 VolumetricFog(VSOUT IN) : COLOR0
 {
 	float4 color = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));

@@ -9,8 +9,6 @@ void GodRaysEffect::UpdateSettings(){
 	dayMult = TheSettingManager->GetSettingF("Shaders.GodRays.Main", "DayMultiplier");
 	nightMult = TheSettingManager->GetSettingF("Shaders.GodRays.Main", "NightMultiplier");
 	sunGlareEnabled = TheSettingManager->GetSettingI("Shaders.GodRays.Main", "SunGlareEnabled");
-	// 0: Classic, 1: CrepuscularRays (a separate effect -- see CrepuscularRaysEffect).
-	quality = TheSettingManager->GetSettingI("Shaders.GodRays.Main", "Quality");
 
 	Constants.Ray.x = TheSettingManager->GetSettingF("Shaders.GodRays.Main", "RayIntensity");
 	Constants.Ray.y = TheSettingManager->GetSettingF("Shaders.GodRays.Main", "RayLength");
