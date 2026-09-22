@@ -46,7 +46,12 @@ extern "C" {
 
 			if (GetModuleHandle(L"VanillaPlusAO.dll")) {
 				TheShaderManager->Effects.AmbientOcclusion->bNVAOLoaded = true;
-			}			
+			}
+
+			// Vanilla Plus Skin detection lives in src/core/Hooks/GameCommon.cpp's
+			// InitializeRendererHook instead of here -- by the time kMessage_DeferredInit
+			// fires, the game has already created every SKIN20xx shader, so setting
+			// bVPSLoaded this late has no effect.
 
 			HMODULE hRTM = GetModuleHandle(L"RealTimeMenus.dll");
 			if (hRTM) {

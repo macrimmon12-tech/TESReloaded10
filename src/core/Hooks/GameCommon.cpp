@@ -6,6 +6,21 @@ NiDX9Renderer* __fastcall InitializeRendererHook(NiDX9Renderer* This, UInt32 edx
 	TheRenderManager = (RenderManager*)(*InitializeRenderer)(This);
 	TheRenderManager->Initialize();
 	InitializeManagers();
+
+	// Vanilla Plus Skin detection has to happen here, not in NVSE's kMessage_DeferredInit --
+	// the game creates every SKIN20xx shader (via the CreateVertexShader/CreatePixelShader
+	// hooks) as part of the same startup sequence this hook belongs to, well before
+	// DeferredInit ever fires. Checking there was always too late: bVPSLoaded would still be
+	// false by the time SkinShaders::Templates() got consulted, so every SKIN shader loaded
+	// from the old standalone/decompiled files regardless of whether VPS was installed.
+	if (GetModuleHandle(L"VanillaPlusSkin.dll")) {
+		TheShaderManager->Shaders.Skin->bVPSLoaded = true;
+		Logger::Log("Vanilla Plus Skin found, routing SKIN shaders through SkinVPSTemplate");
+	}
+	else {
+		Logger::Log("Vanilla Plus Skin not found");
+	}
+
 	return TheRenderManager;
 
 }
