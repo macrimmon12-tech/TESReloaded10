@@ -281,7 +281,13 @@ float4 BlurEnhanced(VSOUT IN) : COLOR0 {
 	clip((uv <= scale) - 1);
 
 	float2 sunPos = projectPosition(TESR_ViewSpaceLightDir.xyz * farZ).xy * scale;
-	float2 tangent = normalize(uv - sunPos).yx * float2(TESR_ReciprocalResolution.y, -TESR_ReciprocalResolution.x) * BlurStrength;
+	float2 radial = normalize(uv - sunPos);
+	// True perpendicular (-y, x) of radial, each component scaled by its own axis' texel size --
+	// the previous float2(Recip.y, -Recip.x) pairing had the axes crossed and the sign on the wrong
+	// term, which is neither a correct 90-degree rotation nor correctly aspect-scaled; at most
+	// on-screen angles it blurred close to radially instead of tangentially, compounding the
+	// existing radial accumulation into streaky garbage instead of smoothing it.
+	float2 tangent = float2(-radial.y * TESR_ReciprocalResolution.x, radial.x * TESR_ReciprocalResolution.y) * BlurStrength;
 
 	float4 col = tex2D(TESR_RenderedBuffer, uv);
 	col += 0.67f * tex2D(TESR_RenderedBuffer, uv + tangent);
@@ -318,7 +324,15 @@ float4 CombineEnhanced(VSOUT IN) : COLOR0 {
 	rays.rgb *= multiplier * rayTint * attenuation * saturate(1.0 - ori.rgb);
 
 	float4 color = ori + rays;
-	color.rgb = BlendSoftLight(color.rgb, rayTint * multiplier + 0.5f);
+
+	// BlendSoftLight assumes [0,1] inputs (sqrt(a) and the (1-b) term are only meaningful in that
+	// range); ori+rays is linear HDR and routinely exceeds 1 (bright sky/sun pixels alone, before
+	// rays even add anything), which was feeding the blend out-of-domain and producing broken/
+	// garbled output rather than a smooth graded highlight. Soft-light-shade only the [0,1] base and
+	// re-add whatever was above 1 afterward, so HDR highlights that should still bloom downstream
+	// aren't silently clipped away by the blend.
+	float3 hdrOverflow = max(0, color.rgb - 1.0);
+	color.rgb = BlendSoftLight(saturate(color.rgb), saturate(rayTint * multiplier + 0.5f)) + hdrOverflow;
 	color.rgb = delinearize(color.rgb);
 	return float4(color.rgb, 1.0f);
 }
@@ -503,19 +517,32 @@ float4 VolumetricCombine(VSOUT IN) : COLOR0 {
 	float4 scene = linearize(tex2D(TESR_SourceBuffer, uv));
 	float shaftLight = tex2D(TESR_RenderedBuffer, uv).r;
 
+	// Directional gate toward the sun, same term Classic/Enhanced both use for their own ray
+	// contribution -- without it, shaftLight (which is close to "fully lit" for most raymarched
+	// points, since GetFogShadowVisibility falls back to 1.0 outside the shadow cascades' radius)
+	// was being applied to every pixel regardless of view direction, not just ones looking toward
+	// the sun, which is what washed the whole screen white instead of showing localized shafts.
+	float3 eyeDir = normalize(reconstructPosition(uv));
+	float heightAttenuation = TESR_GodRaysData.w ? lerp(0.2, 4.0, pows(sunHeight, 4)) : 1.0;
+	float attenuation = pow(compress(shade(TESR_ViewSpaceLightDir.xyz, eyeDir)), 2.5) * heightAttenuation * (sunHeight < 1);
+
 	float3 sunColor = GetSunColor(shade(TESR_SunDirection.xyz, blue.xyz), 1, TESR_SunAmount.x, TESR_SunColor.rgb, TESR_SunsetColor.rgb);
-	float3 tintedShaft = shaftLight * sunColor;
-	float3 glareLight = ComputeGlare(uv);
+	float3 tintedShaft = shaftLight * sunColor * attenuation;
+	float3 glareLight = ComputeGlare(uv); // already self-limited to a tight cone around the sun disk
 
 	// Small output dither -- separate from VolumetricRaymarch's own per-pixel start-offset dither
 	// above, which addresses step banding, not render-target quantization banding in the final value.
 	float ditherNoise = (frac(sin(dot(uv, float2(12.9898, 78.233))) * 43758.5453) - 0.5) * (0.5 / 255.0);
 
-	float3 light = max(0, tintedShaft + glareLight + ditherNoise);
+	// Saturated here (unlike Oblivion Reloaded's own CombineLight, which leaves it unclamped) --
+	// OR's raymarch stays naturally bounded near the shaft without a separate directional gate, ours
+	// doesn't, so an unclamped light could still exceed 1 near the sun itself (HDR sunColor) and flip
+	// `scene*(1-light)` negative there, which is what showed up as the brightest pixels "inverting".
+	float3 light = saturate(tintedShaft + glareLight + ditherNoise);
 
 	// Screen/over composite, not additive: light partially replaces the scene rather than only
 	// adding to it, so it can't blow out highlights the way `color += light` can (matches Oblivion
-	// Reloaded's own CombineLight -- deliberately not saturating `light` first, same as that source).
+	// Reloaded's own CombineLight).
 	float3 color = scene.rgb * (1 - light) + light;
 	color = delinearize(color);
 	return float4(color, 1.0f);
