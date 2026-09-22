@@ -313,6 +313,7 @@ void ShaderManager::UpdateConstants() {
 	GameState.isUnderwater = Tes->sky->GetIsUnderWater();
 	GameState.isRainy = currentWeather?currentWeather->GetWeatherType() == TESWeather::WeatherType::kType_Rainy : false;
 	GameState.isSnow = currentWeather?currentWeather->GetWeatherType() == TESWeather::WeatherType::kType_Snow : false;
+	GameState.isCloudy = currentWeather?currentWeather->GetWeatherType() == TESWeather::WeatherType::kType_Cloudy : false;
 
 	TimeGlobals* GameTimeGlobals = TimeGlobals::Get();
 	float GameHour = fmod(GameTimeGlobals->GameHour->data, 24); // make sure the hours values are less than 24
