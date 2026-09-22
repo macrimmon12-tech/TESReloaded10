@@ -6,7 +6,6 @@ void VolumetricLightEffect::UpdateSettings() {
 	Settings.Strength = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Strength");
 	Settings.Anisotropy = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Anisotropy");
 	Settings.Dither = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "Dither");
-	Settings.DebugView = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "DebugView");
 	Settings.AccumDistance = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "AccumDistance");
 	Settings.FogInfluence = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "FogInfluence");
 	Settings.Extinction = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Extinction");
@@ -24,7 +23,8 @@ void VolumetricLightEffect::UpdateSettings() {
 	Constants.Data3 = D3DXVECTOR4(Settings.Strength, max(Settings.Extinction, 0.001f), Settings.FogInfluence, Settings.Anisotropy);
 	// HeightFalloff passes through unclamped: 0 is a real setting, meaning a uniform medium with
 	// no altitude gradient, and the shader tests for it explicitly.
-	Constants.Data4 = D3DXVECTOR4((float)Settings.DebugView, Settings.Dither ? 1.0f : 0.0f,
+	// x is free -- it carried the DebugView mode until the diagnostic views were removed.
+	Constants.Data4 = D3DXVECTOR4(0.0f, Settings.Dither ? 1.0f : 0.0f,
 		max(Settings.HeightFalloff, 0.0f), Settings.DitherMotion ? 1.0f : 0.0f);
 }
 

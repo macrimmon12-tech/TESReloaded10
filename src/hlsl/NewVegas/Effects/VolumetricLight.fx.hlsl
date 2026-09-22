@@ -42,7 +42,7 @@ float4 TESR_GameTime; // z: seconds since startup -- used only to advance the di
 float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: reference path length / march range
 float4 TESR_VolumetricLightData3; // x: strength, y: extinction, z: fog influence, w: anisotropy
-float4 TESR_VolumetricLightData4; // x: debug view, y: dither toggle, z: height falloff, w: dither motion
+float4 TESR_VolumetricLightData4; // x: unused, y: dither toggle, z: height falloff, w: dither motion
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -185,9 +185,9 @@ float GetSunShadowAmount(float3 positionWS) {
     // Cascade chosen by whether the point projects inside each map, nearest first -- not by
     // distance to TESR_Shadow*Center as the deferred path does.
     //
-    // The distance form was silently selecting nothing. Debug mode 7, which runs those four
-    // sphere tests directly and touches neither the atlas nor this function, came back solid
-    // black over an entire exterior frame: not one cascade claimed a single pixel. Since this
+    // The distance form was silently selecting nothing. A diagnostic that ran those four sphere
+    // tests directly, touching neither the atlas nor this function, came back solid black over an
+    // entire exterior frame: not one cascade claimed a single pixel. Since this
     // function starts at shadow = 1.0 and only assigns inside one of those tests, it was
     // returning fully lit without ever sampling the shadow map, in every scene, which is why
     // no amount of work on the sampling itself changed anything.
@@ -358,15 +358,6 @@ float ComputeOpticalDepth(float rayLength, float rayDirZ, float baseDensity, flo
 
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
 static const bool ditherMotion = TESR_VolumetricLightData4.w > 0.5f;
-// 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface, 4 the lookup's intermediates, 5-8 the sampling inputs. Mode 2 divides out everything
-// layered on top of occlusion -- the phase function, the distance falloff, Strength and
-// TESR_SunColor -- and shows only the average of GetSunShadowAmount along each ray. It answers
-// the one question the finished output cannot: whether the cascade lookup finds occluders at
-// all. A dim frame in mode 1 is ambiguous, because the sun's own colour is near zero shortly
-// after sunrise and scales the whole effect with it. Mode 2 depends on no tuning value, no sun
-// colour and no time of day: white is lit, black is occluded, and a flat featureless field
-// means the lookup returns a constant and no occluder is being detected.
-static const float debugMode = TESR_VolumetricLightData4.x;
 
 // Calibration constant. Left at 0.04, with Strength carrying the rest, so the usable setting is
 // around 55 rather than around 1.
@@ -525,7 +516,6 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float invReference = 1.0f / accumDistance;
 
     float3 accumLight = 0.0f.xxx;
-    float accumShadow = 0.0f;
     // Transmittance of the medium between the camera and the current sample. Tracked separately
     // from the in-scattered light, which is the whole point of the rewrite -- see CompositeLight.
     float transmittance = 1.0f;
@@ -543,7 +533,6 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
 
         // 1.0 where this step sees the sun, towards 0 behind an occluder.
         float Shadow = GetSunShadowAmount(currentPosition);
-        accumShadow += Shadow;
 
         // Beer-Lambert, integrated analytically over the step rather than sampled at a point.
         //
@@ -583,129 +572,6 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
         t += ds;
         ds *= STEP_GROWTH;
     }
-
-    // Modes 5-8: the INPUTS to the sampling, not its result. Everything above debugs the
-    // shadow lookup while assuming what is fed to it is correct. These check that assumption,
-    // because a wrong input produces a plausible-looking wrong output and cannot be told apart
-    // from a wrong lookup by staring at the finished image.
-    //
-    // 5 DEPTH. readDepth(uv) over farZ, greyscale. Expect a smooth near-black to white gradient
-    //   with crisp object silhouettes. Flat, banded or inverted means the depth buffer or farZ is
-    //   wrong, and then every world position built from it is wrong too.
-    [branch] if (debugMode > 4.5f && debugMode < 5.5f)
-        return float4(saturate(readDepth(uv) / accumDistance).xxx, 1.0f);
-
-    // 6 WORLD POSITION. frac(pos / 512) as RGB: a world-aligned grid repeating every 512 units.
-    //   Expect coloured banding that stays welded to surfaces as the camera moves, and stays put
-    //   when only the camera rotates. Swimming with rotation means the reconstruction is wrong.
-    [branch] if (debugMode > 5.5f && debugMode < 6.5f)
-        return float4(frac((rayOrigin + cameraVector) / 512.0f), 1.0f);
-
-    // 7 CASCADE SELECTION for the surface point. red near, green middle, blue far, yellow lod,
-    //   BLACK none. This is the one that matters most: GetSunShadowAmount starts at shadow = 1.0
-    //   and only assigns if a cascade claims the point, so anything black here is returning lit
-    //   without sampling the atlas at all. Expect concentric bands, red nearest the camera.
-    [branch] if (debugMode > 6.5f && debugMode < 7.5f) {
-        float3 p = rayOrigin + cameraVector;
-        if (length(p - TESR_ShadowNearCenter.xyz)   < TESR_ShadowNearCenter.w)   return float4(1,0,0,1);
-        if (length(p - TESR_ShadowMiddleCenter.xyz) < TESR_ShadowMiddleCenter.w) return float4(0,1,0,1);
-        if (length(p - TESR_ShadowFarCenter.xyz)    < TESR_ShadowFarCenter.w)    return float4(0,0,1,1);
-        if (length(p - TESR_ShadowLodCenter.xyz)    < TESR_ShadowLodCenter.w)    return float4(1,1,0,1);
-        return float4(0,0,0,1);
-    }
-
-    // 9 CASCADE RADII, as one flat colour: TESR_Shadow{Near,Middle,Far}Center.w over 250,
-    //   1000 and 3000. Mode 7 came back solid black, meaning not one of the four cascade tests
-    //   passed anywhere on screen -- and those tests read these constants directly, without
-    //   touching the atlas or GetSunShadowAmount. So either the radii are zero or the centres
-    //   are nowhere near the camera, and every theory about precision, slab bounds and atlas
-    //   format was downstream of a lookup that never ran. Black here means the constants are
-    //   arriving as zero, which is a binding failure rather than anything in the shader maths.
-    [branch] if (debugMode > 8.5f && debugMode < 9.5f)
-        return float4(saturate(TESR_ShadowNearCenter.w / 250.0f),
-                      saturate(TESR_ShadowMiddleCenter.w / 1000.0f),
-                      saturate(TESR_ShadowFarCenter.w / 3000.0f), 1.0f);
-
-    // 10 DISTANCE from the surface point to the near cascade centre, over 2000. A smooth
-    //   gradient means the centre is a real world position near the camera. Uniform white means
-    //   it is far away or at the origin, which is what a zeroed constant looks like.
-    [branch] if (debugMode > 9.5f && debugMode < 10.5f)
-        return float4(saturate(length((rayOrigin + cameraVector) - TESR_ShadowNearCenter.xyz) / 2000.0f).xxx, 1.0f);
-
-    // 11 CASCADE SELECTION AT A MARCH SAMPLE -- the midpoint of the ray, not the visible
-    //   surface. This is the test mode 7 should have been. Mode 7 and mode 10 both use the
-    //   uncapped surface position, and for a sky pixel that is toWorld * farZ, some 250000
-    //   units out and correctly outside every cascade. Their black and saturated results were
-    //   therefore consistent with the lookup working, and reading them as proof it never ran
-    //   was wrong. March samples are capped at accumDistance from the camera, so unlike the
-    //   surface they should land inside a cascade, and anything black here is a real failure.
-    //   red near, green middle, blue far, yellow lod, black none.
-    [branch] if (debugMode > 10.5f && debugMode < 11.5f) {
-        float3 m = rayOrigin + rayDirection * (rayLength * 0.5f);
-        if (length(m - TESR_ShadowNearCenter.xyz)   < TESR_ShadowNearCenter.w)   return float4(1,0,0,1);
-        if (length(m - TESR_ShadowMiddleCenter.xyz) < TESR_ShadowMiddleCenter.w) return float4(0,1,0,1);
-        if (length(m - TESR_ShadowFarCenter.xyz)    < TESR_ShadowFarCenter.w)    return float4(0,0,1,1);
-        if (length(m - TESR_ShadowLodCenter.xyz)    < TESR_ShadowLodCenter.w)    return float4(1,1,0,1);
-        return float4(0,0,0,1);
-    }
-
-    // 12 CAMERA SOURCE DISAGREEMENT, as a flat grey: the distance between TESR_CameraPosition
-    //   and the origin encoded in TESR_InvViewTransform, over 64 units. Black means the two
-    //   agree and this was never the fault; anything brighter is the offset that was being
-    //   applied to every world position the march built.
-    [branch] if (debugMode > 11.5f)
-        return float4(saturate(length(TESR_CameraPosition.xyz - GetRayOrigin()) / 64.0f).xxx, 1.0f);
-
-    // 8 GATING CONSTANTS, as one flat colour. red TESR_ShadowFade.y (0 disables the lookup
-    //   entirely and returns 1.0 before anything is sampled), green shadow mode over 2 so VSM,
-    //   EVSM2 and EVSM4 read as 0, 0.5 and 1, blue the format bit where 0 is the 16-bit atlas
-    //   whose clamped EVSM exponent costs the depth precision. Any red channel at zero means the
-    //   effect cannot produce shadow at all and nothing downstream is worth reading.
-    [branch] if (debugMode > 7.5f && debugMode < 8.5f)
-        return float4(TESR_ShadowFade.y, ShadowMode * 0.5f, ShadowFormatBits, 1.0f);
-
-    // Mode 4: the lookup's intermediates for the surface point, rather than its verdict.
-    // Mode 3 came back white at surface positions too -- the positions SunShadows passes and
-    // shadows correctly -- so the fault is not specific to air samples and reading the code has
-    // not found it. This shows where each sample actually lands and what it reads there:
-    //   RED, GREEN = the near cascade's light-space UV, scaled so the quadrant fills 0..1.
-    //                Expect a smooth gradient across the frame. Flat or pinned to an edge means
-    //                the transform is wrong and CLAMP is returning the atlas border everywhere.
-    //   BLUE       = the moment actually sampled there, scaled by the EVSM positive exponent so
-    //                it is visible. Bright blue means a cleared far texel, which reads as lit;
-    //                varying blue means real occluder depths are being read and the fault is in
-    //                the comparison rather than the addressing.
-    [branch] if (debugMode > 3.5f) {
-        float3 surfacePos = rayOrigin + cameraVector;
-        // The cascade the real lookup would select, not a hardcoded one. Pinning this to Near
-        // made the mode useless: Near spans ~212 units, so nearly every visible point projects
-        // outside it, saturate clamped to 0 or 1, and the result was flat colour-cube corners that
-        // looked like a broken transform while being entirely correct.
-        float4x4 sel = TESR_ShadowCameraToLightTransformLod;
-        if (length(surfacePos - TESR_ShadowNearCenter.xyz)   < TESR_ShadowNearCenter.w)   sel = TESR_ShadowCameraToLightTransformNear;
-        else if (length(surfacePos - TESR_ShadowMiddleCenter.xyz) < TESR_ShadowMiddleCenter.w) sel = TESR_ShadowCameraToLightTransformMiddle;
-        else if (length(surfacePos - TESR_ShadowFarCenter.xyz)    < TESR_ShadowFarCenter.w)    sel = TESR_ShadowCameraToLightTransformFar;
-        float4 lsc = ScreenCoordToTexCoord(mul(float4(surfacePos, 1.0f), sel));
-        float2 atlasUV = lsc.xy * 0.5f;
-        float moment = SampleShadowMoments(atlasUV).x;
-        return float4(saturate(lsc.x), saturate(lsc.y), saturate(moment / exp(5.54f)), 1.0f);
-    }
-
-    // Mode 3: the same lookup run at the VISIBLE SURFACE instead of the air samples --
-    // exactly the position SunShadows.fx.hlsl feeds it, which is known to shadow correctly.
-    // This is the A/B that says whether GetSunShadowAmount is broken outright or only for
-    // free-floating points. If mode 3 shows proper shadows and mode 2 does not, the lookup is
-    // sound and the fault is specific to air samples -- most likely their light-space depth
-    // falling outside the cascade's near/far range, which reads as a cleared (far) texel and so
-    // as lit. If mode 3 is white too, the lookup is wrong for every position and differs from
-    // SunShadows in some way the two can then be diffed over directly.
-    [branch] if (debugMode > 2.5f) {
-        float3 surfacePos = rayOrigin + cameraVector;
-        return float4(GetSunShadowAmount(surfacePos).xxx, 1.0f);
-    }
-
-    // Shadow term on its own, before anything is layered over it -- see debugMode.
-    [branch] if (debugMode > 1.5f) return float4((accumShadow / MARCH_NUM).xxx, 1.0f);
 
     // No path-length normalisation here any more. The loop's segment term carries real world
     // units, so how far the ray travelled is already in the result -- which is what the old
@@ -773,8 +639,8 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     // four neighbours sit on the far side of an edge -- dividing by the epsilon floor returns
     // black, not a neutral result. That painted single-pixel black speckle along every
     // silhouette in the frame, and because it rides on top of whatever the march produced it
-    // corrupted the diagnostic modes too: debug mode 9 outputs one flat colour with no uv term
-    // at all and still came back speckled, which is how it was found. Earlier readings of those
+    // corrupted the diagnostics too: a view that output one flat colour with no uv term at all
+    // still came back speckled, which is how it was found. Earlier readings of those
     // specks as genuine occlusion were wrong; they were this.
     //
     // Falling back to the nearest single tap keeps the pixel's own value instead of inventing
@@ -784,15 +650,10 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
         ? tex2D(TESR_VolumetricLightBuffer, uv).rgb
         : sum / weightSum;
 
-    // Debug view: the march's own output with no scene under it, so what the effect actually
-    // computes can be read directly instead of inferred from how it tints the frame. Blown-out
-    // highlights and a correctly shaped but over-bright shaft look identical once blended.
-    if (debugMode > 0.5f) return float4(volumeLight, 1.0f);
-
     // The volumetric rendering equation: what reaches the eye is the scene behind the medium,
     // attenuated by the medium's transmittance, plus the light the medium scattered into the ray.
     //
-    //     result = color * T + L        (alpha holds 1 - T; see the march's return)
+    //     result = color * T + L
     //
     // What stood here was color * (1 - L) + L, a premultiplied "over" blend that makes
     // transmittance a function of shaft BRIGHTNESS. Those are independent quantities: a sunbeam
