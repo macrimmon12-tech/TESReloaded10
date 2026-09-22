@@ -315,47 +315,6 @@ float GetHeightDensity(float positionZ, float originZ) {
     return exp(-max(positionZ - originZ, 0.0f) / heightFalloff);
 }
 
-// Optical depth of the whole ray, in closed form -- no march.
-//
-// Extinction is the one quantity here that does NOT need the ray march. The march is half
-// resolution because the cascade shadow lookup is expensive; extinction has no shadow term at
-// all. It is a pure function of how far the ray travels and how dense the medium is along it,
-// both of which follow from the pixel's depth, so it can be evaluated exactly at full
-// resolution for a handful of instructions.
-//
-// That matters because transmittance MULTIPLIES the scene. Carried through the half-res buffer
-// it has to survive a 4-tap depth-aware upsample, and at a silhouette -- a head against a bright
-// sky -- the value either side differs enormously: a ray that stops on the head accumulates
-// almost nothing, a sky ray runs the full AccumDistance. At Extinction 1.0 that is the
-// difference between keeping 99% of the pixel and keeping 45%. Any reconstruction error there
-// is a 55% brightness step, and where all four taps are rejected the fallback is a POINT sample
-// of a half-res texture, which is a 2x2 block. Alpha-tested hair makes it worst, because it
-// writes no depth, so hair-edge pixels read the background's depth and the weighting pulls in
-// sky transmittance. That was a blocky fringe around every silhouette.
-//
-// The integral: density along the ray is baseDensity * exp(-max(z - z0, 0) / H), and on a
-// straight ray z - z0 = t * dz, so for a rising ray it is exp(-t * dz / H), whose integral over
-// [0, L] is (H / dz) * (1 - exp(-L * dz / H)). A ray that is level or descending sits at the
-// clamp, where density is constant and the integral is just L.
-float ComputeOpticalDepth(float rayLength, float rayDirZ, float baseDensity, float invReference) {
-    // A zero-length ray means normalize() gave NaN for the direction, and NaN fails every
-    // comparison, so the height branch below would be taken and would return NaN for the pixel.
-    // No ray, no medium crossed, so this is the right answer as well as the safe one.
-    if (rayLength <= 0.0f) return 0.0f;
-
-    float sigmaBase = baseDensity * extinction * invReference;
-
-    // No height gradient, or the ray never rises above its origin: constant density.
-    if (heightFalloff <= 0.0f || rayDirZ <= 0.0f) return sigmaBase * rayLength;
-
-    float k = rayDirZ / heightFalloff;
-    float x = rayLength * k;
-    // (1 - exp(-x)) / k cancels catastrophically for small x -- a near-horizontal ray makes k
-    // tiny. Same series the march uses for the same reason; the limit is rayLength.
-    float integral = x > 1e-3f ? (1.0f - exp(-x)) / k : rayLength * (1.0f - 0.5f * x);
-    return sigmaBase * integral;
-}
-
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
 static const bool ditherMotion = TESR_VolumetricLightData4.w > 0.5f;
 
@@ -587,12 +546,25 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // makes a shaft look like paint rather than like light. The ceiling that remains is only to
     // keep a pathological value out of the FP16 buffer.
     //
-    // Alpha is unused. Transmittance is no longer carried to the composite through this buffer
-    // -- see ComputeOpticalDepth. The running transmittance above still attenuates in-scattered
-    // light along the ray, which is correct and stays: light scattered far away really is dimmed
-    // by the medium in front of it. It just is not what dims the SCENE, which is computed at full
-    // resolution instead.
-    return float4(min(accumLight, 16.0f), 1.0f);
+    // Alpha carries the medium's OPACITY, 1 - transmittance, back in the half-res buffer.
+    //
+    // This costs a blocky fringe at silhouettes and that is a known, accepted trade. A ray that
+    // stops on a near object accumulates almost no extinction while a sky ray runs the full
+    // AccumDistance, so the value either side of an edge differs enormously -- at Extinction 1.0,
+    // keeping 99% of the pixel against keeping 45%. Reconstructing that through the 4-tap upsample
+    // is what fringes, and where all four taps are rejected the fallback is a POINT sample of a
+    // half-res texture, i.e. 2x2 blocks. Alpha-tested hair is worst, writing no depth, so its edge
+    // pixels read the background's depth and pull in sky transmittance.
+    //
+    // Computing it at full resolution in the composite removes that entirely and costs very
+    // little -- see git history for the closed form, which matched the march's stepped integral
+    // to five decimal places. Go back to it if the fringe matters more than whatever this is
+    // being traded for.
+    //
+    // Opacity rather than transmittance so an all-zero buffer reads as "no medium" and passes the
+    // frame through, instead of reading as "absorbs everything" and blacking the screen on the
+    // first frame after a device reset recreates it.
+    return float4(min(accumLight, 16.0f), 1.0f - transmittance);
 }
 
 // One tap of the depth-aware upsample. exp2 falls off fast enough that a tap on the far side
@@ -600,13 +572,13 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
 // continuous surface (even a steeply raked one) stays well inside the kernel. Relative to
 // centerDepth, not absolute: the same slope spans a far larger absolute depth range at 4000
 // units than at 40, and an absolute tolerance would either bleed up close or over-reject far off.
-// RGB only. Alpha used to carry transmittance and had to be reconstructed here too; it is
-// computed at full resolution now, so this upsamples only the in-scattered light -- which is
-// additive, small, and forgiving of a reconstruction error in a way a scene multiplier is not.
-void AccumulateTap(float2 tapUV, float centerDepth, inout float3 sum, inout float weightSum) {
+// Weights all four channels together: opacity rides in alpha and has to be reconstructed against
+// the same depth test as the colour, or a silhouette pixel takes its in-scattered light from one
+// side of the edge and its attenuation from the other.
+void AccumulateTap(float2 tapUV, float centerDepth, inout float4 sum, inout float weightSum) {
     float tapDepth = readDepth(tapUV);
     float weight = exp2(-32.0f * abs(tapDepth - centerDepth) / max(centerDepth, 1.0f));
-    sum += tex2D(TESR_VolumetricLightBuffer, tapUV).rgb * weight;
+    sum += tex2D(TESR_VolumetricLightBuffer, tapUV) * weight;
     weightSum += weight;
 }
 
@@ -628,7 +600,7 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     float2 offset = TESR_ReciprocalResolution.xy;
     float centerDepth = readDepth(uv);
 
-    float3 sum = float3(0.0f, 0.0f, 0.0f);
+    float4 sum = float4(0.0f, 0.0f, 0.0f, 0.0f);
     float weightSum = 0.0f;
     AccumulateTap(uv + float2(-offset.x, -offset.y), centerDepth, sum, weightSum);
     AccumulateTap(uv + float2( offset.x, -offset.y), centerDepth, sum, weightSum);
@@ -646,8 +618,8 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     // Falling back to the nearest single tap keeps the pixel's own value instead of inventing
     // a black one. It is the right answer as well as a safe one: if no neighbour shares this
     // pixel's depth, the unfiltered sample is exactly what should be used.
-    float3 volumeLight = weightSum < 0.0001f
-        ? tex2D(TESR_VolumetricLightBuffer, uv).rgb
+    float4 volumeLight = weightSum < 0.0001f
+        ? tex2D(TESR_VolumetricLightBuffer, uv)
         : sum / weightSum;
 
     // The volumetric rendering equation: what reaches the eye is the scene behind the medium,
@@ -685,22 +657,8 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     //
     // At the calibrated settings it costs roughly 2x brightness overall, so Strength wants raising
     // to compensate -- see accumLightStrength.
-    // Transmittance, evaluated here at FULL resolution rather than upsampled from the half-res
-    // march. Everything it needs comes from this pixel's own depth, so there is no reconstruction
-    // to get wrong at a silhouette -- see ComputeOpticalDepth. Mirrors the march's ray setup
-    // exactly so the two agree about how far the ray goes and how dense the medium is.
-    float3 cameraVector = toWorld(uv) * centerDepth;
-    float accumDistance = max(TESR_VolumetricLightData1.w, 1.0f);
-    bool isSky = centerDepth > (farZ * 0.99f);
-    float rayLength = isSky ? accumDistance : min(length(cameraVector), accumDistance);
-    float3 rayDirection = normalize(cameraVector);
-    float baseDensity = lerp(1.0f, GetFogDensity(), saturate(fogInfluence));
-
-    float opticalDepth = ComputeOpticalDepth(rayLength, rayDirection.z, baseDensity, 1.0f / accumDistance);
-    float transmittance = exp(-opticalDepth);
-
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
-    float3 result = color * transmittance + linearize(volumeLight);
+    float3 result = color * (1.0f - volumeLight.a) + linearize(volumeLight.rgb);
     return delinearize(float4(result, 1.0f));
 }
 
