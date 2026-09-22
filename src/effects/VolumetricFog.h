@@ -3,34 +3,23 @@
 class VolumetricFogEffect : public EffectRecord
 {
 public:
-	VolumetricFogEffect() : EffectRecord("VolumetricFog") {
-		Constants.WeatherFilterAnimator.Initialize(1);
-		weatherFilterWasActive = true;
-		rainyDisablesSkyFilter = true;
-		cloudyDisablesSkyFilter = true;
-	};
+	VolumetricFogEffect() : EffectRecord("VolumetricFog") {};
 
 	struct VolumetricFogStruct {
-		D3DXVECTOR4		Density;         // x: BaseDensity, y: WeatherImpact, z: MorningFogDip, w: SunriseSunsetBoost
-		D3DXVECTOR4		Shape;           // x: HeightFalloff, y: MaxHeight, z: Extinction, w: Inscattering
-		D3DXVECTOR4		Wind;            // x: WindDirX, y: WindDirY, z: WindSpeed, w: NoiseScale
-		D3DXVECTOR4		Scatter;         // x: PhaseAsymmetry, y: ShadowStrength, z: NoiseStrength, w: HeightInfluence
-		D3DXVECTOR4		Weather;         // x: WeatherFilterBlend (animated 0-1, 1=sky mask active), y: isExterior, z: SkyAmbientAvailable, w: FogSaturation
-		D3DXVECTOR4		Aerial;          // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
-		D3DXVECTOR4		AerialTintColor; // xyz: manual aerial tint override
-		D3DXVECTOR4		Distant;         // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-		D3DXVECTOR4		Global;          // x: Amount, y: unused, z: unused, w: unused
-		Animator		WeatherFilterAnimator;
+		D3DXVECTOR4		LowFog;
+		D3DXVECTOR4		HighFog;
+		D3DXVECTOR4		SimpleFog;
+		D3DXVECTOR4		Blend;
+		D3DXVECTOR4		Height;
+		D3DXVECTOR4		Data;
 	};
 	VolumetricFogStruct	Constants;
+
+	float	Amount;
+	float	AmountInteriors;
 
 	void	UpdateConstants();
 	void	RegisterConstants();
 	void	UpdateSettings();
 	bool	ShouldRender();
-
-	// cached from UpdateSettings, consumed by UpdateConstants to drive WeatherFilterAnimator
-	bool	rainyDisablesSkyFilter;
-	bool	cloudyDisablesSkyFilter;
-	bool	weatherFilterWasActive; // edge-detect for the animator, mirrors RainAnimator.switched
 };

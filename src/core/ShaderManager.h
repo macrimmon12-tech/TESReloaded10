@@ -144,7 +144,6 @@ public:
 		bool					OverlayIsOn;
 		bool					isRainy;
 		bool					isSnow;
-		bool					isCloudy;
 	};
 
 	EffectsStruct			Effects;

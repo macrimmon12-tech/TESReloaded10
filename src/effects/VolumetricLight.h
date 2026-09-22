@@ -20,6 +20,7 @@ public:
 		D3DXVECTOR3	ScatterColor;
 		float	AccumDistance;
 		float	FogInfluence;
+		float	Extinction;
 		float	HeightFalloff;
 		bool	DitherMotion;
 	};
@@ -27,7 +28,7 @@ public:
 
 	struct VolumetricLightStruct {
 		D3DXVECTOR4	Data1;	// xyz: scatter color tint, w: reference path length / march range
-		D3DXVECTOR4	Data3;	// x: strength, y: unused, z: fog influence, w: anisotropy
+		D3DXVECTOR4	Data3;	// x: strength, y: extinction, z: fog influence, w: anisotropy
 		D3DXVECTOR4	Data4;	// x: unused, y: dither, z: height falloff, w: dither motion
 	};
 	VolumetricLightStruct	Constants;

@@ -8,6 +8,7 @@ void VolumetricLightEffect::UpdateSettings() {
 	Settings.Dither = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "Dither");
 	Settings.AccumDistance = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "AccumDistance");
 	Settings.FogInfluence = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "FogInfluence");
+	Settings.Extinction = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Extinction");
 	Settings.HeightFalloff = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "HeightFalloff");
 	Settings.DitherMotion = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "DitherMotion");
 
@@ -16,11 +17,10 @@ void VolumetricLightEffect::UpdateSettings() {
 	Settings.ScatterColor.z = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Coloring", "ScatterB");
 
 	Constants.Data1 = D3DXVECTOR4(Settings.ScatterColor.x, Settings.ScatterColor.y, Settings.ScatterColor.z, Settings.AccumDistance);
-	// y is free -- extinction is no longer a setting of this effect. There is one atmosphere, so
-	// the shader reads VolumetricFog's Extinction and converts it (see GROUND_LAYER_SCALE in
-	// VolumetricLight.fx.hlsl), which also keeps the floor-above-zero that sigmaT's analytic
-	// step integral needs in one place rather than two.
-	Constants.Data3 = D3DXVECTOR4(Settings.Strength, 0.0f, Settings.FogInfluence, Settings.Anisotropy);
+	// Extinction floored above zero rather than at it: the shader divides by sigmaT to integrate
+	// each step analytically. It carries its own epsilon for that, but keeping a real value here
+	// means the medium always has some attenuation, which is what makes transmittance meaningful.
+	Constants.Data3 = D3DXVECTOR4(Settings.Strength, max(Settings.Extinction, 0.001f), Settings.FogInfluence, Settings.Anisotropy);
 	// HeightFalloff passes through unclamped: 0 is a real setting, meaning a uniform medium with
 	// no altitude gradient, and the shader tests for it explicitly.
 	// x is free -- it carried the DebugView mode until the diagnostic views were removed.
