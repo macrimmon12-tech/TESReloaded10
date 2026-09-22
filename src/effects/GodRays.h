@@ -4,16 +4,13 @@ class GodRaysEffect : public EffectRecord
 {
 public:
 	GodRaysEffect() : EffectRecord("GodRays") {
-		selectedTechnique = 0; // Classic, until the first settings pass picks a real value
+		quality = 0; // Classic, until the first settings pass picks a real value
 	};
 
 	struct GodRaysStruct {
 		D3DXVECTOR4		Ray;
 		D3DXVECTOR4		RayColor;
 		D3DXVECTOR4		Data;
-		D3DXVECTOR4		Enhanced;     // x: RayDecay, y: RayStepScale, z: BlurStrength, w: GlareStrength
-		D3DXVECTOR4		Volumetric1;  // x: Steps, y: MaxDistance, z: HeightCutoff, w: LayerThickness
-		D3DXVECTOR4		Volumetric2;  // x: ShadowedCutoffDistance, y: NearWeightFalloff, z: Strength, w: unused
 	};
 	GodRaysStruct	Constants;
 
@@ -27,8 +24,9 @@ public:
 	bool sunGlareEnabled;
 	float rayVisibility;
 
-	// which of GodRays.fx.hlsl's named techniques to render (0: Classic, 1: Enhanced,
-	// 2: Volumetric -- real shadow-raymarched shafts + glare, no separate streak passes),
-	// mirroring FlashlightEffect::selectedPass
-	int selectedTechnique;
+	// 0: Classic (this effect's own single technique). 1: CrepuscularRays (a separate effect --
+	// see CrepuscularRaysEffect). ShaderManager reads this to decide which of the two actually
+	// renders each frame; GodRays' own Render() call always uses technique index 0 now that
+	// Classic is the only technique left in GodRays.fx.hlsl.
+	int quality;
 };

@@ -364,34 +364,17 @@ ScaleZ = 1.0
 Enabled = true                        # Replaces the grass shaders.
 
 [_Shaders.GodRays.Main]
-Quality = 0                           # 0 = Classic (original screen-space streak+glare technique). 1 = Enhanced (raymarched shaft accumulation with real per-step decay, tangential blur cleanup, darkness-weighted soft-light combine -- see [_Shaders.GodRays.Enhanced]). 2 = Volumetric (real shadow-cascade-raymarched shafts, shaped by actual 3D occluders rather than a screen-space approximation -- see [_Shaders.GodRays.Volumetric]). Real per-step shadow sampling, meaningfully more expensive than 0/1.
+Quality = 0                           # 0 = Classic (original screen-space streak+glare technique, this effect's own technique). 1 = CrepuscularRays (real shadow-cascade-raymarched shafts, shaped by actual 3D occluders rather than a screen-space approximation -- a separate effect entirely, see [_Shaders.CrepuscularRays.Main]). Meaningfully more expensive than 0.
 DayMultiplier = 1.0                   # Strength of godrays during the day.
-LightShaftPasses = 8                  # Raymarch step count for Enhanced's shaft accumulation. Not used by Classic.
-Luminance = 0.8                       # Treshold for minimum luminosity of areas casting rays. Lower means more of the sky will cast rays. Classic only.
+LightShaftPasses = 8                  # Unused -- kept for compatibility with existing configs.
+Luminance = 0.8                       # Treshold for minimum luminosity of areas casting rays. Lower means more of the sky will cast rays.
 NightMultiplier = 0.5                 # Strength of godrays during the night.
-RayDensity = 1.0                      # Curve for reduction of the intensity of godrays near the sunglare. Classic only (currently has no live effect there either -- kept for compatibility).
+RayDensity = 1.0                      # Curve for reduction of the intensity of godrays near the sunglare. Currently has no live effect (kept for compatibility).
 RayIntensity = 1.0                    # Multiplier for the intensity of the bright areas being blurred to create the rays.
-RayLength = 1.0                       # Multiplier for the length of rays. Classic only.
-RayVisibility = 50.0                  # Exponent for the godrays contrast. Classic only (currently has no live effect there either -- kept for compatibility).
+RayLength = 1.0                       # Multiplier for the length of rays.
+RayVisibility = 50.0                  # Exponent for the godrays contrast. Currently has no live effect (kept for compatibility).
 SunGlareEnabled = true                # Strength of the effect will be scaled with the weather sunglare setting.
 TimeEnabled = false                    # Strength of the effect will be strongest around sunset/sunrise and not at all during noon.
-
-[_Shaders.GodRays.Enhanced]
-RayDecay = 0.97                       # Per-step illumination falloff for the raymarched shaft accumulation. Closer to 1.0 = rays extend further/persist longer before fading; lower = shorter, punchier shafts.
-RayStepScale = 1.0                    # Spacing between raymarch samples along the ray toward the sun.
-BlurStrength = 1.0                    # Strength of the tangential blur pass that smooths out raymarch step banding.
-
-[_Shaders.GodRays.Volumetric]
-# All world-unit and world-Z values below are first-guess defaults, not yet validated in-game --
-# expect a tuning pass, especially HeightCutoff/LayerThickness, which depend on this game's actual
-# world-Z conventions.
-Steps = 24                            # Raymarch step count. Runs at quarter resolution (half in each dimension), so this is meaningfully cheaper per-step than Enhanced's full-res-adjacent raymarch -- can afford more steps.
-MaxDistance = 20000.0                 # World-unit distance the raymarch extends to before stopping.
-HeightCutoff = 1500.0                 # World-Z ceiling of the fog layer the shafts are marched through -- shafts only form within [HeightCutoff - LayerThickness, HeightCutoff], not the whole view ray.
-LayerThickness = 2500.0               # World-Z thickness of that fog layer, measured down from HeightCutoff.
-ShadowedCutoffDistance = 10000.0      # Distance beyond which a shadowed sample point stops contributing any residual light at all.
-NearWeightFalloff = 0.7               # How much less the raymarch's far steps count vs its near steps (0 = every step weighted equally, 1 = far steps contribute nothing) -- emphasizes near-camera detail, where haze is thickest.
-Strength = 1.0                        # Overall multiplier on the accumulated shaft light.
 
 [_Shaders.GodRays.Coloring]
 RayR = 1.0                            # Red channel for custom coloring of the godrays. Use Saturate setting to tweak the global influence.
@@ -401,7 +384,22 @@ Saturate = 0.0                        # Influence of the coloring setting. 0: us
 
 
 [_Shaders.GodRays.Status]
-Enabled = true                        # Screenspace godrays/volumetric rays.
+Enabled = true                        # Screenspace godrays (Quality 0, Classic). Has no effect on CrepuscularRays (Quality 1) -- see [_Shaders.CrepuscularRays.Status].
+
+
+[_Shaders.CrepuscularRays.Main]
+Strength = 1.0                        # Overall multiplier on the accumulated shaft light.
+Anisotropy = 0.6                      # Forward-scattering lobe sharpness (0-1, Henyey-Greenstein g). Higher makes shafts brighter and narrower when looking along them toward the sun.
+FogInfluence = 0.0                    # 0 keeps a constant scattering medium regardless of weather. 1 scales it by the weather's own fog density, so shafts thicken in fog and thin out in clear air.
+AccumDistance = 4000.0                # World-unit distance the raymarch covers -- also the falloff range light fades out over. Shorter is cheaper and keeps detail concentrated near the camera. First-guess default, not yet validated in-game -- with 64 fixed samples, too large a value spreads them thin enough to step over typical near-camera occluders (trees, poles).
+TintR = 1.0                           # Red channel of the scatter color tint, multiplied onto the sun's own color.
+TintG = 1.0                           # Green channel of the scatter color tint.
+TintB = 1.0                           # Blue channel of the scatter color tint.
+DebugMode = 0                         # 0: normal render. 1: the march's own output with no scene under it. 2-12: shadow-lookup diagnostics -- see the debugMode comment in CrepuscularRays.fx.hlsl for what each one shows.
+DitherEnabled = true                  # Blue-noise dither on the march's start offset, hides raymarch step banding. Leave on unless diagnosing with DebugMode.
+
+[_Shaders.CrepuscularRays.Status]
+Enabled = true                        # Real shadow-cascade-raymarched sunbeams. Only actually renders while [_Shaders.GodRays.Main] Quality = 1.
 
 
 [_Shaders.Tonemapping.Main]

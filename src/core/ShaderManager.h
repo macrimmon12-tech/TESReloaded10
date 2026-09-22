@@ -90,6 +90,7 @@ public:
 		FlashlightEffect*		Flashlight;
 		FlashlightBeamEffect*	FlashlightBeam;
 		CombineDepthEffect*		CombineDepth;
+		CrepuscularRaysEffect*	CrepuscularRays;
 		DepthOfFieldEffect*		DepthOfField;
 		DebugEffect*			Debug;
 		GodRaysEffect*			GodRays;
