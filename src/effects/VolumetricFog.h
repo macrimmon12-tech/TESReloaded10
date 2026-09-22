@@ -20,12 +20,12 @@ public:
 		D3DXVECTOR4		Aerial;          // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 		D3DXVECTOR4		AerialTintColor; // xyz: manual aerial tint override
 		D3DXVECTOR4		Distant;         // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-		D3DXVECTOR4		Global;          // x: Amount, y: NightAmbientStrength, z: MoonVisibility, w: MinDensityFloor
+		D3DXVECTOR4		Global;          // x: Amount, y: unused, z: MoonVisibility, w: MinDensityFloor
 		// Its own section/settings-UI tab (Shaders.VolumetricFog.Night), separate from Main, so
 		// night-specific controls don't crowd the exterior tab as more of them get added.
 		D3DXVECTOR4		Night;           // x: DensityScale, y: AmountScale, z: HeightFalloffScale, w: MaxHeightOffset
 		D3DXVECTOR4		NightScatter;    // x: NoiseStrengthScale, y: WindSpeedScale, z: ExtinctionScale, w: InscatteringScale
-		D3DXVECTOR4		NightTint;       // xyz: multiplicative night fog color tint, w: unused
+		D3DXVECTOR4		NightTint;       // xyz: multiplicative night fog color tint, w: NightAmbientStrength
 		Animator		WeatherFilterAnimator;
 	};
 	VolumetricFogStruct	Constants;

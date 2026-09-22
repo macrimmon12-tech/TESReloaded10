@@ -32,7 +32,8 @@ void VolumetricFogEffect::UpdateConstants() {
 	// floor tracks the same lunar cycle the shadow system already uses. The day/night fade itself
 	// is left to the shader's own continuous isDayTime curve rather than duplicated here, so the
 	// transition stays smooth instead of snapping at a hard cutoff. Harmless to compute for
-	// interiors too -- NightAmbientStrength is zeroed there in UpdateSettings, so it has no effect.
+	// interiors too -- NightAmbientStrength (read in UpdateSettings) is gated to zero there by the
+	// shader's own nightFactor (isExterior term), so this has no effect regardless.
 	TimeGlobals* GameTimeGlobals = TimeGlobals::Get();
 	float DaysPassed = GameTimeGlobals->GameDaysPassed ? GameTimeGlobals->GameDaysPassed->data : 1.0f;
 	float MoonPhase = (fmod(DaysPassed, 8 * Tes->sky->firstClimate->phaseLength & 0x3F)) / (Tes->sky->firstClimate->phaseLength & 0x3F);
@@ -93,7 +94,6 @@ void VolumetricFogEffect::UpdateSettings(){
 		Constants.Distant.z = TheSettingManager->GetSettingF(SettingCategory, "DistantFogHeight");
 		Constants.Distant.w = TheSettingManager->GetSettingF(SettingCategory, "EdgeAA");
 
-		Constants.Global.y = TheSettingManager->GetSettingF(SettingCategory, "NightAmbientStrength");
 		// shared with ShadowsExterior's own moon-phase shadow fade -- keeps fog's night-ambient
 		// ceiling consistent with the shadow system's, rather than a second, disconnected knob.
 		nightMinDarkness = 1.0f - TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "NightMinDarkness");
@@ -112,7 +112,6 @@ void VolumetricFogEffect::UpdateSettings(){
 		Constants.AerialTintColor = D3DXVECTOR4(0, 0, 0, 0);
 		Constants.Distant = D3DXVECTOR4(0, 0, 0, 0);
 
-		Constants.Global.y = 0.0f;
 		Constants.Global.w = 0.0f;
 	}
 
@@ -133,6 +132,9 @@ void VolumetricFogEffect::UpdateSettings(){
 	Constants.NightTint.x = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "TintR");
 	Constants.NightTint.y = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "TintG");
 	Constants.NightTint.z = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "TintB");
+	// Moved here from Global.y (Main-scoped) so it fades via the shared shader-side nightFactor like
+	// the rest of this section, instead of needing its own interior-zeroing branch above.
+	Constants.NightTint.w = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "NightAmbientStrength");
 }
 
 void VolumetricFogEffect::RegisterConstants(){
