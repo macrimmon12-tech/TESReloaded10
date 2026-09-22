@@ -613,7 +613,21 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
 
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
     volumeLight = linearize(volumeLight);
-    float3 result = color * (1 - volumeLight) + volumeLight;
+
+    // Darkness-weighted additive, not the screen/over blend (color*(1-v)+v) this used to be.
+    // Screen/over pulls every pixel toward v as v grows, bright sky included -- and since most of
+    // a typical view is unoccluded (confirmed by the raw shadow term: mostly lit, with only the
+    // ground right at nearby occluders reading dark), any Strength high enough to make that small
+    // shadowed minority read as a visible dip also means v is large across the rest of the frame,
+    // dragging the whole scene toward white with it. There was no Strength where that wasn't true,
+    // because it followed from the blend formula, not from how bright any given input was.
+    // Weighting the glow's contribution by how dark the underlying scene pixel already is (same
+    // pattern GodRays' own Enhanced technique uses) fixes this at the source: an already-bright
+    // sky pixel gets essentially none of it added, since it was never going to read as a visible
+    // beam there anyway, while a genuinely dark/shadowed pixel -- where light breaking through
+    // actually looks like something -- gets the effect at full strength.
+    float darknessWeight = saturate(1.0 - luma(color));
+    float3 result = color + volumeLight * darknessWeight;
     return delinearize(float4(result, 1.0f));
 }
 
