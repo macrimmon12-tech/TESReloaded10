@@ -93,6 +93,13 @@ static const float VolumetricLayerThickness = max(1, TESR_GodRaysVolumetric1.w);
 static const float VolumetricShadowedCutoffDistance = max(0, TESR_GodRaysVolumetric2.x);
 static const float VolumetricNearWeightFalloff = saturate(TESR_GodRaysVolumetric2.y);
 static const float VolumetricStrength = max(0, TESR_GodRaysVolumetric2.z);
+// How much of a lit sample's brightness a shadowed one still gets, right next to the camera (t=0),
+// before fading to 0 by ShadowedCutoffDistance. Without this factor a shadowed and a lit sample near
+// the camera read almost identically (saturate(1 - t/CutoffDistance) is ~1 for small t), which erases
+// the lit/shadowed contrast a raymarch needs to show as a visible ray at all -- this was the actual
+// reason HeightCutoff/LayerThickness had no visible effect regardless of value: this term was
+// swamping out whatever spatial variation the raymarch band produced.
+static const float VolumetricShadowResidual = 0.15;
 
 struct VSOUT {
 	float4 vertPos : POSITION;
@@ -298,13 +305,6 @@ float4 BlurEnhanced(VSOUT IN) : COLOR0 {
 	return float4(col.rgb * 0.333f, 1.0f);
 }
 
-float3 BlendSoftLight(float3 a, float3 b) {
-	float3 c = 2.0f * a * b * (1.0f + a * (1.0f - b));
-	float3 a_sqrt = sqrt(a);
-	float3 d = (a + b * (a_sqrt - a)) * 2.0f - a_sqrt;
-	return (b < 0.5f) ? c : d;
-}
-
 float4 CombineEnhanced(VSOUT IN) : COLOR0 {
 	float4 ori = linearize(tex2D(TESR_SourceBuffer, IN.UVCoord));
 	float2 uv = IN.UVCoord * scale;
@@ -320,21 +320,22 @@ float4 CombineEnhanced(VSOUT IN) : COLOR0 {
 
 	// Darkness-weighted: rays read weaker over already-bright pixels, stronger over dark/shadowed
 	// ones, instead of a flat additive boost -- avoids blowing out highlights the way Classic's
-	// `color += rays * 5 * color + rays * 0.2` can. Soft-light composite instead of a plain add.
+	// `color += rays * 5 * color + rays * 0.2` can.
 	rays.rgb *= multiplier * rayTint * attenuation * saturate(1.0 - ori.rgb);
 
-	float4 color = ori + rays;
-
-	// BlendSoftLight assumes [0,1] inputs (sqrt(a) and the (1-b) term are only meaningful in that
-	// range); ori+rays is linear HDR and routinely exceeds 1 (bright sky/sun pixels alone, before
-	// rays even add anything), which was feeding the blend out-of-domain and producing broken/
-	// garbled output rather than a smooth graded highlight. Soft-light-shade only the [0,1] base and
-	// re-add whatever was above 1 afterward, so HDR highlights that should still bloom downstream
-	// aren't silently clipped away by the blend.
-	float3 hdrOverflow = max(0, color.rgb - 1.0);
-	color.rgb = BlendSoftLight(saturate(color.rgb), saturate(rayTint * multiplier + 0.5f)) + hdrOverflow;
-	color.rgb = delinearize(color.rgb);
-	return float4(color.rgb, 1.0f);
+	// Screen/over composite (same pattern VolumetricCombine uses), not a soft-light blend: the
+	// previous BlendSoftLight(color, rayTint*multiplier+0.5f) passed a blend factor that never
+	// referenced the actual localized ray buffer -- rayTint*multiplier+0.5 is a near-flat color that
+	// saturates to ~1 almost everywhere on screen for typical settings, and BlendSoftLight(a, 1)
+	// reduces to sqrt(a), a straight gamma-lift applied to every pixel regardless of whether a ray
+	// was actually present there. That's what was brightening the whole screen instead of just the
+	// streaks. `light` here is `rays.rgb` itself, which is already correctly localized (attenuation +
+	// darkness-weighting above), so it's 0 -- and leaves the scene untouched -- anywhere there's no
+	// actual ray contribution.
+	float3 light = saturate(rays.rgb);
+	float3 color = ori.rgb * (1 - light) + light;
+	color = delinearize(color);
+	return float4(color, 1.0f);
 }
 
 
@@ -492,10 +493,11 @@ float4 VolumetricRaymarch(VSOUT IN) : COLOR0 {
 			accumLight += nearWeight;
 		}
 		else {
-			// Shadowed points still contribute a reduced, distance-limited amount rather than
-			// nothing -- represents indirect/ambient scattering within the fog instead of a hard
-			// binary lit/unlit switch.
-			accumLight += nearWeight * saturate(1 - t / max(VolumetricShadowedCutoffDistance, 1));
+			// Shadowed points still contribute a small residual (indirect/ambient scattering within
+			// the fog) rather than a hard 0, fading to nothing by ShadowedCutoffDistance -- scaled
+			// down by VolumetricShadowResidual so it stays clearly dimmer than a lit sample instead
+			// of reading the same.
+			accumLight += nearWeight * VolumetricShadowResidual * saturate(1 - t / max(VolumetricShadowedCutoffDistance, 1));
 		}
 		nearWeight = max(0, nearWeight - VolumetricNearWeightFalloff / VolumetricSteps);
 	}
