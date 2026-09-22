@@ -1,23 +1,27 @@
-// Volumetric Light shafts for New Vegas Reloaded.
+// Crepuscular rays (sunbeams through gaps in occluders) for New Vegas Reloaded.
 //
 // Originally ported from arafuse/tes-reloaded's OblivionReloaded/Shaders/VolumetricLight/
 // VolumetricLight.fx.hlsl, then rewritten against this fork's VSM/EVSM cascade shadow atlas
 // (near/middle/far/lod, cross-faded) instead of the source's plain near/far depth-compare maps.
 //
-// This is now a from-scratch design for NVR rather than a port: two in-game tests (screenshots)
-// showed the source shader's height-bounded "fog layer" ray march (march within a volume capped
-// by a HEIGHT setting, animated flow-noise density, wind scroll) reads as a flat ground-hugging
-// haze, not shafts -- a fully-lit ray inside that fog volume still glows even with zero occluder
-// in view, so it looks like ambient fog rather than light breaking through gaps. In a second test,
-// its unclamped accumulated light blew past 1.0 in a debris-dense area (lots of small sky gaps),
-// which inverted CompositeLight's blend and erased the scene under a flat wash entirely.
+// Two earlier designs both tried to BRIGHTEN unoccluded pixels (a height-bounded fog-layer march
+// that read as flat ground-hugging haze regardless of any real occluder, then a Henyey-Greenstein-
+// scattering march whose accumulated light -- driven by TESR_SunColor's real HDR magnitude and a
+// glow term that swings by orders of magnitude with view angle toward the sun -- always either
+// blew out or was invisible, with no Strength value in between). Both failed for the same
+// structural reason: in a typical exterior view, the sun is unoccluded almost everywhere (open
+// sky, open ground), so brightening "unoccluded" pixels means brightening most of the screen, and
+// any Strength high enough to make the small shadowed minority visible also washes out everything
+// else, because that follows from touching the majority, not from any specific tuning value.
 //
-// So: no fog volume, no height ceiling, no animated noise, no wind. The march is just camera to
-// visible surface (or the falloff cutoff, whichever is nearer), testing the sun shadow atlas at each
-// step. The only thing that ever brightens a pixel is GetSunShadowAmount() varying along the ray
-// -- i.e. an actual occluder -- and the final output is saturated once, at the source, so it can
-// never invert the composite blend. General atmospheric haze is VolumetricFog.fx.hlsl's job, not
-// this one's.
+// This version DARKENS the occluded minority instead, and never touches unoccluded pixels at all.
+// The march computes a plain, unweighted-by-color occlusion signal (0 = fully shadowed, 1 = fully
+// exposed to the sun -- literally the same average GetSunShadowAmount() debug mode 2 already shows
+// working correctly) with no phase function, no sun-color multiplication, no fog-density coupling.
+// Composite then multiplies the scene by a factor that stays exactly 1.0 (no change at all)
+// wherever that signal reads fully exposed, and only dips below 1.0 -- darkening -- where it reads
+// shadowed. An unoccluded pixel is architecturally incapable of being touched, so there is no wash-
+// out mechanism left regardless of how high Strength (now "how much to darken") is set.
 
 // The bug that made this produce nothing for most of its development was a camera mismatch,
 // not anything in the scattering or the shadow sampling. RenderManager::SetupSceneCamera builds
@@ -35,12 +39,14 @@
 
 float4 TESR_ReciprocalResolution;
 float4 TESR_SmoothedSunDir;
-float4 TESR_SunColor;
 float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
-float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
-float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: accum distance cutoff
-float4 TESR_VolumetricLightData3; // x: strength, z: fog influence, w: anisotropy (y unused)
+// xyz unused (were a scatter color tint, dropped along with the phase-function scattering model
+// that read it -- see the header comment). w: accum distance cutoff, still the march's range.
+float4 TESR_VolumetricLightData1;
+// x: darkening strength, consumed only by CompositeLight now, not the march. y, z, w unused (were
+// the phase-function sample count, fog influence and anisotropy of the dropped scattering model).
+float4 TESR_VolumetricLightData3;
 float4 TESR_VolumetricLightData4; // x: debug view toggle, y: dither toggle (z, w unused)
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
@@ -232,51 +238,21 @@ float GetSunShadowAmount(float3 positionWS) {
 static const int MARCH_NUM = 64;
 static const float NOISE_GRANULARITY = 0.5 / 255.0;
 
+// How much to darken occluded pixels, consumed by CompositeLight -- see its own comment. The
+// march itself no longer has a user-facing strength of its own: its job is just to compute a
+// clean 0-1 occlusion signal, not to decide how visually strong the final effect is.
 static const float strength = TESR_VolumetricLightData3.x;
-static const float anisotropy = TESR_VolumetricLightData3.w;
-static const float fogInfluence = TESR_VolumetricLightData3.z;
-
-// Scattering medium density taken from the weather's own fog.
-//
-// Scattered light is proportional to how much medium the ray crosses, so a constant density
-// gives identical shafts in clear desert air and in thick fog, which is wrong in both
-// directions: too strong when there is nothing to scatter off, too weak when the air is full
-// of it. The game already varies fog per weather, so that is the density to use rather than
-// inventing a second one that disagrees with the fog the player can see.
-//
-// TESR_FogData carries the near and far fog distances. Denser fog reaches full opacity over a
-// shorter span, so the span is an inverse density; FOG_REFERENCE_SPAN is the span treated as
-// fully dense. Typical clear weather runs tens of thousands of units and lands near 0.1, while
-// a fog weather closes to a few thousand and approaches 1.
-static const float FOG_REFERENCE_SPAN = 4000.0f;
-
-float GetFogDensity() {
-    float span = max(TESR_FogData.y - TESR_FogData.x, 1.0f);
-    return saturate(FOG_REFERENCE_SPAN / span);
-}
 
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
-// 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the visible surface, 4 the lookup's intermediates, 5-8 the sampling inputs. Mode 2 divides out everything
-// layered on top of occlusion -- the phase function, the distance falloff, Strength and
-// TESR_SunColor -- and shows only the average of GetSunShadowAmount along each ray. It answers
-// the one question the finished output cannot: whether the cascade lookup finds occluders at
-// all. A dim frame in mode 1 is ambiguous, because the sun's own colour is near zero shortly
-// after sunrise and scales the whole effect with it. Mode 2 depends on no tuning value, no sun
-// colour and no time of day: white is lit, black is occluded, and a flat featureless field
-// means the lookup returns a constant and no occluder is being detected.
+// 0 off, 1 the finished march, 2 the raw shadow term along the ray, 3 that same term at the
+// visible surface, 4 the lookup's intermediates, 5-12 the sampling inputs. Mode 2 divides out
+// everything layered on top of occlusion -- the distance falloff and Strength -- and shows only
+// the average of GetSunShadowAmount along each ray. It answers the one question the finished
+// output cannot: whether the cascade lookup finds occluders at all. Mode 1 shows the march's own
+// distance-weighted occlusion average after the half-res depth-aware upsample, not composite's
+// ad-hoc unweighted one in mode 2 -- worth checking separately to confirm the weighting/upsample
+// themselves aren't introducing a wash, distinct from the raw shadow lookup mode 2 tests.
 static const float debugMode = TESR_VolumetricLightData4.x;
-
-// Every uniform-wash screenshot so far shares one signature: the sky (correctly suppressed by
-// the distance falloff) looks fine while everything nearby is a flat, undifferentiated plateau
-// -- not literally inverted (that bug is already fixed by the saturate() below), just genuinely
-// hitting 1.0 and staying there regardless of shadow state, which erases whatever contrast the
-// shadow value would otherwise produce. TESR_SunColor carries real HDR magnitude in this engine
-// (this is the same PBR pipeline ObjectTemplate.hlsl's PBRSun/PBRDiffuse consume, not a display-
-// range [0,1] color), so a fully-lit ray was almost certainly clipping well before the shadow
-// term ever got a chance to pull it back down. Cut hard from the source shader's 3.0 so a
-// fully-lit ray has headroom below 1.0 for the shadow value to actually carve a visible gap out
-// of, and treat Strength (the user-facing setting) as the knob to raise from here, not this.
-static const float accumLightStrength = 0.3f;
 
 struct VSOUT {
     float4 vertPos : POSITION;
@@ -295,37 +271,14 @@ VSOUT FrameVS(VSIN IN) {
     return OUT;
 }
 
-// pow(g, 1.5); fxc does not fold this on its own.
-float Pow1_5(float g) {
-    return g * sqrt(g);
-}
-
-// Henyey-Greenstein phase function, anisotropy clamped to ceiling (wider, flatter lobe for sky
-// rays than ground rays -- see the two call sites' scatterCeiling).
-//
-// Normalised to peak at exactly 1.0 looking straight into the sun, so Anisotropy sets the SHAPE
-// of the lobe and nothing else. Raw HG has its magnitude tied to g: the peak is
-// (1-g^2)/(4*PI*(1-g)^3), which climbs from 0.108 at g=0.1 to 0.796 at g=0.6 -- so tightening
-// the lobe also made the whole effect 7.4x brighter, far past where the composite blend
-// saturates, and the frame washed out to a flat sheet that destroyed the very structure the
-// tighter lobe was meant to reveal. Dividing through by that peak decouples the two knobs:
-// Anisotropy controls how sharply light gathers toward the sun, Strength controls how much
-// there is. The peak term is a closed form -- at lightDotView == 1 the denominator is
-// (1 + g^2 - 2g)^1.5 = ((1-g)^2)^1.5 = (1-g)^3 -- so this costs no extra evaluation.
-float ComputeScattering(float lightDotView, float ceiling) {
-    float g = min(anisotropy, ceiling);
-    float forward = 1.0f - g;
-    float denom = 1.0f + g * g - (2.0f * g) * lightDotView;
-    return (forward * forward * forward) / Pow1_5(max(denom, 0.0001f));
-}
-
 // Low-resolution ray march: walks the view ray from the camera to the visible surface, or to
-// the distance-falloff cutoff, whichever is nearer -- sampling the sun shadow atlas at each step. The Henyey-
-// Greenstein term itself only depends on view/sun angle, so it's constant along the ray and
-// computed once outside the loop; the ONLY thing that varies per step, and the only thing that
-// ever brightens a pixel, is the shadow value -- so a fully-lit, unoccluded view (no occluder in
-// the ray's path) contributes almost nothing, and contrast only appears where the ray actually
-// crosses a shadow boundary.
+// the distance-falloff cutoff, whichever is nearer -- sampling the sun shadow atlas at each step
+// and accumulating a plain distance-weighted average of it. No phase function, no sun color, no
+// fog density: those all multiplied a HDR-magnitude color onto the result, which is exactly what
+// made every earlier version either invisible or a wash with nothing usable in between (see the
+// header comment). This just answers "how exposed to the sun is the air near the camera along
+// this ray," a value that's already naturally in [0,1] with no calibration needed, and leaves
+// turning that into a visual effect entirely to CompositeLight's darkening blend.
 // Ray origin, taken from TESR_InvViewTransform rather than TESR_CameraPosition.
 //
 // RenderManager::SetupSceneCamera builds the view and inverse-view matrices from
@@ -381,15 +334,8 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float ditherOffset = ditherEnabled ? tex2D(TESR_NoiseSampler, noiseUV).r : 0.5f;
     float3 currentPosition = rayOrigin + step * ditherOffset;
 
-    float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
-    float3 lightColor = TESR_VolumetricLightData1.xyz * TESR_SunColor.rgb;
-    float scatterCeiling = isSky ? 1.0f : 0.5f;
-    // Weather fog scales the medium density. FogInfluence at 0 keeps a constant medium and the
-    // previous behaviour exactly; at 1 the shafts track the fog the player can actually see.
-    float3 scatterTerm = ComputeScattering(lightDotView, scatterCeiling).xxx * lightColor;
-    scatterTerm *= lerp(1.0f, GetFogDensity(), saturate(fogInfluence));
-
-    float3 accumLight = 0.0f.xxx;
+    float accumOcclusion = 0.0f;
+    float weightSum = 0.0f;
     float accumShadow = 0.0f;
 
     [loop]
@@ -408,9 +354,15 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
         // whole silhouette -- and never as a glow genuinely hanging in open air.
         float distFalloff = 1.0f - saturate(distance(currentPosition, rayOrigin) / accumDistance);
 
-        accumLight += scatterTerm * Shadow * distFalloff;
+        // Weighted average, not a weighted sum: dividing by weightSum (not a fixed MARCH_NUM or
+        // accumDistance) keeps this in [0,1] regardless of how much of the march actually carried
+        // weight, which is what makes it usable directly as a darkening factor with no separate
+        // magnitude calibration the way the old scatterTerm-based accumLight needed.
+        accumOcclusion += Shadow * distFalloff;
+        weightSum += distFalloff;
         currentPosition += step;
     }
+    accumOcclusion /= max(weightSum, 0.0001f);
 
     // Modes 5-8: the INPUTS to the sampling, not its result. Everything above debugs the
     // shadow lookup while assuming what is fed to it is correct. These check that assumption,
@@ -535,23 +487,14 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // Shadow term on its own, before anything is layered over it -- see debugMode.
     [branch] if (debugMode > 1.5f) return float4((accumShadow / MARCH_NUM).xxx, 1.0f);
 
-    // Mean sample value, then back to a path integral: the physical quantity is the integral of
-    // scattered light along the ray, sum(f) * stepLength, and stepLength is rayLength/MARCH_NUM.
-    // Dividing by the sample count alone yields a mean with NO dependence on how far the ray
-    // travelled, so 20 units of air in front of a near wall accumulated exactly as much light as
-    // 4000 units of open sky -- every surface in the frame got the same wash regardless of how
-    // much air was really in front of it, which is what read as haze paint on nearby geometry
-    // rather than depth. Normalised by accumDistance so a full-length ray keeps the magnitude
-    // this was calibrated at and Strength stays meaningful.
-    accumLight *= rayLength / (accumDistance * MARCH_NUM);
-    accumLight *= accumLightStrength * strength;
-    accumLight += lerp(-NOISE_GRANULARITY, NOISE_GRANULARITY, rand(uv));
+    // accumOcclusion is already a proper weighted average (divided by weightSum above, not a
+    // fixed sample count or distance), so it's already in [0,1] with no further scaling needed --
+    // unlike the old scatterTerm-based accumLight, which needed a path-length normalisation and a
+    // hand-calibrated pre-scale to land in a usable range at all. A tiny dither still helps hide
+    // quantisation banding in the output once this gets written to the half-res render target.
+    accumOcclusion += lerp(-NOISE_GRANULARITY, NOISE_GRANULARITY, rand(uv));
 
-    // Saturated here, once, at the source: CompositeLight's blend (color*(1-v)+v) only behaves
-    // as a blend for v in [0,1] -- above that it inverts and swamps the scene color entirely,
-    // which is exactly the "everything erased to a flat wash" failure an earlier, unclamped
-    // version of this produced in debris-dense areas with lots of small sky gaps.
-    return float4(saturate(accumLight), 1.0f);
+    return float4(saturate(accumOcclusion).xxx, 1.0f);
 }
 
 // One tap of the depth-aware upsample. exp2 falls off fast enough that a tap on the far side
@@ -566,10 +509,9 @@ void AccumulateTap(float2 tapUV, float centerDepth, inout float3 sum, inout floa
     weightSum += weight;
 }
 
-// Full resolution: upsamples the low-res march and blends it onto the scene. No separate
+// Full resolution: upsamples the low-res march and darkens the scene with it. No separate
 // sky-ambient term: this stays a pure shadow-occlusion shaft effect, not a general atmospheric
-// glow -- the march itself already scales every contribution by GetSunShadowAmount, so a pixel
-// only lights up here where an occluder actually created contrast against the sun.
+// glow -- a pixel only darkens here where the march actually found real occlusion against the sun.
 //
 // The upsample is depth-aware rather than a plain bilinear tex2D. A half-res texel straddling a
 // silhouette mixes a short ray (near surface, little accumulated light) with a long one (open sky
@@ -612,22 +554,19 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     if (debugMode > 0.5f) return float4(volumeLight, 1.0f);
 
     float3 color = linearize(tex2D(TESR_SourceBuffer, uv)).rgb;
-    volumeLight = linearize(volumeLight);
 
-    // Darkness-weighted additive, not the screen/over blend (color*(1-v)+v) this used to be.
-    // Screen/over pulls every pixel toward v as v grows, bright sky included -- and since most of
-    // a typical view is unoccluded (confirmed by the raw shadow term: mostly lit, with only the
-    // ground right at nearby occluders reading dark), any Strength high enough to make that small
-    // shadowed minority read as a visible dip also means v is large across the rest of the frame,
-    // dragging the whole scene toward white with it. There was no Strength where that wasn't true,
-    // because it followed from the blend formula, not from how bright any given input was.
-    // Weighting the glow's contribution by how dark the underlying scene pixel already is (same
-    // pattern GodRays' own Enhanced technique uses) fixes this at the source: an already-bright
-    // sky pixel gets essentially none of it added, since it was never going to read as a visible
-    // beam there anyway, while a genuinely dark/shadowed pixel -- where light breaking through
-    // actually looks like something -- gets the effect at full strength.
-    float darknessWeight = saturate(1.0 - luma(color));
-    float3 result = color + volumeLight * darknessWeight;
+    // Darkens occluded pixels instead of brightening lit ones -- see the header comment for why.
+    // volumeLight is a plain occlusion signal (0 = shadowed, 1 = fully exposed to the sun), not a
+    // color, so unlike `color` it's used directly rather than delinearized. It's the interpolation
+    // factor, not an additive term: at volumeLight == 1, darkenFactor is exactly 1 and the scene
+    // is completely untouched, and it only drops below 1 where the march actually found occlusion.
+    // Strength sets how deep that darkening goes at full occlusion (0 = effect off, 1 = fully
+    // black there). Because an unoccluded pixel is architecturally incapable of being pushed any
+    // brighter than it already was, there's no Strength value that can wash out the rest of the
+    // frame the way the old additive designs always could -- the majority of a typical view being
+    // unoccluded is no longer a liability, since this only ever touches the occluded minority.
+    float darkenFactor = lerp(1.0 - saturate(strength), 1.0, saturate(volumeLight.x));
+    float3 result = color * darkenFactor;
     return delinearize(float4(result, 1.0f));
 }
 

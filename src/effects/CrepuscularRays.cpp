@@ -7,21 +7,21 @@ void CrepuscularRaysEffect::UpdateConstants() {
 }
 
 void CrepuscularRaysEffect::UpdateSettings() {
-	Constants.Tint.x = TheSettingManager->GetSettingF("Shaders.CrepuscularRays.Main", "TintR");
-	Constants.Tint.y = TheSettingManager->GetSettingF("Shaders.CrepuscularRays.Main", "TintG");
-	Constants.Tint.z = TheSettingManager->GetSettingF("Shaders.CrepuscularRays.Main", "TintB");
+	// Tint.xyz is unused now (was a scatter color tint, dropped with the phase-function model
+	// that read it -- see CrepuscularRays.fx.hlsl's header). Left unset (zeroed) rather than removed
+	// from the struct, since the shader still declares TESR_VolumetricLightData1 as a float4 and
+	// only its w component needs a real value.
 	Constants.Tint.w = TheSettingManager->GetSettingF("Shaders.CrepuscularRays.Main", "AccumDistance");
 
+	// Data.y/z/w unused now (were sample count, fog influence and anisotropy of the dropped model).
 	Constants.Data.x = TheSettingManager->GetSettingF("Shaders.CrepuscularRays.Main", "Strength");
-	Constants.Data.z = TheSettingManager->GetSettingF("Shaders.CrepuscularRays.Main", "FogInfluence");
-	Constants.Data.w = TheSettingManager->GetSettingF("Shaders.CrepuscularRays.Main", "Anisotropy");
 
 	Constants.Debug.x = TheSettingManager->GetSettingF("Shaders.CrepuscularRays.Main", "DebugMode");
 	Constants.Debug.y = TheSettingManager->GetSettingI("Shaders.CrepuscularRays.Main", "DitherEnabled");
 }
 
 void CrepuscularRaysEffect::RegisterConstants() {
-	// Names match CrepuscularRays.fx.hlsl verbatim (see CrepuscularRaysStruct's own comment).
+	// Names match CrepuscularRays.fx.hlsl's own global declarations (see CrepuscularRaysStruct's comment).
 	TheShaderManager->RegisterConstant("TESR_VolumetricLightData1", &Constants.Tint);
 	TheShaderManager->RegisterConstant("TESR_VolumetricLightData3", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_VolumetricLightData4", &Constants.Debug);
@@ -30,7 +30,7 @@ void CrepuscularRaysEffect::RegisterConstants() {
 void CrepuscularRaysEffect::RegisterTextures() {
 	// Half resolution: the march is the expensive part (64 shadow-atlas samples per pixel) and
 	// the shaft has no fine detail the depth-aware composite upsample can't recover. Texture name
-	// matches CrepuscularRays.fx.hlsl's own TESR_VolumetricLightBuffer sampler declaration verbatim.
+	// matches CrepuscularRays.fx.hlsl's own TESR_VolumetricLightBuffer sampler declaration.
 	TheTextureManager->InitTexture("TESR_VolumetricLightBuffer", &Textures.MarchTexture, &Textures.MarchSurface,
 		TheRenderManager->width / 2, TheRenderManager->height / 2, D3DFMT_A16B16G16R16F);
 }

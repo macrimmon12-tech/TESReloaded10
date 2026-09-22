@@ -388,14 +388,9 @@ Enabled = true                        # Screenspace godrays (Quality 0, Classic)
 
 
 [_Shaders.CrepuscularRays.Main]
-Strength = 1.0                        # Overall multiplier on the accumulated shaft light.
-Anisotropy = 0.6                      # Forward-scattering lobe sharpness (0-1, Henyey-Greenstein g). Higher makes shafts brighter and narrower when looking along them toward the sun.
-FogInfluence = 0.0                    # 0 keeps a constant scattering medium regardless of weather. 1 scales it by the weather's own fog density, so shafts thicken in fog and thin out in clear air.
-AccumDistance = 4000.0                # World-unit distance the raymarch covers -- also the falloff range light fades out over. Shorter is cheaper and keeps detail concentrated near the camera. First-guess default, not yet validated in-game -- with 64 fixed samples, too large a value spreads them thin enough to step over typical near-camera occluders (trees, poles).
-TintR = 1.0                           # Red channel of the scatter color tint, multiplied onto the sun's own color.
-TintG = 1.0                           # Green channel of the scatter color tint.
-TintB = 1.0                           # Blue channel of the scatter color tint.
-DebugMode = 0                         # 0: normal render. 1: the march's own output with no scene under it. 2-12: shadow-lookup diagnostics -- see the debugMode comment in CrepuscularRays.fx.hlsl for what each one shows.
+Strength = 0.7                        # How much to darken occluded pixels (0 = effect off, 1 = fully black where the march finds total occlusion). Unoccluded pixels are never touched at any value, by design -- see CrepuscularRays.fx.hlsl's header for why this darkens shadowed areas instead of brightening lit ones.
+AccumDistance = 4000.0                # World-unit distance the raymarch covers -- also the falloff range the occlusion signal fades out over. Shorter is cheaper and keeps detail concentrated near the camera. First-guess default, not yet validated in-game -- with 64 fixed samples, too large a value spreads them thin enough to step over typical near-camera occluders (trees, poles).
+DebugMode = 0                         # 0: normal render. 1: the march's own occlusion output with no scene under it. 2-12: shadow-lookup diagnostics -- see the debugMode comment in CrepuscularRays.fx.hlsl for what each one shows.
 DitherEnabled = true                  # Blue-noise dither on the march's start offset, hides raymarch step banding. Leave on unless diagnosing with DebugMode.
 
 [_Shaders.CrepuscularRays.Status]
