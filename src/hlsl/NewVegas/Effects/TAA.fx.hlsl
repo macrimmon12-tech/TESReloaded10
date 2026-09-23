@@ -1,4 +1,4 @@
-// Temporal anti-aliasing, phase 1: temporal accumulation with reprojection, no sub-pixel jitter.
+// Temporal anti-aliasing: temporal accumulation with reprojection, over a sub-pixel-jittered world.
 //
 // Ported from Oblivion Reloaded E3 (arafuse/tes-reloaded, OblivionReloaded/Shaders/TAA/TAA.fx.hlsl),
 // which builds on:
@@ -8,11 +8,19 @@
 // and the AABB clip follows Playdead's INSIDE TAA (Pedersen, GDC 2016).
 //
 // Each frame blends the current image with the previous TAA result, fetched from where this
-// pixel's surface was on screen last frame. Without jitter every frame samples the same pixel
-// centres, so a still image gains nothing -- the history converges to the current frame. What
-// this does fix is instability: edges and fine detail crawl as the camera moves because each
-// frame lands them at a different sub-pixel offset, and averaging those frames is exactly the
-// sub-pixel coverage that crawl is missing. Temporally noisy effects settle for the same reason.
+// pixel's surface was on screen last frame. The world is rendered through a projection shifted by a
+// different fraction of a pixel each frame (TAAEffect::BeginJitter), so successive frames sample
+// each pixel at different points inside it, and averaging them recovers the partial coverage a
+// single sample per pixel cannot see -- anti-aliasing, including on a still image. Motion adds more
+// of the same, which is why edges that crawl as the camera moves settle too.
+//
+// The reprojection below deliberately ignores that jitter. It reconstructs with toWorld, which
+// reads only the projection's _11/_22 scale and none of its _31/_32 offset, and last frame's camera
+// is stored the same way. That is what motion vectors must do: the current sample is SUPPOSED to
+// sit at this frame's sub-pixel offset inside the pixel -- that is the sample being accumulated --
+// while the history lives on the steady pixel grid. Folding the jitter into the reprojection would
+// give a still camera non-zero motion, and the image would drift and blur. (By the time TAA runs,
+// NVR's matrices have been restored to the unjittered camera anyway.)
 //
 // What changed from the ORL original, and why:
 //   - Reconstruction. ORL decodes its own depth format. This uses NVR's, and reprojects by

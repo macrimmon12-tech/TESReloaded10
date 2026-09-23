@@ -1,7 +1,8 @@
 #pragma once
 
-// Temporal anti-aliasing, phase 1: temporal accumulation with camera reprojection, no sub-pixel
-// jitter. Ported from Oblivion Reloaded E3's TAA; see TAA.fx.hlsl for what changed and why.
+// Temporal anti-aliasing: temporal accumulation with camera reprojection, plus sub-pixel jitter of
+// the world render so a still image gets anti-aliased too. Ported from Oblivion Reloaded E3's TAA;
+// see TAA.fx.hlsl for what changed and why, and BeginJitter below for how the jitter is applied.
 //
 // Two passes per frame, both full resolution:
 //   Resolve: current frame + reprojected history -> ResolveTexture (FP16)
@@ -20,6 +21,7 @@ public:
 		float	HistoryWeight;
 		float	ClipGamma;
 		int		DebugView;
+		bool	Jitter;
 	};
 	TAASettingsStruct	Settings;
 
@@ -46,9 +48,25 @@ public:
 
 	void	Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTarget, IDirect3DSurface9* RenderedSurface, UINT techniqueIndex, bool ClearRenderTarget, IDirect3DSurface9* SourceBuffer);
 
+	// Bracket the world scene render (RenderWorldSceneGraphHook) with these. Begin shifts the
+	// world camera's frustum by this frame's sub-pixel offset; End puts it back. Both are no-ops
+	// unless TAA will actually resolve this frame, and End is safe to call when Begin did nothing.
+	void	BeginJitter();
+	void	EndJitter();
+	bool	IsJitterActive() const { return jitterActive; }
+
 private:
 	bool		historyValid = false;
 	D3DXVECTOR4	prevCameraPosition = D3DXVECTOR4(0.0f, 0.0f, 0.0f, 0.0f);
+
+	static const int JitterSequenceLength = 8;
+	int			jitterIndex = 0;
+	bool		jitterActive = false;
+	NiCamera*	jitterCamera = nullptr;
+	float		frustumShiftX = 0.0f;
+	float		frustumShiftY = 0.0f;
+
+	bool	WillResolveThisFrame();
 
 	void	RememberCamera();
 	bool	DrawTechnique(const char* TechniqueName);
