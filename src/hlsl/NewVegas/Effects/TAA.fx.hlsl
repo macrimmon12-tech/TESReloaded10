@@ -37,7 +37,7 @@
 //     TESR_TAAData.z tells this shader to ignore it.
 
 float4 TESR_ReciprocalResolution;      // x: 1 / width, y: 1 / height
-float4 TESR_TAAData;                   // x: history weight, y: clip gamma, z: history valid (0/1), w: unused
+float4 TESR_TAAData;                   // x: history weight, y: clip gamma, z: history valid (0/1), w: debug view (0 = off)
 float4 TESR_TAAPrevProjection;         // x: last frame's projection _11, y: its _22
 float4 TESR_TAACameraDelta;            // xyz: camera position this frame minus last frame's
 float4x4 TESR_TAAPrevViewTransform;    // last frame's TESR_ViewTransform; only its rotation is read
@@ -54,6 +54,7 @@ sampler2D TESR_DepthBufferViewModel : register(s3) = sampler_state { ADDRESSU = 
 static const float historyWeight = TESR_TAAData.x;
 static const float clipGamma = TESR_TAAData.y;
 static const float historyValid = TESR_TAAData.z;
+static const float debugView = TESR_TAAData.w;
 
 struct VSOUT
 {
@@ -166,9 +167,23 @@ float3 ClipToBox(float3 history, float3 boxMin, float3 boxMax)
 	return maxUnit > 1.0f ? center + offset / maxUnit : history;
 }
 
-float4 ResolvePS(VSOUT IN) : COLOR0
+// Everything the resolve computes, kept together so the debug views read the same values the real
+// resolve used rather than a second copy of the maths that could drift from it.
+struct TAAResult
 {
-	float2 uv = IN.UVCoord;
+	float3 color;         // final colour, RGB
+	float3 current;       // this frame's colour at the pixel, RGB
+	float3 historyRaw;    // reprojected history before clipping, RGB
+	float2 motionPixels;  // where the pixel was last frame minus where it is now, in pixels
+	float weight;         // history weight actually applied: 0 = rejected, up to HistoryWeight
+	float clipAmount;     // how far clipping moved the history, in YCoCg
+	float isViewModel;    // 1 on first-person weapon pixels
+	float depth;          // linear view-space depth, game units
+};
+
+TAAResult ResolveCore(float2 uv)
+{
+	TAAResult result;
 	float2 texelSize = TESR_ReciprocalResolution.xy;
 
 	// Current-frame 3x3 neighbourhood in YCoCg: its range, and its mean and spread.
@@ -209,13 +224,66 @@ float4 ResolvePS(VSOUT IN) : COLOR0
 	float2 inside = step(0.0f, prevUV) * step(prevUV, 1.0f);
 	float onScreen = inside.x * inside.y;
 
-	float3 history = ClipToBox(RGBToYCoCg(SampleHistory(prevUV)), boxMin, boxMax);
+	float3 historyRaw = SampleHistory(prevUV);
+	float3 historyRawYCoCg = RGBToYCoCg(historyRaw);
+	float3 history = ClipToBox(historyRawYCoCg, boxMin, boxMax);
 
 	// A surface that was off screen or behind the camera last frame has no history to use, and
 	// neither does anything on the first frame after a reset.
 	float weight = historyWeight * historyValid * onScreen * inFront;
 
-	return float4(YCoCgToRGB(lerp(current, history, weight)), 1.0f);
+	result.color = YCoCgToRGB(lerp(current, history, weight));
+	result.current = YCoCgToRGB(current);
+	result.historyRaw = historyRaw;
+	result.motionPixels = (prevUV - uv) / texelSize;
+	result.weight = weight;
+	result.clipAmount = length(history - historyRawYCoCg);
+	result.isViewModel = isViewModel;
+	result.depth = readDepth(uv);
+	return result;
+}
+
+float4 ResolvePS(VSOUT IN) : COLOR0
+{
+	return float4(ResolveCore(IN.UVCoord).color, 1.0f);
+}
+
+// Debug views, selected by DebugView in [_Shaders.TAA.Main]. Drawn to the screen in place of Output,
+// BEFORE this frame's resolve is copied into the history -- so these see the same previous frame
+// the real resolve saw, and the debug picture never becomes next frame's history.
+//
+//   1  Motion. Black = the pixel did not move. Red = horizontal motion, green = vertical, full
+//      brightness at 16 pixels per frame. Standing still the whole frame must be black; turning
+//      should give a smooth, even wash across the world while the weapon stays black. Blotches,
+//      bands, or a weapon that lights up mean the reprojection is wrong.
+//   2  Reprojection error. |reprojected history - current frame|, x4, before any clipping. THE
+//      check for "does the image trail when I turn": while turning past static scenery this must
+//      stay mostly dark, lit only along edges and where something newly came into view. A frame
+//      that lights up everywhere -- a doubled image -- means last frame is being fetched from the
+//      wrong place.
+//   3  History use. Grey level = how much history was blended in (white = the full HistoryWeight,
+//      black = rejected: off screen, behind the camera, or just after a reset). Red = how hard
+//      clipping pulled the history in to stop a ghost -- expect it on moving NPCs and edges.
+//   4  Weapon mask. The frame, darkened, with pixels treated as the first-person weapon in magenta.
+//      Must cover the weapon and hands exactly, and nothing else.
+//   5  Depth, as TAA reads it: log scale, black near, white at the far plane.
+float4 DebugPS(VSOUT IN) : COLOR0
+{
+	TAAResult r = ResolveCore(IN.UVCoord);
+
+	float3 motion = float3(saturate(abs(r.motionPixels) / 16.0f), 0.0f);
+	float3 error = saturate(abs(r.historyRaw - r.current) * 4.0f);
+	float3 historyUse = float3(saturate(r.weight + r.clipAmount * 8.0f), r.weight, r.weight);
+	float3 weaponMask = lerp(r.current * 0.35f, float3(1.0f, 0.0f, 1.0f), r.isViewModel * 0.75f);
+	float3 depth = saturate(log2(1.0f + r.depth) / log2(1.0f + farZ)).xxx;
+
+	float3 view = r.color;
+	view = debugView > 0.5f && debugView < 1.5f ? motion : view;
+	view = debugView > 1.5f && debugView < 2.5f ? error : view;
+	view = debugView > 2.5f && debugView < 3.5f ? historyUse : view;
+	view = debugView > 3.5f && debugView < 4.5f ? weaponMask : view;
+	view = debugView > 4.5f ? depth : view;
+	return float4(view, 1.0f);
 }
 
 // Pixel shaders carry a PS suffix so no function shares a name with a technique -- every other
@@ -243,5 +311,14 @@ technique Output
 	{
 		VertexShader = compile vs_3_0 FrameVS();
 		PixelShader = compile ps_3_0 OutputPS();
+	}
+}
+
+technique Debug
+{
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 DebugPS();
 	}
 }
