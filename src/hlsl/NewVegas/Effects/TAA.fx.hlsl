@@ -122,8 +122,13 @@ float2 Reproject(float2 uv, out float inFront)
 	return float2(ndc.x * 0.5f + 0.5f, 0.5f - ndc.y * 0.5f);
 }
 
-// Catmull-Rom filtered history fetch in 9 taps instead of 16. After MJP (MIT licence):
+// Catmull-Rom filtered history fetch in 5 taps instead of 16. After MJP (MIT licence):
 // https://gist.github.com/TheRealMJP/bc503b0b87b643d3505d41eab8b332ae (the link ORL credits)
+//
+// MJP's version is 9 bilinear taps; the four corner ones are dropped here and the rest renormalised,
+// as Jimenez's Filmic SMAA does. A corner's weight is the product of two outer lobes, at most about
+// half a percent of the total, and exactly zero when the history is read at a texel centre -- a still
+// camera -- so that case is unchanged and moving ones differ far less than the clip moves them.
 //
 // Reprojected uvs almost never land on texel centres, and plain bilinear resampling blurs the
 // history a little every frame -- compounded over the ~10 frames a 0.9 weight averages, that is
@@ -148,20 +153,20 @@ float3 SampleHistory(float2 uv)
 	float2 texPos3 = (texPos1 + 2.0f) * texelSize;
 	float2 texPos12 = (texPos1 + offset12) * texelSize;
 
+	float wTop    = w12.x * w0.y;
+	float wLeft   = w0.x  * w12.y;
+	float wCenter = w12.x * w12.y;
+	float wRight  = w3.x  * w12.y;
+	float wBottom = w12.x * w3.y;
+
 	float3 result = 0.0f;
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos0.x,  texPos0.y)).rgb  * w0.x  * w0.y;
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos12.x, texPos0.y)).rgb  * w12.x * w0.y;
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos3.x,  texPos0.y)).rgb  * w3.x  * w0.y;
+	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos12.x, texPos0.y)).rgb  * wTop;
+	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos0.x,  texPos12.y)).rgb * wLeft;
+	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos12.x, texPos12.y)).rgb * wCenter;
+	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos3.x,  texPos12.y)).rgb * wRight;
+	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos12.x, texPos3.y)).rgb  * wBottom;
 
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos0.x,  texPos12.y)).rgb * w0.x  * w12.y;
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos12.x, texPos12.y)).rgb * w12.x * w12.y;
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos3.x,  texPos12.y)).rgb * w3.x  * w12.y;
-
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos0.x,  texPos3.y)).rgb  * w0.x  * w3.y;
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos12.x, texPos3.y)).rgb  * w12.x * w3.y;
-	result += tex2D(TESR_TAAHistoryBuffer, float2(texPos3.x,  texPos3.y)).rgb  * w3.x  * w3.y;
-
-	return max(result, 0.0f);
+	return max(result / (wTop + wLeft + wCenter + wRight + wBottom), 0.0f);
 }
 
 // Pull the history toward the box centre until it lies inside the box. Clipping along the line
