@@ -128,14 +128,21 @@ bool CinematicDOFEffect::ShouldRender() {
 	return blend > 0.001f || Settings.DebugView > 0;
 }
 
-bool CinematicDOFEffect::DrawTechnique(const char* TechniqueName) {
-	D3DXHANDLE technique = Effect->GetTechniqueByName(TechniqueName);
-	if (!technique) {
-		Logger::Log("[ERROR] CinematicDOF : technique %s not found", TechniqueName);
+bool CinematicDOFEffect::DrawTechnique(Technique technique) {
+	static const char* const Names[TechniqueCount] = { "Focus", "Prefilter", "Bokeh", "Postfilter", "Combine" };
+
+	if (techniquesGeneration != LoadGeneration) {
+		for (int i = 0; i < TechniqueCount; i++) techniques[i] = Effect->GetTechniqueByName(Names[i]);
+		techniquesGeneration = LoadGeneration;
+	}
+
+	D3DXHANDLE handle = techniques[technique];
+	if (!handle) {
+		Logger::Log("[ERROR] CinematicDOF : technique %s not found", Names[technique]);
 		return false;
 	}
 
-	Effect->SetTechnique(technique);
+	Effect->SetTechnique(handle);
 	UINT passes;
 	Effect->Begin(&passes, 0);
 	Effect->BeginPass(0);
@@ -166,32 +173,32 @@ void CinematicDOFEffect::Render(IDirect3DDevice9* Device, IDirect3DSurface9* Ren
 	int focusWrite = 1 - focusRead;
 	Device->SetTexture(FocusSampler, Textures.FocusTexture[focusRead]);
 	Device->SetRenderTarget(0, Textures.FocusSurface[focusWrite]);
-	bool ok = DrawTechnique("Focus");
+	bool ok = DrawTechnique(TechniqueFocus);
 	Device->SetTexture(FocusSampler, Textures.FocusTexture[focusWrite]); // every later pass reads this frame's focus
 
 	// Prefilter: full-res frame -> HalfA.
 	Device->SetTexture(HalfASampler, NULL);
 	Device->SetTexture(HalfBSampler, NULL);
 	Device->SetRenderTarget(0, Textures.HalfASurface);
-	ok = ok && DrawTechnique("Prefilter");
+	ok = ok && DrawTechnique(TechniquePrefilter);
 
 	// Bokeh: HalfA -> HalfB.
 	Device->SetTexture(HalfASampler, Textures.HalfATexture);
 	Device->SetRenderTarget(0, Textures.HalfBSurface);
-	ok = ok && DrawTechnique("Bokeh");
+	ok = ok && DrawTechnique(TechniqueBokeh);
 
 	// Postfilter: HalfB -> HalfA.
 	Device->SetTexture(HalfASampler, NULL);
 	Device->SetTexture(HalfBSampler, Textures.HalfBTexture);
 	Device->SetRenderTarget(0, Textures.HalfASurface);
-	ok = ok && DrawTechnique("Postfilter");
+	ok = ok && DrawTechnique(TechniquePostfilter);
 
 	// Combine: HalfA over the sharp frame -> the frame. Always restores the frame as the target, so a
 	// failed pass above leaves the image untouched rather than the device pointed at a scratch buffer.
 	Device->SetTexture(HalfBSampler, NULL);
 	Device->SetTexture(HalfASampler, Textures.HalfATexture);
 	Device->SetRenderTarget(0, RenderTarget);
-	if (ok && DrawTechnique("Combine")) {
+	if (ok && DrawTechnique(TechniqueCombine)) {
 		if (RenderedSurface) Device->StretchRect(RenderTarget, NULL, RenderedSurface, NULL, D3DTEXF_NONE);
 		focusRead = focusWrite;
 		focusValid = true;

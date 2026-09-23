@@ -2,6 +2,10 @@
 
 #include "TAA.h"
 
+// Sampler register of TESR_TAAHistoryBuffer in TAA.fx.hlsl. Render binds it itself each pass, to
+// whichever history buffer that pass needs.
+static const DWORD HistorySampler = 1;
+
 void TAAEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_TAAData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_TAAPrevProjection", &Constants.PrevProjection);
@@ -14,8 +18,8 @@ void TAAEffect::RegisterTextures() {
 	int width = TheRenderManager->width;
 	int height = TheRenderManager->height;
 
-	TheTextureManager->InitTexture("TESR_TAAResolveBuffer", &Textures.ResolveTexture, &Textures.ResolveSurface, width, height, D3DFMT_A16B16G16R16F);
-	TheTextureManager->InitTexture("TESR_TAAHistoryBuffer", &Textures.HistoryTexture, &Textures.HistorySurface, width, height, D3DFMT_A16B16G16R16F);
+	TheTextureManager->InitTexture("TESR_TAAHistoryBuffer", &Textures.HistoryTexture[0], &Textures.HistorySurface[0], width, height, D3DFMT_A16B16G16R16F);
+	TheTextureManager->InitTexture("TESR_TAAHistoryBufferB", &Textures.HistoryTexture[1], &Textures.HistorySurface[1], width, height, D3DFMT_A16B16G16R16F);
 }
 
 void TAAEffect::UpdateSettings() {
@@ -54,14 +58,25 @@ void TAAEffect::RememberCamera() {
 	prevCameraPosition = TheRenderManager->CameraPosition;
 }
 
-bool TAAEffect::DrawTechnique(const char* TechniqueName) {
-	D3DXHANDLE technique = Effect->GetTechniqueByName(TechniqueName);
-	if (!technique) {
-		Logger::Log("[ERROR] TAA : technique %s not found", TechniqueName);
+bool TAAEffect::HasTextures() const {
+	return Textures.HistorySurface[0] && Textures.HistorySurface[1];
+}
+
+bool TAAEffect::DrawTechnique(Technique technique) {
+	static const char* const Names[TechniqueCount] = { "Resolve", "Output", "Debug" };
+
+	if (techniquesGeneration != LoadGeneration) {
+		for (int i = 0; i < TechniqueCount; i++) techniques[i] = Effect->GetTechniqueByName(Names[i]);
+		techniquesGeneration = LoadGeneration;
+	}
+
+	D3DXHANDLE handle = techniques[technique];
+	if (!handle) {
+		Logger::Log("[ERROR] TAA : technique %s not found", Names[technique]);
 		return false;
 	}
 
-	Effect->SetTechnique(technique);
+	Effect->SetTechnique(handle);
 	UINT passes;
 	Effect->Begin(&passes, 0);
 	Effect->BeginPass(0);
@@ -90,7 +105,7 @@ static float Halton(int index, int base) {
 // on frames where this effect is going to run.
 bool TAAEffect::WillResolveThisFrame() {
 	return Enabled && Effect != nullptr && ShouldRender() && Settings.Jitter &&
-		Textures.ResolveSurface && Textures.HistorySurface &&
+		HasTextures() &&
 		TheSettingManager->SettingsMain.Main.RenderEffects &&
 		Player && Player->parentCell &&
 		!TheShaderManager->GameState.OverlayIsOn;
@@ -154,7 +169,7 @@ void TAAEffect::EndJitter() {
 }
 
 void TAAEffect::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTarget, IDirect3DSurface9* RenderedSurface, UINT techniqueIndex, bool ClearRenderTarget, IDirect3DSurface9* SourceBuffer) {
-	if (!Enabled || Effect == nullptr || !ShouldRender() || !Textures.ResolveSurface || !Textures.HistorySurface) {
+	if (!Enabled || Effect == nullptr || !ShouldRender() || !HasTextures()) {
 		// Whatever is in the history now will be stale, or somewhere else entirely, by the time
 		// this runs again.
 		historyValid = false;
@@ -178,20 +193,24 @@ void TAAEffect::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTarget
 	if (SourceBuffer) Device->StretchRect(RenderTarget, NULL, SourceBuffer, NULL, D3DTEXF_NONE);
 	SetCT();
 
-	Device->SetRenderTarget(0, Textures.ResolveSurface);
-	bool resolved = DrawTechnique("Resolve");
+	// Resolve into the history buffer not holding last frame, reading last frame from the other.
+	int historyWrite = 1 - historyRead;
+	Device->SetTexture(HistorySampler, Textures.HistoryTexture[historyRead]);
+	Device->SetRenderTarget(0, Textures.HistorySurface[historyWrite]);
+	bool resolved = DrawTechnique(TechniqueResolve);
 
-	// A debug view goes to the screen BEFORE the resolve is copied into the history. The history
-	// still holds last frame at this point, so the view sees exactly what the resolve saw, and the
-	// history keeps the real TAA result -- the debug picture never becomes next frame's input.
+	// A debug view reads the history sampler as last frame, which it still is: only the Output pass
+	// below is pointed at this frame's resolve. So the view sees exactly what the resolve saw, and the
+	// debug picture is drawn to the screen only -- it never becomes next frame's history.
 	Device->SetRenderTarget(0, RenderTarget);
-	bool debugDrawn = resolved && Settings.DebugView > 0 && DrawTechnique("Debug");
+	bool debugDrawn = resolved && Settings.DebugView > 0 && DrawTechnique(TechniqueDebug);
 
-	if (resolved) Device->StretchRect(Textures.ResolveSurface, NULL, Textures.HistorySurface, NULL, D3DTEXF_NONE);
+	if (resolved && !debugDrawn) Device->SetTexture(HistorySampler, Textures.HistoryTexture[historyWrite]);
 
-	if (resolved && (debugDrawn || DrawTechnique("Output"))) {
+	if (resolved && (debugDrawn || DrawTechnique(TechniqueOutput))) {
 		if (RenderedSurface) Device->StretchRect(RenderTarget, NULL, RenderedSurface, NULL, D3DTEXF_NONE);
 		RememberCamera();
+		historyRead = historyWrite;
 		historyValid = true;
 		jitterIndex = (jitterIndex + 1) % JitterSequenceLength;
 	}

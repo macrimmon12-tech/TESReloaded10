@@ -69,5 +69,9 @@ private:
 	bool	focusValid = false;		// the focus texture being read holds a real previous value
 	int		focusRead = 0;			// which FocusTexture holds last frame's focus
 
-	bool	DrawTechnique(const char* TechniqueName);
+	// Technique handles, looked up once per loaded Effect rather than by name on every draw.
+	enum Technique { TechniqueFocus, TechniquePrefilter, TechniqueBokeh, TechniquePostfilter, TechniqueCombine, TechniqueCount };
+	D3DXHANDLE	techniques[TechniqueCount] = {};
+	UInt32		techniquesGeneration = 0;	// the Effect LoadGeneration the handles belong to; 0 = none yet
+	bool	DrawTechnique(Technique technique);
 };
