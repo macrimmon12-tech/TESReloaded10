@@ -41,3 +41,35 @@ jobs:
         with:
           name: NewVegasReloaded-latest-build--${{ github.workflow_sha }}
           path: ${{env.ARTEFACT_NAME}}.zip
+
+  # Compiles every runtime effect with Microsoft's fxc, which the Windows runner ships with, so a
+  # shader that would fail to load in game shows up here instead. The game compiles these itself at
+  # load through D3DX9; fxc's fx_2_0 target is the same effect compiler family, run with the same
+  # defines EffectRecord passes (REVERSED_DEPTH as NVR runs, FORWARD_SHADOWS at its default). Separate
+  # from the build so a shader failure never holds up the DLL.
+  shaders:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile effect shaders (fxc fx_2_0)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $fxc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter fxc.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName | Select-Object -Last 1
+          if (-not $fxc) { Write-Host "::error::fxc.exe not found"; exit 1 }
+          Write-Host "Using $($fxc.FullName)"
+          $failed = @()
+          foreach ($file in Get-ChildItem src/hlsl/NewVegas/Effects -Filter *.fx.hlsl | Sort-Object Name) {
+            $out = & $fxc.FullName /nologo /T fx_2_0 /D REVERSED_DEPTH=1 /D FORWARD_SHADOWS=0 /Fo "$env:RUNNER_TEMP\$($file.BaseName).fxo" $file.FullName 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              $failed += $file.Name
+              Write-Host "::error file=$($file.FullName)::$($file.Name) failed to compile"
+              $out | ForEach-Object { Write-Host "    $_" }
+            } else {
+              Write-Host "ok    $($file.Name)"
+              $out | Where-Object { "$_" -match 'warning' -and "$_" -notmatch 'X4717' } | ForEach-Object { Write-Host "    $_" }
+            }
+          }
+          if ($failed.Count -gt 0) { Write-Host "Failed: $($failed -join ', ')"; exit 1 }
