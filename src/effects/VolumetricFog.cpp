@@ -135,6 +135,9 @@ void VolumetricFogEffect::UpdateSettings(){
 	// Moved here from Global.y (Main-scoped) so it fades via the shared shader-side nightFactor like
 	// the rest of this section, instead of needing its own interior-zeroing branch above.
 	Constants.NightTint.w = TheSettingManager->GetSettingF("Shaders.VolumetricFog.Night", "NightAmbientStrength");
+	// Packed into Global.y (its spare slot) rather than a new vector for one bool -- see the shader's
+	// skyMaskFactor for how it's used.
+	Constants.Global.y = TheSettingManager->GetSettingI("Shaders.VolumetricFog.Night", "DisableSkyMask") ? 1.0f : 0.0f;
 }
 
 void VolumetricFogEffect::RegisterConstants(){

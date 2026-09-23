@@ -969,6 +969,7 @@ TintR = 1.0                         # Red channel of a multiplicative color tint
 TintG = 1.0                         # Green channel of the night fog color tint. See TintR.
 TintB = 1.0                         # Blue channel of the night fog color tint. See TintR.
 NightAmbientStrength = 1.0          # Multiplier on the moon-phase-driven night ambient floor for fog color, so fog doesn't collapse toward black after dark (most weathers author near-black night sky colors with no moon/starlight term). Varies with the same lunar cycle as Shaders.ShadowsExteriors.Main's NightMinDarkness, and fades in the same way as DensityScale. 0 = disable, fog can go fully dark at night like before.
+DisableSkyMask = false              # Fog normally excludes the sky dome from the fog composite (see Main.RainyDisablesSkyFilter/CloudyDisablesSkyFilter for the weather-driven version of this same exclusion). Enabling this stops excluding it specifically at night, fading in through dusk the same way DensityScale does, so the sky itself can pick up fog color/haze after dark -- useful for a hazy, starless night look. false = sky dome stays excluded at night same as during the day.
 
 
 [_Shaders.VolumetricFog.Interiors]

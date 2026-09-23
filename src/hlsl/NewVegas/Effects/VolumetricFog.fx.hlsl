@@ -47,7 +47,7 @@ float4 TESR_VolumetricFogWeather;    // x: WeatherFilterBlend (animated 0-1), y:
 float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
 float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
-float4 TESR_VolumetricFogGlobal;     // x: Amount, y: unused, z: MoonVisibility, w: MinDensityFloor
+float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NightDisableSkyMask, z: MoonVisibility, w: MinDensityFloor
 // Own settings-UI section/tab (Shaders.VolumetricFog.Night), not Main/Interiors-switched, so these
 // don't crowd Main as more of them get added.
 float4 TESR_VolumetricFogNight;        // x: DensityScale, y: AmountScale, z: HeightFalloffScale, w: MaxHeightOffset
@@ -69,6 +69,10 @@ static const float FogPower = TESR_FogData.w;
 
 // scale settings for easier tuning
 static const float FogAmount = max(0, TESR_VolumetricFogGlobal.x);
+// Night-scoped (read from Shaders.VolumetricFog.Night, not the Main/Interiors switch), but packed
+// into Global's spare slot rather than a whole new vector for one bool -- see skyMaskFactor's use
+// of this below for why it's here instead of alongside the other Night* settings.
+static const float NightDisableSkyMask = TESR_VolumetricFogGlobal.y;
 // Computed in C++ (VolumetricFog.cpp), mirrors ShadowsExterior's own moon-phase shadow-fade curve.
 static const float MoonVisibility = saturate(TESR_VolumetricFogGlobal.z);
 // Height-agnostic floor on density -- see MinDensityFloor's use near the height/flat fog blend
@@ -406,6 +410,11 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// getSky's 5-tap test also lights up on pixels bordering the sky depth threshold, so this
 	// doubles as an edge-dilated mask usable for anti-aliasing that boundary further down.
 	float skyMaskFactor = lerp(1.0, 1.0 - isSky, WeatherFilterBlend); // weather can disable the sky exclusion so fog blends fully into an overcast sky
+	// Same idea, but time-of-day driven instead of weather driven: lets the sky dome itself pick up
+	// fog color/haze at night (a starless, hazy horizon look) independent of WeatherFilterBlend.
+	// nightFactor already carries isExterior, so this is a no-op in interiors regardless of the
+	// setting.
+	skyMaskFactor = lerp(skyMaskFactor, 1.0, nightFactor * NightDisableSkyMask);
 
 	// Pure depth-threshold sky test, unweighted by luma -- getSky()'s own luma weighting makes
 	// isSky fall toward 0 on a dark sky (night, heavy overcast) even though the pixel genuinely
