@@ -42,6 +42,10 @@ float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: reference path length / march range
 float4 TESR_VolumetricLightData3; // x: strength, y: extinction, z: fog influence, w: anisotropy
 float4 TESR_VolumetricLightData4; // x: scatter reference path, y: dither toggle, z: height falloff, w: dither offset this frame (0-1)
+float4 TESR_VolumetricLightTemporal;        // x: history weight, y: history valid (0/1), z: clip gamma
+float4 TESR_VolumetricLightPrevProjection;  // x: last frame's projection _11, y: its _22
+float4 TESR_VolumetricLightCameraDelta;     // xyz: camera position this frame minus last frame's
+float4x4 TESR_VolumetricLightPrevViewTransform; // last frame's TESR_ViewTransform; only its rotation is read
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -67,6 +71,10 @@ sampler2D TESR_VolumetricLightBuffer : register(s3) = sampler_state { ADDRESSU =
 // Blue noise for the march start offset, the same texture SunShadows and AmbientOcclusion use.
 // WRAP so it tiles one texel per pixel across the half-res buffer.
 sampler2D TESR_NoiseSampler : register(s4) < string ResourceName = "Effects\bluenoise256.dds"; > = sampler_state { ADDRESSU = WRAP; ADDRESSV = WRAP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
+
+// Last frame's filtered march, for the Temporal pass. LINEAR, because the reprojected position
+// almost never lands on a texel centre.
+sampler2D TESR_VolumetricLightHistory : register(s5) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 
 #include "Includes/Helpers.hlsl"
 #include "Includes/Depth.hlsl"
@@ -692,6 +700,84 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     return delinearize(float4(result, 1.0f));
 }
 
+// --- Temporal filter (half res) -------------------------------------------------------------
+// Blends each frame's march with the filtered result of the frames before it, reprojected for camera
+// motion. The march's blue-noise dither moves every frame while this runs (see UpdateConstants), so
+// the history averages many different sample placements into one smooth shaft -- the step-boundary
+// grain a single frame cannot avoid. Same method as TAA.fx.hlsl, at the march's resolution and
+// before the upsample, so it works with TAA off and costs a quarter as much.
+//
+// Rejection is a clamp of the history to the current frame's 3x3 neighbourhood, shrunk to the mean
+// plus or minus ClipGamma standard deviations (Salvi's variance clipping). The dither's grain sits
+// inside that range and is averaged away; a shaft that genuinely moved or a disocclusion falls
+// outside it and is pulled back to the current frame.
+static const float temporalWeight = TESR_VolumetricLightTemporal.x;
+static const float temporalValid = TESR_VolumetricLightTemporal.y;
+static const float temporalGamma = TESR_VolumetricLightTemporal.z;
+
+// Where the surface under uv was on screen last frame. Inverts toWorld with last frame's camera: the
+// same maths as TAA's Reproject, on this effect's own copy of the previous camera. The view matrix
+// holds only rotation here -- position arrives as a CPU-side delta, so no large world coordinates
+// reach the GPU.
+float2 ReprojectToPrevious(float2 uv, out float inFront) {
+    float3 cameraVector = toWorld(uv) * readDepth(uv);
+    float3 fromPrevCamera = cameraVector + TESR_VolumetricLightCameraDelta.xyz;
+
+    float3 prevRight   = float3(TESR_VolumetricLightPrevViewTransform[0][0], TESR_VolumetricLightPrevViewTransform[1][0], TESR_VolumetricLightPrevViewTransform[2][0]);
+    float3 prevUp      = float3(TESR_VolumetricLightPrevViewTransform[0][1], TESR_VolumetricLightPrevViewTransform[1][1], TESR_VolumetricLightPrevViewTransform[2][1]);
+    float3 prevForward = float3(TESR_VolumetricLightPrevViewTransform[0][2], TESR_VolumetricLightPrevViewTransform[1][2], TESR_VolumetricLightPrevViewTransform[2][2]);
+
+    float viewZ = dot(fromPrevCamera, prevForward);
+    inFront = viewZ > 0.0f ? 1.0f : 0.0f;
+
+    float2 ndc = float2(dot(fromPrevCamera, prevRight) * TESR_VolumetricLightPrevProjection.x,
+                        dot(fromPrevCamera, prevUp) * TESR_VolumetricLightPrevProjection.y) / max(viewZ, 1e-4f);
+    return float2(ndc.x * 0.5f + 0.5f, 0.5f - ndc.y * 0.5f);
+}
+
+float4 TemporalFilter(VSOUT IN) : COLOR0 {
+    // Same convention as the march: the quad's half-full-res-texel UV offset puts uv on the first
+    // full-res texel of this half-res pixel's 2x2 block, which is also the depth the march used.
+    float2 uv = IN.UVCoord.xy;
+    float2 halfResTexel = TESR_ReciprocalResolution.xy * 2.0f;
+    float4 current = tex2D(TESR_VolumetricLightBuffer, uv);
+
+    // Mean, variance and range of the 3x3 neighbourhood, all four channels: opacity rides in alpha
+    // and has to be filtered against the same history as the light, or the two drift apart.
+    float4 m1 = 0.0f;
+    float4 m2 = 0.0f;
+    float4 nMin = current;
+    float4 nMax = current;
+    [unroll]
+    for (int y = -1; y <= 1; y++) {
+        [unroll]
+        for (int x = -1; x <= 1; x++) {
+            float4 s = tex2D(TESR_VolumetricLightBuffer, uv + float2(x, y) * halfResTexel);
+            m1 += s;
+            m2 += s * s;
+            nMin = min(nMin, s);
+            nMax = max(nMax, s);
+        }
+    }
+    m1 /= 9.0f;
+    m2 /= 9.0f;
+    float4 sigma = sqrt(max(m2 - m1 * m1, 0.0f));
+    float4 boxMin = max(nMin, m1 - temporalGamma * sigma);
+    float4 boxMax = min(nMax, m1 + temporalGamma * sigma);
+
+    float inFront;
+    float2 prevUV = ReprojectToPrevious(uv, inFront);
+    float onScreen = step(0.0f, prevUV.x) * step(prevUV.x, 1.0f) * step(0.0f, prevUV.y) * step(prevUV.y, 1.0f);
+
+    // prevUV follows the same first-texel convention; half a full-res texel on is this half-res
+    // texel's centre, so a still camera reads the history texel back exactly, with no blur.
+    float4 history = tex2D(TESR_VolumetricLightHistory, prevUV + 0.5f * TESR_ReciprocalResolution.xy);
+    history = clamp(history, boxMin, boxMax);
+
+    float weight = temporalWeight * temporalValid * onScreen * inFront;
+    return lerp(current, history, weight);
+}
+
 technique March {
     pass {
         VertexShader = compile vs_3_0 FrameVS();
@@ -703,5 +789,13 @@ technique Composite {
     pass {
         VertexShader = compile vs_3_0 FrameVS();
         PixelShader = compile ps_3_0 CompositeLight();
+    }
+}
+
+// Technique 2, run by VolumetricLightEffect::RenderTemporal between the march and the composite.
+technique Temporal {
+    pass {
+        VertexShader = compile vs_3_0 FrameVS();
+        PixelShader = compile ps_3_0 TemporalFilter();
     }
 }

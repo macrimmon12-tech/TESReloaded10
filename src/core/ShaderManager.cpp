@@ -844,6 +844,7 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 		Effects.VolumetricLight->Enabled &&
 		Effects.VolumetricLight->ShouldRender()) {
 		RenderEffectToRT(Effects.VolumetricLight->Textures.VolumetricSurface, Effects.VolumetricLight, true);
+		Effects.VolumetricLight->RenderTemporal(Device);
 		Device->SetRenderTarget(0, RenderTarget);
 	}
 
