@@ -436,7 +436,18 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 	// in daylight instead of just on the sky. isSkyDome has no such false positives.
 	float noiseSkyMask = 1 - isSkyDome;
 	float nvrDensity = BaseDensity * timeOfDayScale * nightDensityScale * lerp(1.0, noiseVal, nightNoiseStrength * noiseSkyMask);
-	nvrDensity = nvrDensity * WeatherFilterBlend + SunriseSunsetBoost * sunsetBump * WeatherFilterBlend;
+	// Not gated by WeatherFilterBlend (unlike skyMaskFactor above): that gate exists so the
+	// composited fog can blend into an overcast sky instead of excluding the sky dome, which is a
+	// property of the final composite, not of density. nvrDensity itself -- including the wind/
+	// noise animation -- used to be multiplied by WeatherFilterBlend too, which meant Rainy/Cloudy
+	// weather (RainyDisablesSkyFilter/CloudyDisablesSkyFilter, both default on) zeroed it entirely.
+	// Since FNV has no distinct "Foggy" weather type, an actual fog weather is almost always
+	// authored as Cloudy, so that silently killed the one place the animation lives on exactly the
+	// weather it matters most for. The sky-dome distortion concern that originally motivated
+	// tying density to weather is already independently covered above by noiseSkyMask/isSkyDome,
+	// so nvrDensity no longer needs WeatherFilterBlend's gate at all -- SunriseSunsetBoost included,
+	// for the same reason.
+	nvrDensity += SunriseSunsetBoost * sunsetBump;
 
 	float strength = max(0, nvrDensity + WeatherImpact * vanillaStrength);
 
