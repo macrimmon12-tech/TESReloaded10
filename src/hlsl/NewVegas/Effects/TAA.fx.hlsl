@@ -117,7 +117,7 @@ float2 Reproject(float2 uv, out float inFront)
 // Reprojected uvs almost never land on texel centres, and plain bilinear resampling blurs the
 // history a little every frame -- compounded over the ~10 frames a 0.9 weight averages, that is
 // visible softening in motion. Catmull-Rom keeps it sharp. It can overshoot at hard edges, which
-// the clip in Resolve absorbs.
+// the clip in ResolvePS absorbs.
 float3 SampleHistory(float2 uv)
 {
 	float2 texelSize = TESR_ReciprocalResolution.xy;
@@ -166,7 +166,7 @@ float3 ClipToBox(float3 history, float3 boxMin, float3 boxMax)
 	return maxUnit > 1.0f ? center + offset / maxUnit : history;
 }
 
-float4 Resolve(VSOUT IN) : COLOR0
+float4 ResolvePS(VSOUT IN) : COLOR0
 {
 	float2 uv = IN.UVCoord;
 	float2 texelSize = TESR_ReciprocalResolution.xy;
@@ -206,7 +206,8 @@ float4 Resolve(VSOUT IN) : COLOR0
 	prevUV = lerp(prevUV, uv, isViewModel);
 	inFront = max(inFront, isViewModel);
 
-	float onScreen = all(prevUV == saturate(prevUV)) ? 1.0f : 0.0f;
+	float2 inside = step(0.0f, prevUV) * step(prevUV, 1.0f);
+	float onScreen = inside.x * inside.y;
 
 	float3 history = ClipToBox(RGBToYCoCg(SampleHistory(prevUV)), boxMin, boxMax);
 
@@ -217,8 +218,12 @@ float4 Resolve(VSOUT IN) : COLOR0
 	return float4(YCoCgToRGB(lerp(current, history, weight)), 1.0f);
 }
 
+// Pixel shaders carry a PS suffix so no function shares a name with a technique -- every other
+// effect in this codebase keeps the two distinct, and the Resolve and Output technique names are
+// what TAAEffect looks up.
+//
 // Copies the resolved frame, which lives in the FP16 history buffer, back to the screen.
-float4 Output(VSOUT IN) : COLOR0
+float4 OutputPS(VSOUT IN) : COLOR0
 {
 	return float4(tex2D(TESR_TAAHistoryBuffer, IN.UVCoord).rgb, 1.0f);
 }
@@ -228,7 +233,7 @@ technique Resolve
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 Resolve();
+		PixelShader = compile ps_3_0 ResolvePS();
 	}
 }
 
@@ -237,6 +242,6 @@ technique Output
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 Output();
+		PixelShader = compile ps_3_0 OutputPS();
 	}
 }
