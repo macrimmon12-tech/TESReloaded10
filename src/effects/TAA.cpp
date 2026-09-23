@@ -6,6 +6,7 @@ void TAAEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_TAAData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_TAAPrevProjection", &Constants.PrevProjection);
 	TheShaderManager->RegisterConstant("TESR_TAACameraDelta", &Constants.CameraDelta);
+	TheShaderManager->RegisterConstant("TESR_TAAWeapon", &Constants.Weapon);
 	TheShaderManager->RegisterConstant("TESR_TAAPrevViewTransform", (D3DXVECTOR4*)&Constants.PrevViewTransform);
 }
 
@@ -31,12 +32,17 @@ void TAAEffect::UpdateSettings() {
 	Settings.DebugView = std::clamp(TheSettingManager->GetSettingI("Shaders.TAA.Main", "DebugView"), 0, 5);
 
 	Settings.Jitter = TheSettingManager->GetSettingI("Shaders.TAA.Main", "Jitter") != 0;
+
+	// 0 is a real value here -- the weapon skipped entirely -- so a missing key reading as 0 is taken
+	// at its word rather than replaced by the default.
+	Settings.WeaponTAA = std::clamp(TheSettingManager->GetSettingF("Shaders.TAA.Main", "WeaponTAA"), 0.0f, 1.0f);
 }
 
 void TAAEffect::UpdateConstants() {
 	Constants.Data.x = Settings.HistoryWeight;
 	Constants.Data.y = Settings.ClipGamma;
 	Constants.Data.w = (float)Settings.DebugView;
+	Constants.Weapon = D3DXVECTOR4(Settings.WeaponTAA, 0.0f, 0.0f, 0.0f);
 }
 
 // Record the camera that rendered the frame now in the history buffer, for next frame's
