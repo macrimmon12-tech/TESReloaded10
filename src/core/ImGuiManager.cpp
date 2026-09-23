@@ -1913,7 +1913,8 @@ void ImGuiManager::Render() {
 // ---- Menu UI -----------------------------------------------------------------
 
 static bool ShouldHideSection(const std::string& name) {
-	return name == "WeatherMode" || name == "Status";
+	// CinematicDOF is kept out of the menu for this build; it is still driven by its TOML section.
+	return name == "WeatherMode" || name == "Status" || name == "CinematicDOF";
 }
 
 static bool ShouldHideKey(const char* key) {
