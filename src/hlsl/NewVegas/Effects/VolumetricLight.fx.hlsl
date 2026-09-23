@@ -42,7 +42,7 @@ float4 TESR_GameTime; // z: seconds since startup -- used only to advance the di
 float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: reference path length / march range
 float4 TESR_VolumetricLightData3; // x: strength, y: extinction, z: fog influence, w: anisotropy
-float4 TESR_VolumetricLightData4; // x: unused, y: dither toggle, z: height falloff, w: dither motion
+float4 TESR_VolumetricLightData4; // x: scatter reference path, y: dither toggle, z: height falloff, w: dither motion
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -238,6 +238,9 @@ static const float anisotropy = TESR_VolumetricLightData3.w;
 static const float fogInfluence = TESR_VolumetricLightData3.z;
 static const float extinction = TESR_VolumetricLightData3.y;
 static const float heightFalloff = TESR_VolumetricLightData4.z;
+// Path length the scattering and extinction coefficients are expressed against. Floored in
+// VolumetricLightEffect::UpdateSettings because this is a divisor.
+static const float scatterReference = max(TESR_VolumetricLightData4.x, 1.0f);
 
 // Geometric step growth: ds_i = ds_0 * r^i, so samples crowd near the camera and spread out with
 // distance. A uniform march has to spend the same resolution on air 4000 units away, where one
@@ -474,13 +477,31 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // Weather fog sets the baseline density of the medium; GetHeightDensity varies it per sample.
     float baseDensity = lerp(1.0f, GetFogDensity(), saturate(fogInfluence));
 
-    // Both coefficients are per world unit, expressed against accumDistance as the reference
-    // path. So a full-length ray through undiminished medium accumulates unit scattering, and
+    // Both coefficients are per world unit, expressed against ScatterReference as the reference
+    // path. A full-length ray through undiminished medium accumulates unit scattering, and
     // Extinction reads as "optical depth over that same reference path" -- 1.0 meaning the scene
     // behind it is attenuated to 1/e. Without this normalisation the coefficients would be
     // raw per-unit numbers in the 1e-4 range and every setting would need retuning by three
     // orders of magnitude.
-    float invReference = 1.0f / accumDistance;
+    //
+    // This divides by ScatterReference and NOT by accumDistance, which it used to, and the
+    // difference is the whole reason ScatterReference exists. Dividing by the march range makes
+    // one setting do two unrelated jobs, and they fight:
+    //
+    //   accumLight ~ scatterTerm * density * (Shadow_avg * rayLength) / reference
+    //
+    // rayLength is min(distance to the surface, accumDistance). A sky ray has rayLength ==
+    // accumDistance, so the ratio is 1 and raising the range costs it nothing. Every ray that
+    // hits something has rayLength pinned by the depth buffer, so raising the range divided its
+    // brightness outright -- at 12000 instead of 6000 a ray stopping at a wall 800 units away
+    // came out half as bright. Near the camera every ray terminates early, so raising the march
+    // range faded the shafts out exactly where the player is standing while the distance and the
+    // sky held station.
+    //
+    // Split in two, each setting does one job: ScatterReference sets how dense the air is,
+    // accumDistance sets how far to look. Leaving them equal reproduces the old behaviour, which
+    // is why the default is 6000 for both.
+    float invReference = 1.0f / scatterReference;
 
     float3 accumLight = 0.0f.xxx;
     // Transmittance of the medium between the camera and the current sample. Tracked separately
