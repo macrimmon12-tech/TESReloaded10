@@ -1916,7 +1916,7 @@ static bool ShouldHideSection(const std::string& name) {
 	return name == "WeatherMode" || name == "Status";
 }
 
-static bool ShouldHideKey(const char* key) {
+static bool ShouldHideKey(const char* section, const char* key) {
 	if (strncmp(key, "TextColor", 9) == 0 || strncmp(key, "TextShadow", 10) == 0) return true;
 	// LUT filenames are rendered as cycle pickers, not raw InputText
 	if (strcmp(key, "DayLUT") == 0 || strcmp(key, "NightLUT") == 0 || strcmp(key, "InteriorLUT") == 0) return true;
@@ -2502,7 +2502,7 @@ static void RenderContent() {
 	for (auto& s : settings) {
 		std::string key(s.Key);
 		if (handled.count(key)) continue;
-		if (ShouldHideKey(s.Key)) continue;
+		if (ShouldHideKey(s.Section, s.Key)) continue;
 
 		// Hide HDRCompat when PreTonemapping is off — it's meaningless in post-tonemapping mode
 		if (strcmp(s.Key, "HDRCompat") == 0 && SelectedSection == "Shaders.LUT.Main") {
