@@ -262,13 +262,24 @@ float getHeightFog(float distance, float falloff, float3 worldPos, float heightO
 // fogging by the max of the two underlying densities.
 void getHeightFogTerms(float distance, float3 extinctionColor, float3 inscatteringColor, float density, float falloff, float3 worldPos, float offset, out float3 extColor, out float3 insColor){
 	float fog = density * 0.00001 * getHeightFog(distance, falloff * 0.0001, worldPos, offset);
-	extColor = fog * extinctionColor;
-	insColor = fog * inscatteringColor;
+	// fog is an optical-depth-like accumulation (density integrated along the view ray), the same
+	// role distance*density plays in getFogFlat below -- so it goes through the same Beer-Lambert
+	// 1-exp(-x) curve rather than being used directly as a linear coverage fraction. The old linear
+	// version was implicitly clamped by the caller's saturate(1-extColor): fine while fog*extinction
+	// stayed well under 1, but the linear ramp hits that ceiling at exactly 1 and goes fully opaque
+	// with a hard clip, whereas 1-exp(-x) only ever approaches 1 asymptotically. Practically: past a
+	// certain density, raising Extinction (or NightExtinctionScale) stopped doing anything visible
+	// under the old formula, because there was no headroom left for it to add. Also lets extColor/
+	// insColor from the two paths (this and getFlatFogTerms) combine consistently, since they're now
+	// both true coverage fractions from 0 up to just under 1, rather than one being an unbounded
+	// linear multiple.
+	extColor = 1 - exp(-fog * extinctionColor);
+	insColor = 1 - exp(-fog * inscatteringColor);
 }
 
 // Flat, distance-only density -- no height term at all. This is the HeightInfluence=0 endpoint;
 // it is NOT the same as feeding falloff=0 into getHeightFog/getHeightFogTerms above, since that
-// function's outer (length(eyeVector)/distance) normalization is built assuming the integral is
+// function's outer distance/length(eyeVector) normalization is built assuming the integral is
 // doing real work and doesn't collapse to a clean distance-only result at falloff=0.
 float3 getFogFlat(float distance, float3 density){
 	return 1 - exp(-distance * density * 0.0001);
