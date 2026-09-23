@@ -49,6 +49,7 @@ float4 TESR_TAAData;                   // x: history weight, y: clip gamma, z: h
 float4 TESR_TAAPrevProjection;         // x: last frame's projection _11, y: its _22
 float4 TESR_TAACameraDelta;            // xyz: camera position this frame minus last frame's
 float4x4 TESR_TAAPrevViewTransform;    // last frame's TESR_ViewTransform; only its rotation is read
+float4 TESR_TAAWeapon;                 // x: history weight scale on first-person weapon pixels (WeaponTAA)
 
 // POINT: the neighbourhood below reads exact texels.
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
@@ -63,6 +64,7 @@ static const float historyWeight = TESR_TAAData.x;
 static const float clipGamma = TESR_TAAData.y;
 static const float historyValid = TESR_TAAData.z;
 static const float debugView = TESR_TAAData.w;
+static const float weaponHistoryScale = TESR_TAAWeapon.x;
 
 struct VSOUT
 {
@@ -239,6 +241,12 @@ TAAResult ResolveCore(float2 uv)
 	// A surface that was off screen or behind the camera last frame has no history to use, and
 	// neither does anything on the first frame after a reset.
 	float weight = historyWeight * historyValid * onScreen * inFront;
+
+	// The weapon is not jittered, so history buys it no anti-aliasing -- only stability while it sways,
+	// at the cost of some softening, because its own animation is motion zero-motion reprojection
+	// cannot follow. WeaponTAA trades one against the other: 1 treats it like the world, 0 leaves it
+	// exactly as rendered.
+	weight *= lerp(1.0f, weaponHistoryScale, isViewModel);
 
 	result.color = YCoCgToRGB(lerp(current, history, weight));
 	result.current = YCoCgToRGB(current);
