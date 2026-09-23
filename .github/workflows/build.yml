@@ -61,8 +61,12 @@ jobs:
           if (-not $fxc) { Write-Host "::error::fxc.exe not found"; exit 1 }
           Write-Host "Using $($fxc.FullName)"
           $failed = @()
-          foreach ($file in Get-ChildItem src/hlsl/NewVegas/Effects -Filter *.fx.hlsl | Sort-Object Name) {
-            $out = & $fxc.FullName /nologo /T fx_2_0 /D REVERSED_DEPTH=1 /D FORWARD_SHADOWS=0 /Fo "$env:RUNNER_TEMP\$($file.BaseName).fxo" $file.FullName 2>&1
+          # Includes nested inside Includes/ name their neighbours from the Effects folder
+          # ("Includes/Blur.hlsl"), which is where the game resolves them; fxc looks beside the
+          # including file first, so the Effects folder goes on the include path as well.
+          $effects = (Resolve-Path src/hlsl/NewVegas/Effects).Path
+          foreach ($file in Get-ChildItem $effects -Filter *.fx.hlsl | Sort-Object Name) {
+            $out = & $fxc.FullName /nologo /T fx_2_0 /I $effects /D REVERSED_DEPTH=1 /D FORWARD_SHADOWS=0 /Fo "$env:RUNNER_TEMP\$($file.BaseName).fxo" $file.FullName 2>&1
             if ($LASTEXITCODE -ne 0) {
               $failed += $file.Name
               Write-Host "::error file=$($file.FullName)::$($file.Name) failed to compile"
