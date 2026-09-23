@@ -80,6 +80,7 @@ void ShaderManager::Initialize() {
 	TheShaderManager->RegisterEffect<WetWorldEffect>(&TheShaderManager->Effects.WetWorld);
 	TheShaderManager->RegisterEffect<DitherBusterEffect>(&TheShaderManager->Effects.DitherBuster);
 	TheShaderManager->RegisterEffect<SMAAEffect>(&TheShaderManager->Effects.SMAA);
+	TheShaderManager->RegisterEffect<TAAEffect>(&TheShaderManager->Effects.TAA);
 
 	TheShaderManager->RegisterShaderCollection<TonemappingShaders>(&TheShaderManager->Shaders.Tonemapping);
 	TheShaderManager->RegisterShaderCollection<POMShaders>(&TheShaderManager->Shaders.POM);
@@ -904,6 +905,13 @@ void ShaderManager::RenderEffects(IDirect3DSurface9* RenderTarget) {
 	// copy the source render target to both the rendered and source textures (rendered gets updated after every pass, source once per effect)
 	Device->StretchRect(RenderTarget, NULL, RenderedSurface, NULL, D3DTEXF_NONE);
 	Device->StretchRect(RenderTarget, NULL, SourceSurface, NULL, D3DTEXF_NONE);
+
+	// TAA first: after tonemapping, so it resolves LDR values that cannot ghost as HDR highlights
+	// do, and ahead of everything below. Rain and snow are particles with no depth of their own
+	// to reproject by, DoF and motion blur want the stable image as input, and the lens effects
+	// and cinema overlay are fixed to the screen -- any of them run through a reprojection that
+	// assumes a static world would smear across the frame as the camera turns.
+	Effects.TAA->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 
 	Effects.Rain->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	Effects.Snow->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);

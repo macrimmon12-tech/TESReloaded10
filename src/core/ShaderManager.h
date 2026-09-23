@@ -115,6 +115,7 @@ public:
 		WetWorldEffect*			WetWorld;
 		DitherBusterEffect*		DitherBuster;
 		SMAAEffect*				SMAA;
+		TAAEffect*				TAA;
 	};
 
 	struct ShadersStruct{
