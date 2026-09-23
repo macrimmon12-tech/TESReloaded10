@@ -38,11 +38,10 @@ float4 TESR_SmoothedSunDir;
 float4 TESR_SunColor;
 float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
-float4 TESR_GameTime; // z: seconds since startup -- used only to advance the dither per frame
 float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: reference path length / march range
 float4 TESR_VolumetricLightData3; // x: strength, y: extinction, z: fog influence, w: anisotropy
-float4 TESR_VolumetricLightData4; // x: scatter reference path, y: dither toggle, z: height falloff, w: dither motion
+float4 TESR_VolumetricLightData4; // x: scatter reference path, y: dither toggle, z: height falloff, w: dither offset this frame (0-1)
 
 // Two techniques, not two passes of one technique: EffectRecord::Render() keeps a single
 // RenderTarget/RenderedSurface pair for every pass of one Render() call, so a low-res march and
@@ -319,7 +318,6 @@ float GetHeightDensity(float positionZ, float originZ) {
 }
 
 static const bool ditherEnabled = TESR_VolumetricLightData4.y > 0.5f;
-static const bool ditherMotion = TESR_VolumetricLightData4.w > 0.5f;
 
 // Calibration constant. Left at 0.04, with Strength carrying the rest, so the usable setting is
 // around 55 rather than around 1.
@@ -457,16 +455,13 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     float2 noiseUV = uv * (0.5f / TESR_ReciprocalResolution.xy) / 256.0f;
     float ditherOffset = ditherEnabled ? tex2D(TESR_NoiseSampler, noiseUV).r : 0.5f;
 
-    // Optionally advance the mask every frame so the sample pattern is not frozen in place. The
-    // multiplier puts the per-frame step near the golden ratio at 60fps (0.0167s * 37 = 0.62),
-    // which is the sequence that decorrelates fastest; any other framerate lands on a different
-    // irrational-ish step, which works just as well.
-    //
-    // Off by default, and this is a real trade rather than a free win: with no temporal filter
-    // to average the frames back together, animating the dither swaps a fixed pattern for
-    // shimmer. It pays off once frames are accumulated -- the fixed pattern is exactly what
-    // temporal accumulation cannot remove, because every frame reproduces it.
-    if (ditherMotion) ditherOffset = frac(ditherOffset + TESR_GameTime.z * 37.0f);
+    // Advance the mask every frame so the sample pattern is not frozen in place: shifted by the
+    // golden-ratio sequence, which VolumetricLightEffect::UpdateConstants steps once per frame and
+    // passes in already wrapped to [0, 1). 0, and so no motion, unless TAA is on or DitherMotion
+    // forces it -- with nothing averaging the frames back together, a moving dither is only shimmer.
+    // With TAA it pays off: a fixed pattern is exactly what temporal accumulation cannot remove,
+    // because every frame reproduces it.
+    ditherOffset = frac(ditherOffset + TESR_VolumetricLightData4.w);
 
     float lightDotView = dot(rayDirection, TESR_SmoothedSunDir.xyz);
     float3 lightColor = TESR_VolumetricLightData1.xyz * TESR_SunColor.rgb;

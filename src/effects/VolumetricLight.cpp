@@ -1,6 +1,27 @@
+#include <cmath>
+
 #include "VolumetricLight.h"
 
-void VolumetricLightEffect::UpdateConstants() {}
+// Advance the march's dither each frame when something will average the frames back together.
+//
+// TAA is that something: its history blends roughly the last ten frames, so a dither that moves each
+// frame averages out into smooth shafts, where a fixed one leaves the same grain in every frame and
+// accumulation cannot touch it. So while TAA is enabled the dither moves on its own; DitherMotion
+// forces it without TAA, where it only trades a still pattern for shimmer.
+//
+// The step is the golden ratio per frame, the additive sequence that spreads any run of frames most
+// evenly over [0, 1). Counted in frames rather than seconds, so it is the same at any frame rate.
+// Kept in double and wrapped here: the shader only ever sees the fractional offset.
+void VolumetricLightEffect::UpdateConstants() {
+	bool temporal = TheShaderManager->Effects.TAA && TheShaderManager->Effects.TAA->Enabled;
+	if (Settings.DitherMotion || temporal) {
+		ditherPhase = std::fmod(ditherPhase + 0.6180339887498949, 1.0);
+		Constants.Data4.w = (float)ditherPhase;
+	}
+	else {
+		Constants.Data4.w = 0.0f;
+	}
+}
 
 void VolumetricLightEffect::UpdateSettings() {
 	Settings.Strength = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Strength");
@@ -28,8 +49,9 @@ void VolumetricLightEffect::UpdateSettings() {
 	// ScatterReference is floored hard because the shader divides by it. It is the path length
 	// the scattering and extinction coefficients are expressed against, and it is deliberately
 	// NOT AccumDistance any more -- see the note at invReference in VolumetricLight.fx.hlsl.
+	// w, the dither's per-frame offset, is set every frame in UpdateConstants.
 	Constants.Data4 = D3DXVECTOR4(max(Settings.ScatterReference, 1.0f), Settings.Dither ? 1.0f : 0.0f,
-		max(Settings.HeightFalloff, 0.0f), Settings.DitherMotion ? 1.0f : 0.0f);
+		max(Settings.HeightFalloff, 0.0f), Constants.Data4.w);
 }
 
 void VolumetricLightEffect::RegisterConstants() {

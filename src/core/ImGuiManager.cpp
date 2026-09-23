@@ -1920,14 +1920,6 @@ static bool ShouldHideKey(const char* section, const char* key) {
 	if (strncmp(key, "TextColor", 9) == 0 || strncmp(key, "TextShadow", 10) == 0) return true;
 	// LUT filenames are rendered as cycle pickers, not raw InputText
 	if (strcmp(key, "DayLUT") == 0 || strcmp(key, "NightLUT") == 0 || strcmp(key, "InteriorLUT") == 0) return true;
-	// DitherMotion is implemented and works -- it is hidden because there is nothing yet for it
-	// to pair with. Animating the march's dither only pays off alongside a temporal filter that
-	// averages the frames back together; a fixed noise pattern is precisely what temporal
-	// accumulation can remove and nothing else can. Without one, turning this on trades a static
-	// pattern for shimmer and gains nothing. Hidden rather than deleted so the shader path stays
-	// live and it can still be set from the TOML for testing. Unhide it if a temporal filter
-	// ever lands.
-	if (strcmp(section, "Shaders.VolumetricLight.Main") == 0 && strcmp(key, "DitherMotion") == 0) return true;
 	return false;
 }
 

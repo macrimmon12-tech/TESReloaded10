@@ -30,7 +30,7 @@ public:
 	struct VolumetricLightStruct {
 		D3DXVECTOR4	Data1;	// xyz: scatter color tint, w: reference path length / march range
 		D3DXVECTOR4	Data3;	// x: strength, y: extinction, z: fog influence, w: anisotropy
-		D3DXVECTOR4	Data4;	// x: scatter reference, y: dither, z: height falloff, w: dither motion
+		D3DXVECTOR4	Data4;	// x: scatter reference, y: dither, z: height falloff, w: dither offset this frame (0-1)
 	};
 	VolumetricLightStruct	Constants;
 
@@ -45,4 +45,7 @@ public:
 	void	RegisterTextures();
 	void	UpdateSettings();
 	bool	ShouldRender();
+
+private:
+	double	ditherPhase = 0.0;	// golden-ratio sequence position, advanced once per frame while the dither moves
 };
