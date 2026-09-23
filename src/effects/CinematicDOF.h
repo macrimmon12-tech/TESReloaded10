@@ -31,6 +31,7 @@ public:
 		float	HighlightThreshold;	// brightness above which HighlightBoost applies
 		int		BokehShape;			// 0 aperture, 1 star, 2 donut, 3 heart, 4 cross
 		float	ShapeDetail;		// 0-1: star point depth, donut hole size, cross arm width
+		int		BokehQuality;		// 0: 48 samples, 1: 96, 2: 160
 		int		DebugView;
 	};
 	CinematicDOFSettingsStruct	Settings;
@@ -70,7 +71,7 @@ private:
 	int		focusRead = 0;			// which FocusTexture holds last frame's focus
 
 	// Technique handles, looked up once per loaded Effect rather than by name on every draw.
-	enum Technique { TechniqueFocus, TechniquePrefilter, TechniqueBokeh, TechniquePostfilter, TechniqueCombine, TechniqueCount };
+	enum Technique { TechniqueFocus, TechniquePrefilter, TechniqueBokeh48, TechniqueBokeh96, TechniqueBokeh160, TechniquePostfilter, TechniqueCombine, TechniqueCount };
 	D3DXHANDLE	techniques[TechniqueCount] = {};
 	UInt32		techniquesGeneration = 0;	// the Effect LoadGeneration the handles belong to; 0 = none yet
 	bool	DrawTechnique(Technique technique);

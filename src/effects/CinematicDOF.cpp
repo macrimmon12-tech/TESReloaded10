@@ -67,6 +67,8 @@ void CinematicDOFEffect::UpdateSettings() {
 	Settings.HighlightThreshold = std::clamp(TheSettingManager->GetSettingF(Section, "HighlightThreshold"), 0.0f, 0.95f);
 	Settings.BokehShape = std::clamp(TheSettingManager->GetSettingI(Section, "BokehShape"), 0, 4);
 	Settings.ShapeDetail = std::clamp(TheSettingManager->GetSettingF(Section, "ShapeDetail"), 0.0f, 1.0f);
+	// A missing key reads as 0, the 48-sample level this effect shipped with.
+	Settings.BokehQuality = std::clamp(TheSettingManager->GetSettingI(Section, "BokehQuality"), 0, 2);
 }
 
 void CinematicDOFEffect::UpdateConstants() {
@@ -129,7 +131,7 @@ bool CinematicDOFEffect::ShouldRender() {
 }
 
 bool CinematicDOFEffect::DrawTechnique(Technique technique) {
-	static const char* const Names[TechniqueCount] = { "Focus", "Prefilter", "Bokeh", "Postfilter", "Combine" };
+	static const char* const Names[TechniqueCount] = { "Focus", "Prefilter", "Bokeh48", "Bokeh96", "Bokeh160", "Postfilter", "Combine" };
 
 	if (techniquesGeneration != LoadGeneration) {
 		for (int i = 0; i < TechniqueCount; i++) techniques[i] = Effect->GetTechniqueByName(Names[i]);
@@ -185,7 +187,8 @@ void CinematicDOFEffect::Render(IDirect3DDevice9* Device, IDirect3DSurface9* Ren
 	// Bokeh: HalfA -> HalfB.
 	Device->SetTexture(HalfASampler, Textures.HalfATexture);
 	Device->SetRenderTarget(0, Textures.HalfBSurface);
-	ok = ok && DrawTechnique(TechniqueBokeh);
+	static const Technique BokehByQuality[3] = { TechniqueBokeh48, TechniqueBokeh96, TechniqueBokeh160 };
+	ok = ok && DrawTechnique(BokehByQuality[Settings.BokehQuality]);
 
 	// Postfilter: HalfB -> HalfA.
 	Device->SetTexture(HalfASampler, NULL);

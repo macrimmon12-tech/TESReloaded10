@@ -2191,6 +2191,9 @@ static const char* kShadowOrthoResolutionNames[] = {
 static const char* kEdgeDetectionNames[] = {
 	"0 - Luma", "1 - Color", "2 - Depth", "3 - Luma + Depth",
 };
+static const char* kBokehQualityNames[] = {
+	"0 - Low (48 samples)", "1 - Medium (96 samples)", "2 - High (160 samples)",
+};
 static const char* kBokehShapeNames[] = {
 	"0 - Aperture (round/blades)", "1 - Star", "2 - Donut (mirror lens)", "3 - Heart", "4 - Cross",
 };
@@ -2212,6 +2215,7 @@ static const std::unordered_map<std::string, EnumOptions> kEnumSettings = {
 	{ "Shaders.ShadowsExteriors.Ortho.Resolution",             ENUM_OPT(kShadowOrthoResolutionNames) },
 	{ "Shaders.SMAA.Main.EdgeDetection",                       ENUM_OPT(kEdgeDetectionNames) },
 	{ "Shaders.CinematicDOF.Main.BokehShape",                  ENUM_OPT(kBokehShapeNames) },
+	{ "Shaders.CinematicDOF.Main.BokehQuality",                ENUM_OPT(kBokehQualityNames) },
 };
 
 #undef ENUM_OPT

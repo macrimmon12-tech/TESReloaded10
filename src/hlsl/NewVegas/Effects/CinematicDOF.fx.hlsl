@@ -111,9 +111,13 @@ static const float UNIT_MM = 14.2875f;
 
 // Golden-angle spiral: sample i sits at radius sqrt((i + 0.5) / N) and angle i * 137.5 degrees, which
 // covers a disc evenly for any N. The direction is advanced by a fixed rotation rather than by sin and
-// cos of the angle; the angle itself is tracked alongside for the aperture shape. Compile-time count: a runtime loop bound is the construct that has crashed the D3DX
-// compiler in this codebase before.
-static const int SAMPLE_COUNT = 48;
+// cos of the angle; the angle itself is tracked alongside for the aperture shape.
+//
+// N is BokehQuality's sample count, a compile-time constant of each Bokeh technique (48, 96, 160)
+// passed as a uniform argument -- a runtime loop bound is the construct that has crashed the D3DX
+// compiler in this codebase before. The count matters more than it looks: a highlight's bokeh is
+// drawn by exactly these N samples, so at 48 over a full MaxBlur disc it is a cloud of separate dots
+// and a polygon, star or heart does not read. 96 shows the shapes; 160 fills them.
 static const float GOLDEN_COS = -0.7373688f;   // cos(2.3999632)
 static const float GOLDEN_SIN = 0.6754903f;    // sin(2.3999632)
 static const float GOLDEN_ANGLE = 2.3999632f;
@@ -325,7 +329,7 @@ float4 PrefilterPS(VSOUT IN) : COLOR0
 }
 
 // ---- Bokeh (half) ----
-float4 BokehPS(VSOUT IN) : COLOR0
+float4 BokehPS(VSOUT IN, uniform int sampleCount) : COLOR0
 {
 	float2 uv = IN.UVCoord + 0.5f * TESR_ReciprocalResolution.xy;   // half-res texel centre
 	float halfTexel = TESR_ReciprocalResolution.y * 2.0f;           // one half-res texel, screen heights
@@ -336,6 +340,7 @@ float4 BokehPS(VSOUT IN) : COLOR0
 	float4 farAcc = 0.0f;
 	float4 nearAcc = 0.0f;
 	float nearCoverage = 0.0f;
+	float areaSum = 0.0f;
 	float2 direction = float2(1.0f, 0.0f);
 	float angle = 0.0f;
 
@@ -364,11 +369,19 @@ float4 BokehPS(VSOUT IN) : COLOR0
 	float2 eyeShift = fromCentre / length(float2(1.0f / heightToU, 1.0f)) * catsEye;
 
 	[loop]
-	for (int i = 0; i < SAMPLE_COUNT; i++) {
+	for (int i = 0; i < sampleCount; i++) {
 		// radius is how far this sample is from the centre in aperture terms -- the blur a disc needs to
 		// reach it. The offset actually sampled is that, reshaped by the aperture.
-		float radius = sqrt(((float)i + 0.5f) / (float)SAMPLE_COUNT) * maxCoC;
-		float2 offset = direction * radius * OutlineRadius(angle, segment, edge, armWidth, isRound) * squeeze;
+		float radius = sqrt(((float)i + 0.5f) / (float)sampleCount) * maxCoC;
+		float outline = OutlineRadius(angle, segment, edge, armWidth, isRound);
+		float2 offset = direction * radius * outline * squeeze;
+
+		// Every direction gets the same number of samples, but a long one (a star's point, a cross's
+		// arm) spreads them over more area than a short one, so unweighted the shape comes out bright in
+		// the middle and dim at its tips. Weighting by the area each sample stands for -- the outline
+		// radius squared -- evens it out. 1 for a round disc, so that case is unchanged.
+		float area = outline * outline;
+		areaSum += area;
 		float4 s = tex2Dlod(TESR_CinematicDOFHalfA, float4(uv + float2(offset.x * heightToU, offset.y), 0.0f, 0.0f));
 
 		// Where this pixel sits inside the sample's own disc: 0 at its centre, 1 at its rim.
@@ -395,9 +408,9 @@ float4 BokehPS(VSOUT IN) : COLOR0
 		float nearWeight = saturate((-s.a - radius + margin) / margin) * eye;
 		nearWeight *= step(halfTexel, -s.a);
 
-		farAcc += float4(s.rgb, 1.0f) * farWeight * ring;
-		nearAcc += float4(s.rgb, 1.0f) * nearWeight * ring;
-		nearCoverage += nearWeight;
+		farAcc += float4(s.rgb, 1.0f) * farWeight * ring * area;
+		nearAcc += float4(s.rgb, 1.0f) * nearWeight * ring * area;
+		nearCoverage += nearWeight * area;
 
 		direction = float2(direction.x * GOLDEN_COS - direction.y * GOLDEN_SIN,
 		                   direction.x * GOLDEN_SIN + direction.y * GOLDEN_COS);
@@ -410,8 +423,9 @@ float4 BokehPS(VSOUT IN) : COLOR0
 	nearAcc.rgb /= nearAcc.a + (nearAcc.a == 0.0f ? 1.0f : 0.0f);
 
 	// How much of this pixel the near field covers: the weights' total, as a fraction of the disc.
-	// Counted without the ring weighting, which moves light around the disc but does not change its size.
-	float nearAlpha = saturate(nearCoverage * PI / (float)SAMPLE_COUNT);
+	// Counted without the ring weighting, which moves light around the disc but does not change its size,
+	// and relative to the total area so a shape's coverage means the same as a disc's.
+	float nearAlpha = saturate(nearCoverage * PI / areaSum);
 	return float4(lerp(farAcc.rgb, nearAcc.rgb, nearAlpha), nearAlpha);
 }
 
@@ -468,12 +482,31 @@ technique Prefilter
 	}
 }
 
-technique Bokeh
+// One Bokeh technique per BokehQuality level; CinematicDOFEffect::Render picks by name.
+technique Bokeh48
 {
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 BokehPS();
+		PixelShader = compile ps_3_0 BokehPS(48);
+	}
+}
+
+technique Bokeh96
+{
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 BokehPS(96);
+	}
+}
+
+technique Bokeh160
+{
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 BokehPS(160);
 	}
 }
 
