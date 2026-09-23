@@ -70,9 +70,13 @@ void CinematicDOFEffect::UpdateConstants() {
 		case 3: active = aiming || dialogue; break;
 	}
 
+	// Off in VATS, and cut rather than faded: VATS drives its own camera and screen effects, and the
+	// blur showed ghosted copies of the scene there. The debug view still runs, for diagnosing it.
+	bool vats = TheShaderManager->GameState.VATSIsOn;
+
 	// Fade rather than snap, so raising the sights pulls focus instead of flicking a switch.
-	float target = active ? 1.0f : 0.0f;
-	if (Settings.TransitionTime <= 0.0f) blend = target;
+	float target = active && !vats ? 1.0f : 0.0f;
+	if (Settings.TransitionTime <= 0.0f || vats) blend = target;
 	else if (dt > 0.0f) {
 		float step = dt / Settings.TransitionTime;
 		blend = blend < target ? (std::min)(blend + step, target) : (std::max)(blend - step, target);
