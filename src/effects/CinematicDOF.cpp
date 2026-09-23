@@ -14,6 +14,8 @@ void CinematicDOFEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFFocus", &Constants.Focus);
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFNear", &Constants.Near);
+	TheShaderManager->RegisterConstant("TESR_CinematicDOFAperture", &Constants.Aperture);
+	TheShaderManager->RegisterConstant("TESR_CinematicDOFBokeh", &Constants.Bokeh);
 }
 
 void CinematicDOFEffect::RegisterTextures() {
@@ -52,6 +54,16 @@ void CinematicDOFEffect::UpdateSettings() {
 	// missing key reading as 0 is taken at its word.
 	Settings.NearFocusRange = (std::max)(TheSettingManager->GetSettingF(Section, "NearFocusRange"), 0.0f);
 	Settings.NearBlurStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NearBlurStrength"), 0.0f, 2.0f);
+
+	// Bokeh shape. Every one of these is the plain round disc at 0 -- a missing key included -- except
+	// Anamorphic, where 0 would be a line, so it falls back to 1.
+	Settings.ApertureBlades = std::clamp(TheSettingManager->GetSettingI(Section, "ApertureBlades"), 0, 9);
+	Settings.BladeRotation = TheSettingManager->GetSettingF(Section, "BladeRotation");
+	Settings.BladeCurvature = std::clamp(TheSettingManager->GetSettingF(Section, "BladeCurvature"), 0.0f, 1.0f);
+	Settings.Anamorphic = std::clamp(orDefault(TheSettingManager->GetSettingF(Section, "Anamorphic"), 1.0f), 0.5f, 2.0f);
+	Settings.CatsEye = std::clamp(TheSettingManager->GetSettingF(Section, "CatsEye"), 0.0f, 1.0f);
+	Settings.RingBrightness = std::clamp(TheSettingManager->GetSettingF(Section, "RingBrightness"), -1.0f, 1.0f);
+	Settings.HighlightThreshold = std::clamp(TheSettingManager->GetSettingF(Section, "HighlightThreshold"), 0.0f, 0.95f);
 }
 
 void CinematicDOFEffect::UpdateConstants() {
@@ -104,6 +116,8 @@ void CinematicDOFEffect::UpdateConstants() {
 	Constants.Data.z = Settings.FocalLength;
 	Constants.Data.w = (float)Settings.DebugView;
 	Constants.Near = D3DXVECTOR4(Settings.NearFocusRange, Settings.NearBlurStrength, 0.0f, 0.0f);
+	Constants.Aperture = D3DXVECTOR4((float)Settings.ApertureBlades, D3DXToRadian(Settings.BladeRotation), Settings.BladeCurvature, Settings.Anamorphic);
+	Constants.Bokeh = D3DXVECTOR4(Settings.CatsEye, Settings.RingBrightness, Settings.HighlightThreshold, 0.0f);
 }
 
 bool CinematicDOFEffect::ShouldRender() {

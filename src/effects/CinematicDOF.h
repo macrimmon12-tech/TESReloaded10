@@ -22,6 +22,13 @@ public:
 		float	NearFocusRange;		// units kept sharp in front of the focus point
 		float	NearBlurStrength;	// scale on foreground blur only
 		float	TransitionTime;		// seconds to fade in or out
+		int		ApertureBlades;		// below 3 is a round aperture
+		float	BladeRotation;		// degrees
+		float	BladeCurvature;		// 0 straight-sided polygon, 1 round
+		float	Anamorphic;			// bokeh height / width
+		float	CatsEye;			// 0-1, discs clipped toward the frame edges
+		float	RingBrightness;		// -1 to 1, light toward the disc's centre or rim
+		float	HighlightThreshold;	// brightness above which HighlightBoost applies
 		int		DebugView;
 	};
 	CinematicDOFSettingsStruct	Settings;
@@ -31,6 +38,8 @@ public:
 		D3DXVECTOR4	Focus;	// x: manual focus (units), y: autofocus (0/1), z: focus easing this frame, w: previous focus valid (0/1)
 		D3DXVECTOR4	Data;	// x: strength 0-1, y: min focus (units), z: focal length (mm), w: debug view
 		D3DXVECTOR4	Near;	// x: near focus range (units), y: near blur strength
+		D3DXVECTOR4	Aperture;	// x: blades, y: blade rotation (radians), z: blade curvature, w: anamorphic
+		D3DXVECTOR4	Bokeh;	// x: cat's eye, y: ring brightness, z: highlight threshold
 	};
 	CinematicDOFStruct	Constants;
 

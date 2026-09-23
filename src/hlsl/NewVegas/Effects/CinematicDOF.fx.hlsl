@@ -31,6 +31,13 @@
 //    swell into discs. HighlightBoost inverts a Reinhard curve on the way in -- c / (1 - k*max(c))
 //    -- so bright pixels outweigh their neighbours through the gather, and the exact inverse,
 //    c / (1 + k*max(c)), puts the range back afterwards. Dark and mid tones are nearly untouched.
+//    HighlightThreshold starts the curve higher up, so only the brightest pixels are boosted.
+//
+//  - Aperture shape. The gather's disc can be reshaped the way a real lens shapes its bokeh:
+//    ApertureBlades turns it into a polygon (BladeRotation turns it, BladeCurvature rounds its sides
+//    back toward a circle), Anamorphic stretches it into an oval, CatsEye clips discs toward the
+//    frame edges into lemon shapes (optical vignetting), and RingBrightness moves light toward the
+//    disc's rim (older, "soap bubble" lenses) or its centre (smooth, "creamy" bokeh).
 //
 //  - Autofocus on WORLD depth. The combined depth buffer contains the first-person weapon, and when
 //    aiming down sights the sights sit dead centre -- autofocus on that would focus on the gun and
@@ -44,6 +51,8 @@ float4 TESR_CinematicDOFLens;       // x: lens coefficient f^2 * aspect / (N * 3
 float4 TESR_CinematicDOFFocus;      // x: manual focus distance (units), y: autofocus (0/1), z: focus easing this frame, w: previous focus valid (0/1)
 float4 TESR_CinematicDOFData;       // x: effect strength 0-1 (fades in and out), y: min focus distance (units), z: focal length (mm), w: debug view
 float4 TESR_CinematicDOFNear;       // x: near focus range (units), y: near blur strength
+float4 TESR_CinematicDOFAperture;   // x: blades (below 3 = round), y: blade rotation (radians), z: blade curvature 0-1, w: anamorphic squeeze
+float4 TESR_CinematicDOFBokeh;      // x: cat's eye 0-1, y: ring brightness -1 to 1, z: highlight threshold 0-0.95
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
@@ -71,17 +80,25 @@ static const float focalLength = TESR_CinematicDOFData.z;
 static const float debugView = TESR_CinematicDOFData.w;
 static const float nearFocusRange = TESR_CinematicDOFNear.x;
 static const float nearBlurStrength = TESR_CinematicDOFNear.y;
+static const float bladeCount = TESR_CinematicDOFAperture.x;
+static const float bladeRotation = TESR_CinematicDOFAperture.y;
+static const float bladeCurvature = TESR_CinematicDOFAperture.z;
+static const float anamorphic = TESR_CinematicDOFAperture.w;
+static const float catsEye = TESR_CinematicDOFBokeh.x;
+static const float ringBrightness = TESR_CinematicDOFBokeh.y;
+static const float highlightThreshold = TESR_CinematicDOFBokeh.z;
 
 // One game unit is 0.5625 in, 14.2875 mm (roughly 70 units to the metre).
 static const float UNIT_MM = 14.2875f;
 
 // Golden-angle spiral: sample i sits at radius sqrt((i + 0.5) / N) and angle i * 137.5 degrees, which
-// covers a disc evenly for any N. The direction is advanced by a fixed rotation, so the loop needs no
-// sin or cos. Compile-time count: a runtime loop bound is the construct that has crashed the D3DX
+// covers a disc evenly for any N. The direction is advanced by a fixed rotation rather than by sin and
+// cos of the angle; the angle itself is tracked alongside for the aperture shape. Compile-time count: a runtime loop bound is the construct that has crashed the D3DX
 // compiler in this codebase before.
 static const int SAMPLE_COUNT = 48;
 static const float GOLDEN_COS = -0.7373688f;   // cos(2.3999632)
 static const float GOLDEN_SIN = 0.6754903f;    // sin(2.3999632)
+static const float GOLDEN_ANGLE = 2.3999632f;
 
 struct VSOUT
 {
@@ -109,14 +126,36 @@ float Max3(float3 c)
 }
 
 // Inverse Reinhard on the way in, and its exact inverse on the way out. See the header.
+//
+// Applied to the brightest channel m, above the threshold t only: m -> t + x / (1 - k'x), x = m - t,
+// with k' = k / (1 - t) so full white is boosted by the same amount whatever the threshold. At t = 0
+// this is exactly c / (1 - k*m). The colour is scaled by the change in m, so hue is kept.
 float3 ExpandHighlights(float3 c)
 {
-	return c / max(1.0f - highlightBoost * Max3(c), 0.05f);
+	float m = Max3(c);
+	float x = max(m - highlightThreshold, 0.0f);
+	float k = highlightBoost / (1.0f - highlightThreshold);
+	float expanded = highlightThreshold + x / max(1.0f - k * x, 0.05f);
+	return m > highlightThreshold ? c * (expanded / max(m, 1e-5f)) : c;
 }
 
 float3 CompressHighlights(float3 c)
 {
-	return c / (1.0f + highlightBoost * Max3(c));
+	float m = Max3(c);
+	float x = max(m - highlightThreshold, 0.0f);
+	float k = highlightBoost / (1.0f - highlightThreshold);
+	float compressed = highlightThreshold + x / (1.0f + k * x);
+	return m > highlightThreshold ? c * (compressed / max(m, 1e-5f)) : c;
+}
+
+// Radius of the aperture's outline in the direction angle, relative to the circle it fits in: 1 for a
+// round aperture. A regular polygon with a vertex at bladeRotation reaches cos(pi/n) / cos(a) at angle
+// a from the middle of a side; BladeCurvature bends the sides back out toward the circle.
+float ApertureRadius(float angle, float segment, float apothem)
+{
+	float a = frac((angle - bladeRotation) / segment) * segment - 0.5f * segment;
+	float polygon = lerp(apothem / cos(a), 1.0f, bladeCurvature);
+	return bladeCount >= 3.0f ? polygon : 1.0f;
 }
 
 float FocusDistance()
@@ -238,35 +277,68 @@ float4 BokehPS(VSOUT IN) : COLOR0
 	float4 center = tex2D(TESR_CinematicDOFHalfA, uv);
 	float4 farAcc = 0.0f;
 	float4 nearAcc = 0.0f;
+	float nearCoverage = 0.0f;
 	float2 direction = float2(1.0f, 0.0f);
+	float angle = 0.0f;
+
+	// Aperture shape, fixed for the frame. Anamorphic keeps the disc's area: taller by sqrt(squeeze),
+	// narrower by the same.
+	float segment = 2.0f * PI / max(bladeCount, 3.0f);
+	float apothem = cos(0.5f * segment);
+	float2 squeeze = float2(rsqrt(anamorphic), sqrt(anamorphic));
+
+	// Cat's eye: this pixel's position from the frame centre, 1 at the corners. Each disc is cut by a
+	// copy of itself shifted by this much, so discs stay round in the middle and become lemon-shaped,
+	// long side along the edge, toward the corners.
+	float2 fromCentre = (uv - 0.5f) * 2.0f * float2(1.0f / heightToU, 1.0f);
+	float2 eyeShift = fromCentre / length(float2(1.0f / heightToU, 1.0f)) * catsEye;
 
 	[loop]
 	for (int i = 0; i < SAMPLE_COUNT; i++) {
+		// radius is how far this sample is from the centre in aperture terms -- the blur a disc needs to
+		// reach it. The offset actually sampled is that, reshaped by the aperture.
 		float radius = sqrt(((float)i + 0.5f) / (float)SAMPLE_COUNT) * maxCoC;
-		float2 offset = direction * radius;
+		float2 offset = direction * radius * ApertureRadius(angle, segment, apothem) * squeeze;
 		float4 s = tex2Dlod(TESR_CinematicDOFHalfA, float4(uv + float2(offset.x * heightToU, offset.y), 0.0f, 0.0f));
+
+		// Where this pixel sits inside the sample's own disc: 0 at its centre, 1 at its rim.
+		float sourceCoC = max(abs(s.a), 1e-5f);
+		float2 inDisc = direction * (radius / sourceCoC);
+
+		// Cat's eye: outside the shifted copy of the disc is cut away, softened over the same margin.
+		// Exactly 1 when off, so the edge falloff below is untouched.
+		float eye = saturate(((1.0f - length(inDisc - eyeShift)) * sourceCoC + margin) / margin);
+		eye = catsEye > 0.0f ? eye : 1.0f;
+
+		// Ring brightness: move light toward the rim (positive) or centre (negative). 2r^2 - 1 averages
+		// zero over a disc, so the total light is unchanged.
+		float rim = saturate(radius / sourceCoC);
+		float ring = 1.0f + ringBrightness * (2.0f * rim * rim - 1.0f);
 
 		// Far field: only as much blur as both this sample and the centre have, so an in-focus
 		// foreground never spreads into the background's blur.
 		float farCoC = max(min(center.a, s.a), 0.0f);
-		float farWeight = saturate((farCoC - radius + margin) / margin);
+		float farWeight = saturate((farCoC - radius + margin) / margin) * eye;
 
 		// Near field: the sample's own blur decides its reach, so it spreads past its outline.
-		float nearWeight = saturate((-s.a - radius + margin) / margin);
+		float nearWeight = saturate((-s.a - radius + margin) / margin) * eye;
 		nearWeight *= step(halfTexel, -s.a);
 
-		farAcc += float4(s.rgb, 1.0f) * farWeight;
-		nearAcc += float4(s.rgb, 1.0f) * nearWeight;
+		farAcc += float4(s.rgb, 1.0f) * farWeight * ring;
+		nearAcc += float4(s.rgb, 1.0f) * nearWeight * ring;
+		nearCoverage += nearWeight;
 
 		direction = float2(direction.x * GOLDEN_COS - direction.y * GOLDEN_SIN,
 		                   direction.x * GOLDEN_SIN + direction.y * GOLDEN_COS);
+		angle += GOLDEN_ANGLE;
 	}
 
 	farAcc.rgb /= farAcc.a + (farAcc.a == 0.0f ? 1.0f : 0.0f);
 	nearAcc.rgb /= nearAcc.a + (nearAcc.a == 0.0f ? 1.0f : 0.0f);
 
 	// How much of this pixel the near field covers: the weights' total, as a fraction of the disc.
-	float nearAlpha = saturate(nearAcc.a * PI / (float)SAMPLE_COUNT);
+	// Counted without the ring weighting, which moves light around the disc but does not change its size.
+	float nearAlpha = saturate(nearCoverage * PI / (float)SAMPLE_COUNT);
 	return float4(lerp(farAcc.rgb, nearAcc.rgb, nearAlpha), nearAlpha);
 }
 
