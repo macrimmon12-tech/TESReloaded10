@@ -467,6 +467,13 @@ LocalContrast = 2.0                    # [1.0-20.0] How willing SMAA is to call 
 [_Shaders.SMAA.Status]
 Enabled = true						  # Apply SMAA.
 
+[_Shaders.TAA.Main]
+HistoryWeight = 0.9                    # [0.5-0.97] How much of each frame is last frame's result carried forward. 0.9 averages roughly the last ten frames. Higher is smoother and settles crawling edges more completely, but anything the reprojection gets wrong -- moving NPCs, since only camera motion is tracked -- lingers longer before it clears. Lower responds faster and stabilises less.
+ClipGamma = 1.0                        # [0.5-2.5] How far last frame's colour may stray from what is around the pixel now before it is pulled back, in standard deviations of the 3x3 neighbourhood. This is the main defence against ghosting. Lower rejects stale history harder -- fewer trails behind moving things, but more of the flicker comes back; higher keeps more history -- steadier, but moving objects start leaving trails.
+
+[_Shaders.TAA.Status]
+Enabled = false                        # Temporal anti-aliasing, phase 1: blends each frame with the last, reprojected for camera motion, to settle edges and fine detail that crawl as the view moves. No sub-pixel jitter yet, so it stabilises rather than smooths: a still image is unchanged. The first-person weapon is reprojected with zero motion so it does not smear when turning.
+
 
 [_Shaders.ImageAdjust.Main]
 Brightness = 1.0                      # Overall image brightness.

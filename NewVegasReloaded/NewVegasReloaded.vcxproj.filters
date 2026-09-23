@@ -322,6 +322,9 @@
     <ClInclude Include="..\src\effects\SMAA.h">
       <Filter>Effects</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\effects\TAA.h">
+      <Filter>Effects</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Main.cpp">
@@ -559,6 +562,9 @@
       <Filter>NewVegas\Hooks</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\SMAA.cpp">
+      <Filter>Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\effects\TAA.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\SunShadows.cpp">

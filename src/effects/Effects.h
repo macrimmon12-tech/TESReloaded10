@@ -36,6 +36,7 @@
 #include "WetWorld.h"
 #include "DitherBuster.h"
 #include "SMAA.h"
+#include "TAA.h"
 
 #include "Water.h"
 #include "Tonemapping.h"
