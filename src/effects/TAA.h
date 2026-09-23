@@ -19,11 +19,12 @@ public:
 	struct TAASettingsStruct {
 		float	HistoryWeight;
 		float	ClipGamma;
+		int		DebugView;
 	};
 	TAASettingsStruct	Settings;
 
 	struct TAAStruct {
-		D3DXVECTOR4	Data;				// x: history weight, y: clip gamma, z: history valid (0/1), w: unused
+		D3DXVECTOR4	Data;				// x: history weight, y: clip gamma, z: history valid (0/1), w: debug view (0 = off)
 		D3DXVECTOR4	PrevProjection;		// x: last frame's projMatrix._11, y: its _22
 		D3DXVECTOR4	CameraDelta;		// xyz: camera position this frame minus last frame's
 		D3DXMATRIX	PrevViewTransform;	// last frame's viewMatrix; the shader reads only its rotation

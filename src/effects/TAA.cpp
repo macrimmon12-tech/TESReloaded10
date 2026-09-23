@@ -26,11 +26,15 @@ void TAAEffect::UpdateSettings() {
 
 	float gamma = TheSettingManager->GetSettingF("Shaders.TAA.Main", "ClipGamma");
 	Settings.ClipGamma = gamma > 0.0f ? std::clamp(gamma, 0.5f, 2.5f) : 1.0f;
+
+	// 0 is off, which is also what a missing key reads as.
+	Settings.DebugView = std::clamp(TheSettingManager->GetSettingI("Shaders.TAA.Main", "DebugView"), 0, 5);
 }
 
 void TAAEffect::UpdateConstants() {
 	Constants.Data.x = Settings.HistoryWeight;
 	Constants.Data.y = Settings.ClipGamma;
+	Constants.Data.w = (float)Settings.DebugView;
 }
 
 // Record the camera that rendered the frame now in the history buffer, for next frame's
@@ -86,10 +90,16 @@ void TAAEffect::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTarget
 
 	Device->SetRenderTarget(0, Textures.ResolveSurface);
 	bool resolved = DrawTechnique("Resolve");
+
+	// A debug view goes to the screen BEFORE the resolve is copied into the history. The history
+	// still holds last frame at this point, so the view sees exactly what the resolve saw, and the
+	// history keeps the real TAA result -- the debug picture never becomes next frame's input.
+	Device->SetRenderTarget(0, RenderTarget);
+	bool debugDrawn = resolved && Settings.DebugView > 0 && DrawTechnique("Debug");
+
 	if (resolved) Device->StretchRect(Textures.ResolveSurface, NULL, Textures.HistorySurface, NULL, D3DTEXF_NONE);
 
-	Device->SetRenderTarget(0, RenderTarget);
-	if (resolved && DrawTechnique("Output")) {
+	if (resolved && (debugDrawn || DrawTechnique("Output"))) {
 		if (RenderedSurface) Device->StretchRect(RenderTarget, NULL, RenderedSurface, NULL, D3DTEXF_NONE);
 		RememberCamera();
 		historyValid = true;
