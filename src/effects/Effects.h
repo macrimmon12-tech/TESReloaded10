@@ -37,6 +37,7 @@
 #include "DitherBuster.h"
 #include "SMAA.h"
 #include "TAA.h"
+#include "CinematicDOF.h"
 
 #include "Water.h"
 #include "Tonemapping.h"

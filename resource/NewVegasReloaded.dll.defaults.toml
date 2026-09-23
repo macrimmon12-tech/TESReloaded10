@@ -476,6 +476,23 @@ DebugView = 0                          # [0-5] Replaces the frame with a diagnos
 [_Shaders.TAA.Status]
 Enabled = false                        # Temporal anti-aliasing: blends each frame with the last, reprojected for camera motion. With Jitter on it anti-aliases still images as well as settling edges and fine detail that crawl as the view moves. The first-person weapon is reprojected with zero motion so it does not smear when turning.
 
+[_Shaders.CinematicDOF.Main]
+Mode = 3                               # [0-3] When the effect is active. 0 always, 1 only while aiming down sights, 2 only in dialogue, 3 aiming or dialogue. Aiming is how modern games mostly use depth of field: the world behind your target falls away while you are down the sights and returns when you lower them.
+FocalLength = 50.0                     # [10-300] Virtual lens focal length in mm, independent of the game's field of view. This is the main "how cinematic" control. FNV's 90 degree view is physically an 18mm lens, which barely blurs anything (under half a pixel of background blur focused at 14 m, at f/2.8) -- games deliberately use a longer virtual lens than their FOV implies, and so does this. 35-50 subtle, 85-135 strong portrait-style separation.
+FStop = 2.0                            # [0.7-32] Aperture. Lower opens it up: a shallower focus zone and more blur everywhere else. Blur scales as 1/FStop, so f/1.4 is twice f/2.8.
+AutoFocus = true                       # Focus on whatever is nearest under the crosshair (five world-depth taps around the screen centre), easing toward it like a real autofocus. Uses world depth only, so aiming down sights focuses on the target and never on your own weapon. Off uses FocusDistance.
+FocusDistance = 1000.0                 # Focus distance in game units when AutoFocus is off. 70 units is about a metre.
+FocusSpeed = 6.0                       # How fast autofocus settles on a new distance, per second. 6 reaches 95% in half a second; lower is a slower, more deliberate focus pull.
+MinFocusDistance = 50.0                # Autofocus never focuses nearer than this, in game units, so brushing past a wall or foliage does not throw everything out of focus.
+MaxBlur = 2.5                          # [0.1-6.0] Largest blur radius, as a percentage of screen height (2.5 is 27 px at 1080p). Caps the thin-lens blur and sets the bokeh kernel's reach. Very large values thin out the samples and look grainy.
+HighlightBoost = 0.6                   # [0.0-0.95] Fakes HDR bokeh. This runs after tonemapping, so bright lights have no extra energy to swell into discs; boosting them through the blur and restoring them after makes highlights bloom into bokeh while leaving mid-tones alone. 0 is a plain blur.
+WeaponBlur = 0.0                       # [0.0-1.0] How much the first-person weapon blurs by its own depth. 0 keeps it sharp; 1 blurs it like any near object, which is physically right when aiming down sights but hides the iron sights.
+TransitionTime = 0.25                  # Seconds to fade the effect in or out when it switches on or off, e.g. raising and lowering the sights. 0 snaps.
+DebugView = 0                          # [0-1] 1 shows the circle of confusion: red = background blur, blue = foreground blur, black = in focus, full brightness at MaxBlur. Also forces the effect on so the map is visible whatever Mode says.
+
+[_Shaders.CinematicDOF.Status]
+Enabled = false                        # Camera-style depth of field: thin-lens blur from focal length and aperture, foreground blur that spreads past its outline, bokeh from highlights, and autofocus. Independent of the older DepthOfField effect -- turn that one off when using this, or the image is blurred twice.
+
 
 [_Shaders.ImageAdjust.Main]
 Brightness = 1.0                      # Overall image brightness.

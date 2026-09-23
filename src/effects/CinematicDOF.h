@@ -1,0 +1,58 @@
+#pragma once
+
+// Cinematic depth of field: thin-lens circle of confusion, near/far-separated gathered bokeh, and
+// autofocus on world depth. See CinematicDOF.fx.hlsl for the technique. Independent of the older
+// DepthOfField effect, so the two can be compared; running both at once blurs twice.
+class CinematicDOFEffect : public EffectRecord
+{
+public:
+	CinematicDOFEffect() : EffectRecord("CinematicDOF") {};
+
+	struct CinematicDOFSettingsStruct {
+		int		Mode;				// 0 always, 1 aiming, 2 dialogue, 3 aiming or dialogue
+		float	FocalLength;		// mm, virtual -- independent of the game's FOV
+		float	FStop;
+		bool	AutoFocus;
+		float	FocusDistance;		// units, when AutoFocus is off
+		float	FocusSpeed;			// per second
+		float	MinFocusDistance;	// units
+		float	MaxBlur;			// percent of screen height
+		float	HighlightBoost;
+		float	WeaponBlur;
+		float	TransitionTime;		// seconds to fade in or out
+		int		DebugView;
+	};
+	CinematicDOFSettingsStruct	Settings;
+
+	struct CinematicDOFStruct {
+		D3DXVECTOR4	Lens;	// x: lens coefficient, y: max CoC (screen heights), z: highlight boost, w: weapon blur
+		D3DXVECTOR4	Focus;	// x: manual focus (units), y: autofocus (0/1), z: focus easing this frame, w: previous focus valid (0/1)
+		D3DXVECTOR4	Data;	// x: strength 0-1, y: min focus (units), z: focal length (mm), w: debug view
+	};
+	CinematicDOFStruct	Constants;
+
+	struct CinematicDOFTexturesStruct {
+		IDirect3DTexture9*	HalfATexture = nullptr;
+		IDirect3DSurface9*	HalfASurface = nullptr;
+		IDirect3DTexture9*	HalfBTexture = nullptr;
+		IDirect3DSurface9*	HalfBSurface = nullptr;
+		IDirect3DTexture9*	FocusTexture[2] = { nullptr, nullptr };
+		IDirect3DSurface9*	FocusSurface[2] = { nullptr, nullptr };
+	};
+	CinematicDOFTexturesStruct	Textures;
+
+	void	UpdateConstants();
+	void	RegisterConstants();
+	void	RegisterTextures();
+	void	UpdateSettings();
+	bool	ShouldRender();
+
+	void	Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTarget, IDirect3DSurface9* RenderedSurface, UINT techniqueIndex, bool ClearRenderTarget, IDirect3DSurface9* SourceBuffer);
+
+private:
+	float	blend = 0.0f;			// current strength, eased toward 1 while active and 0 while not
+	bool	focusValid = false;		// the focus texture being read holds a real previous value
+	int		focusRead = 0;			// which FocusTexture holds last frame's focus
+
+	bool	DrawTechnique(const char* TechniqueName);
+};
