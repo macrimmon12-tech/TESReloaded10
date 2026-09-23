@@ -38,6 +38,14 @@
 //    back toward a circle), Anamorphic stretches it into an oval, CatsEye clips discs toward the
 //    frame edges into lemon shapes (optical vignetting), and RingBrightness moves light toward the
 //    disc's rim (older, "soap bubble" lenses) or its centre (smooth, "creamy" bokeh).
+//    BokehShape swaps the aperture for a star, a donut (a mirror lens's central obstruction), a heart
+//    or a cross, with ShapeDetail setting the star's point depth, the donut's hole or the cross's arms.
+//
+//    Two ways of shaping, chosen per shape. Shapes whose outline can be seen whole from their centre
+//    (polygon, star, cross) move the samples: each sample's distance is scaled to the outline in its
+//    direction, so all of them land inside and none is wasted. The donut's hole and the heart, whose
+//    centre is not where its outline is simplest to describe, keep the round disc's samples and mask
+//    out the ones that fall outside, using a distance to the edge so the cut is as soft as the rim's.
 //
 //  - Autofocus on WORLD depth. The combined depth buffer contains the first-person weapon, and when
 //    aiming down sights the sights sit dead centre -- autofocus on that would focus on the gun and
@@ -53,6 +61,7 @@ float4 TESR_CinematicDOFData;       // x: effect strength 0-1 (fades in and out)
 float4 TESR_CinematicDOFNear;       // x: near focus range (units), y: near blur strength
 float4 TESR_CinematicDOFAperture;   // x: blades (below 3 = round), y: blade rotation (radians), z: blade curvature 0-1, w: anamorphic squeeze
 float4 TESR_CinematicDOFBokeh;      // x: cat's eye 0-1, y: ring brightness -1 to 1, z: highlight threshold 0-0.95
+float4 TESR_CinematicDOFShape;      // x: bokeh shape (0 aperture, 1 star, 2 donut, 3 heart, 4 cross), y: shape detail 0-1
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
@@ -87,6 +96,15 @@ static const float anamorphic = TESR_CinematicDOFAperture.w;
 static const float catsEye = TESR_CinematicDOFBokeh.x;
 static const float ringBrightness = TESR_CinematicDOFBokeh.y;
 static const float highlightThreshold = TESR_CinematicDOFBokeh.z;
+static const float bokehShape = TESR_CinematicDOFShape.x;
+static const float shapeDetail = TESR_CinematicDOFShape.y;
+
+// BokehShape values. Compared with a half-step margin, since they arrive as floats.
+static const float SHAPE_STAR = 1.0f;
+static const float SHAPE_DONUT = 2.0f;
+static const float SHAPE_HEART = 3.0f;
+static const float SHAPE_CROSS = 4.0f;
+bool IsShape(float shape) { return abs(bokehShape - shape) < 0.5f; }
 
 // One game unit is 0.5625 in, 14.2875 mm (roughly 70 units to the metre).
 static const float UNIT_MM = 14.2875f;
@@ -148,14 +166,54 @@ float3 CompressHighlights(float3 c)
 	return m > highlightThreshold ? c * (compressed / max(m, 1e-5f)) : c;
 }
 
-// Radius of the aperture's outline in the direction angle, relative to the circle it fits in: 1 for a
-// round aperture. A regular polygon with a vertex at bladeRotation reaches cos(pi/n) / cos(a) at angle
-// a from the middle of a side; BladeCurvature bends the sides back out toward the circle.
-float ApertureRadius(float angle, float segment, float apothem)
+// Radius of the bokeh outline in the direction angle, relative to the circle it fits in: 1 for a round
+// disc. See BokehPS for what segment and edge hold.
+//
+// Polygon and star are one construction: the outline runs straight from a point at radius 1 to an
+// inner corner half a segment round, and edge is that corner minus the point. A polygon is the star
+// whose inner corners sit on the middles of its sides. The cross has four arms of half-width armWidth
+// ending at 1, scaled down to fit the circle. BladeCurvature bends any of them back toward the circle.
+float OutlineRadius(float angle, float segment, float2 edge, float armWidth, bool isRound)
 {
-	float a = frac((angle - bladeRotation) / segment) * segment - 0.5f * segment;
-	float polygon = lerp(apothem / cos(a), 1.0f, bladeCurvature);
-	return bladeCount >= 3.0f ? polygon : 1.0f;
+	float a = frac((angle - bladeRotation) / segment) * segment;
+	float b = min(a, segment - a);   // angle from the nearest point, 0 to half a segment
+	float starOutline = edge.y / (cos(b) * edge.y - sin(b) * edge.x);
+	float crossOutline = min(1.0f / cos(b), armWidth / max(sin(b), 1e-4f)) * rsqrt(1.0f + armWidth * armWidth);
+	float outline = lerp(IsShape(SHAPE_CROSS) ? crossOutline : starOutline, 1.0f, bladeCurvature);
+	return isRound ? 1.0f : outline;
+}
+
+// Signed distance to a heart with its tip at the origin and lobes up to y = 1.1, negative inside
+// (Inigo Quilez's exact heart distance). y is up.
+float HeartDistance(float2 p)
+{
+	p.x = abs(p.x);
+	float lobe = length(p - float2(0.25f, 0.75f)) - 0.35355339f;   // sqrt(2) / 4
+	float m = 0.5f * max(p.x + p.y, 0.0f);
+	float2 toTop = p - float2(0.0f, 1.0f);
+	float2 toSide = p - m;
+	float body = sqrt(min(dot(toTop, toTop), dot(toSide, toSide))) * sign(p.x - p.y);
+	return p.y + p.x > 1.0f ? lobe : body;
+}
+
+// How much of a sample survives the masked shapes, from where the receiving pixel sits inside the
+// sample's disc (inDisc, 1 at the rim) and the disc's size (coc, screen heights). Softened over margin.
+float ShapeMask(float2 inDisc, float coc, float margin)
+{
+	// Donut: a round hole of ShapeDetail's size in the middle of the aperture.
+	float hole = lerp(0.25f, 0.75f, shapeDetail);
+	float edge = length(inDisc) - hole;
+
+	// Heart: the unit disc mapped onto the heart's bounding circle (radius 0.64 about (0, 0.63)). The
+	// gather samples a disc's opposite side and screen y points down; the two flips cancel for a
+	// shape symmetric left to right, so inDisc is already the right way up.
+	float s, c;
+	sincos(-bladeRotation, s, c);
+	float2 turned = float2(inDisc.x * c - inDisc.y * s, inDisc.x * s + inDisc.y * c);
+	float heart = -HeartDistance(turned * 0.64f + float2(0.0f, 0.63f)) / 0.64f;
+
+	float inside = IsShape(SHAPE_DONUT) ? edge : (IsShape(SHAPE_HEART) ? heart : 1.0f);
+	return saturate((inside * coc + margin) / margin);
 }
 
 float FocusDistance()
@@ -281,10 +339,22 @@ float4 BokehPS(VSOUT IN) : COLOR0
 	float2 direction = float2(1.0f, 0.0f);
 	float angle = 0.0f;
 
-	// Aperture shape, fixed for the frame. Anamorphic keeps the disc's area: taller by sqrt(squeeze),
+	// Bokeh shape, fixed for the frame. Anamorphic keeps the disc's area: taller by sqrt(squeeze),
 	// narrower by the same.
-	float segment = 2.0f * PI / max(bladeCount, 3.0f);
-	float apothem = cos(0.5f * segment);
+	//  - A star has ApertureBlades points (5 below 3), inner corners from 0.85 down to 0.3 of the way
+	//    out as ShapeDetail rises. A polygon's inner corners are its side middles, cos(half segment).
+	//  - A cross has four segments and arms from 0.12 to 0.5 of the way out.
+	//  - The heart is masked from a full disc; the aperture and donut are round below 3 blades.
+	bool isStar = IsShape(SHAPE_STAR);
+	bool isCross = IsShape(SHAPE_CROSS);
+	float points = bladeCount >= 3.0f ? bladeCount : (isStar ? 5.0f : 3.0f);
+	float segment = isCross ? 0.5f * PI : 2.0f * PI / points;
+	float halfSegment = 0.5f * segment;
+	float inner = isStar ? lerp(0.85f, 0.3f, shapeDetail) : cos(halfSegment);
+	float2 edge = float2(inner * cos(halfSegment) - 1.0f, inner * sin(halfSegment));
+	float armWidth = lerp(0.12f, 0.5f, shapeDetail);
+	bool isRound = IsShape(SHAPE_HEART) || (!isStar && !isCross && bladeCount < 3.0f);
+	bool masked = IsShape(SHAPE_DONUT) || IsShape(SHAPE_HEART);
 	float2 squeeze = float2(rsqrt(anamorphic), sqrt(anamorphic));
 
 	// Cat's eye: this pixel's position from the frame centre, 1 at the corners. Each disc is cut by a
@@ -298,7 +368,7 @@ float4 BokehPS(VSOUT IN) : COLOR0
 		// radius is how far this sample is from the centre in aperture terms -- the blur a disc needs to
 		// reach it. The offset actually sampled is that, reshaped by the aperture.
 		float radius = sqrt(((float)i + 0.5f) / (float)SAMPLE_COUNT) * maxCoC;
-		float2 offset = direction * radius * ApertureRadius(angle, segment, apothem) * squeeze;
+		float2 offset = direction * radius * OutlineRadius(angle, segment, edge, armWidth, isRound) * squeeze;
 		float4 s = tex2Dlod(TESR_CinematicDOFHalfA, float4(uv + float2(offset.x * heightToU, offset.y), 0.0f, 0.0f));
 
 		// Where this pixel sits inside the sample's own disc: 0 at its centre, 1 at its rim.
@@ -309,6 +379,7 @@ float4 BokehPS(VSOUT IN) : COLOR0
 		// Exactly 1 when off, so the edge falloff below is untouched.
 		float eye = saturate(((1.0f - length(inDisc - eyeShift)) * sourceCoC + margin) / margin);
 		eye = catsEye > 0.0f ? eye : 1.0f;
+		eye *= masked ? ShapeMask(inDisc, sourceCoC, margin) : 1.0f;
 
 		// Ring brightness: move light toward the rim (positive) or centre (negative). 2r^2 - 1 averages
 		// zero over a disc, so the total light is unchanged.
@@ -333,7 +404,9 @@ float4 BokehPS(VSOUT IN) : COLOR0
 		angle += GOLDEN_ANGLE;
 	}
 
-	farAcc.rgb /= farAcc.a + (farAcc.a == 0.0f ? 1.0f : 0.0f);
+	// A masked shape can leave a slightly blurred pixel with no sample inside its donut or heart; it
+	// keeps its own colour rather than going black.
+	farAcc.rgb = farAcc.a > 1e-4f ? farAcc.rgb / max(farAcc.a, 1e-4f) : center.rgb;
 	nearAcc.rgb /= nearAcc.a + (nearAcc.a == 0.0f ? 1.0f : 0.0f);
 
 	// How much of this pixel the near field covers: the weights' total, as a fraction of the disc.

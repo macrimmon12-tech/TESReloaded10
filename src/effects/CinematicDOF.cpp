@@ -16,6 +16,7 @@ void CinematicDOFEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFNear", &Constants.Near);
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFAperture", &Constants.Aperture);
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFBokeh", &Constants.Bokeh);
+	TheShaderManager->RegisterConstant("TESR_CinematicDOFShape", &Constants.Shape);
 }
 
 void CinematicDOFEffect::RegisterTextures() {
@@ -64,6 +65,8 @@ void CinematicDOFEffect::UpdateSettings() {
 	Settings.CatsEye = std::clamp(TheSettingManager->GetSettingF(Section, "CatsEye"), 0.0f, 1.0f);
 	Settings.RingBrightness = std::clamp(TheSettingManager->GetSettingF(Section, "RingBrightness"), -1.0f, 1.0f);
 	Settings.HighlightThreshold = std::clamp(TheSettingManager->GetSettingF(Section, "HighlightThreshold"), 0.0f, 0.95f);
+	Settings.BokehShape = std::clamp(TheSettingManager->GetSettingI(Section, "BokehShape"), 0, 4);
+	Settings.ShapeDetail = std::clamp(TheSettingManager->GetSettingF(Section, "ShapeDetail"), 0.0f, 1.0f);
 }
 
 void CinematicDOFEffect::UpdateConstants() {
@@ -118,6 +121,7 @@ void CinematicDOFEffect::UpdateConstants() {
 	Constants.Near = D3DXVECTOR4(Settings.NearFocusRange, Settings.NearBlurStrength, 0.0f, 0.0f);
 	Constants.Aperture = D3DXVECTOR4((float)Settings.ApertureBlades, D3DXToRadian(Settings.BladeRotation), Settings.BladeCurvature, Settings.Anamorphic);
 	Constants.Bokeh = D3DXVECTOR4(Settings.CatsEye, Settings.RingBrightness, Settings.HighlightThreshold, 0.0f);
+	Constants.Shape = D3DXVECTOR4((float)Settings.BokehShape, Settings.ShapeDetail, 0.0f, 0.0f);
 }
 
 bool CinematicDOFEffect::ShouldRender() {

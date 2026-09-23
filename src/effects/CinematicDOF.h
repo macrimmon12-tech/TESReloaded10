@@ -29,6 +29,8 @@ public:
 		float	CatsEye;			// 0-1, discs clipped toward the frame edges
 		float	RingBrightness;		// -1 to 1, light toward the disc's centre or rim
 		float	HighlightThreshold;	// brightness above which HighlightBoost applies
+		int		BokehShape;			// 0 aperture, 1 star, 2 donut, 3 heart, 4 cross
+		float	ShapeDetail;		// 0-1: star point depth, donut hole size, cross arm width
 		int		DebugView;
 	};
 	CinematicDOFSettingsStruct	Settings;
@@ -40,6 +42,7 @@ public:
 		D3DXVECTOR4	Near;	// x: near focus range (units), y: near blur strength
 		D3DXVECTOR4	Aperture;	// x: blades, y: blade rotation (radians), z: blade curvature, w: anamorphic
 		D3DXVECTOR4	Bokeh;	// x: cat's eye, y: ring brightness, z: highlight threshold
+		D3DXVECTOR4	Shape;	// x: bokeh shape, y: shape detail
 	};
 	CinematicDOFStruct	Constants;
 
