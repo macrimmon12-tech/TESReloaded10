@@ -1,3 +1,6 @@
+// CREDIT: VolumetricLight effect / shader by mcstfuerson. Used with permission.
+// See the credit header in src/hlsl/NewVegas/Effects/VolumetricLight.fx.hlsl.
+
 #include <algorithm>
 #include <cmath>
 

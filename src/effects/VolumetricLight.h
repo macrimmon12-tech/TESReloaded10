@@ -1,5 +1,8 @@
 #pragma once
 
+// CREDIT: VolumetricLight effect / shader by mcstfuerson. Used with permission.
+// See the credit header in src/hlsl/NewVegas/Effects/VolumetricLight.fx.hlsl.
+
 // Ray-marched sun light shaft: camera to visible surface, testing the sun's VSM/EVSM cascade
 // shadow atlas at each step. A pixel only lights up where that shadow value varies along the
 // ray -- i.e. an actual occluder -- there is no ambient fog/haze term. Marches into its own half

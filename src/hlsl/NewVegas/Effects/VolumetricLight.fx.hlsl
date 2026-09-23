@@ -1,3 +1,10 @@
+// =================================================================================================
+//  CREDIT: Volumetric light shader by mcstfuerson.
+//  Used with permission.
+//
+//  Keep this credit intact in this file and in any copy, port or derivative of it.
+// =================================================================================================
+
 // Volumetric Light shafts for New Vegas Reloaded.
 //
 // Originally ported from arafuse/tes-reloaded's OblivionReloaded/Shaders/VolumetricLight/
