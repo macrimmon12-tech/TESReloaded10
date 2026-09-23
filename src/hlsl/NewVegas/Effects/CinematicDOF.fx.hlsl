@@ -43,6 +43,7 @@ float4 TESR_GameTime;               // w: frame time, seconds
 float4 TESR_CinematicDOFLens;       // x: lens coefficient f^2 * aspect / (N * 36mm), y: max CoC (screen heights), z: highlight boost, w: weapon blur
 float4 TESR_CinematicDOFFocus;      // x: manual focus distance (units), y: autofocus (0/1), z: focus easing this frame, w: previous focus valid (0/1)
 float4 TESR_CinematicDOFData;       // x: effect strength 0-1 (fades in and out), y: min focus distance (units), z: focal length (mm), w: debug view
+float4 TESR_CinematicDOFNear;       // x: near focus range (units), y: near blur strength
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
@@ -68,6 +69,8 @@ static const float strength = TESR_CinematicDOFData.x;
 static const float minFocus = TESR_CinematicDOFData.y;
 static const float focalLength = TESR_CinematicDOFData.z;
 static const float debugView = TESR_CinematicDOFData.w;
+static const float nearFocusRange = TESR_CinematicDOFNear.x;
+static const float nearBlurStrength = TESR_CinematicDOFNear.y;
 
 // One game unit is 0.5625 in, 14.2875 mm (roughly 70 units to the metre).
 static const float UNIT_MM = 14.2875f;
@@ -128,11 +131,29 @@ float WorldViewZ(float2 uv)
 	return nearZ * farZ / (nearZ + d * (farZ - nearZ));
 }
 
+// Thin-lens blur for a surface at depth when focused at plane, in screen heights.
+float ThinLensCoC(float depth, float plane)
+{
+	float planeMM = plane * UNIT_MM;
+	return lensCoeff * (depth - plane) / (max(depth, 1.0f) * max(planeMM - focalLength, focalLength));
+}
+
 // Signed circle of confusion in screen heights: negative in front of the focus plane, positive behind.
+//
+// The two sides are computed apart so the foreground can be shaped on its own, the way engines expose
+// a near transition region and a near blur size:
+//  - NearFocusRange extends the in-focus zone toward the camera. In front of the focus plane the lens is
+//    treated as focused at (focus - range) instead, and clamped so nothing between that plane and the
+//    real focus plane blurs. The CoC is exactly zero at the new boundary, so the zone's edge is
+//    continuous rather than a step.
+//  - NearBlurStrength scales only the foreground result. 0 gives background-only depth of field.
+// Behind the focus plane nothing changes.
 float CircleOfConfusion(float depth, float focus)
 {
-	float focusMM = focus * UNIT_MM;
-	float coc = lensCoeff * (depth - focus) / (max(depth, 1.0f) * max(focusMM - focalLength, focalLength));
+	float nearPlane = max(focus - nearFocusRange, 1.0f);
+	float nearCoC = min(ThinLensCoC(depth, nearPlane), 0.0f) * nearBlurStrength;
+	float farCoC = max(ThinLensCoC(depth, focus), 0.0f);
+	float coc = depth < focus ? nearCoC : farCoC;
 	return clamp(coc * strength, -maxCoC, maxCoC);
 }
 

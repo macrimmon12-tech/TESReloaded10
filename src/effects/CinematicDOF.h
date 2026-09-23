@@ -19,6 +19,8 @@ public:
 		float	MaxBlur;			// percent of screen height
 		float	HighlightBoost;
 		float	WeaponBlur;
+		float	NearFocusRange;		// units kept sharp in front of the focus point
+		float	NearBlurStrength;	// scale on foreground blur only
 		float	TransitionTime;		// seconds to fade in or out
 		int		DebugView;
 	};
@@ -28,6 +30,7 @@ public:
 		D3DXVECTOR4	Lens;	// x: lens coefficient, y: max CoC (screen heights), z: highlight boost, w: weapon blur
 		D3DXVECTOR4	Focus;	// x: manual focus (units), y: autofocus (0/1), z: focus easing this frame, w: previous focus valid (0/1)
 		D3DXVECTOR4	Data;	// x: strength 0-1, y: min focus (units), z: focal length (mm), w: debug view
+		D3DXVECTOR4	Near;	// x: near focus range (units), y: near blur strength
 	};
 	CinematicDOFStruct	Constants;
 

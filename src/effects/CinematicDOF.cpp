@@ -13,6 +13,7 @@ void CinematicDOFEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFLens", &Constants.Lens);
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFFocus", &Constants.Focus);
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFData", &Constants.Data);
+	TheShaderManager->RegisterConstant("TESR_CinematicDOFNear", &Constants.Near);
 }
 
 void CinematicDOFEffect::RegisterTextures() {
@@ -46,6 +47,11 @@ void CinematicDOFEffect::UpdateSettings() {
 	Settings.WeaponBlur = std::clamp(TheSettingManager->GetSettingF(Section, "WeaponBlur"), 0.0f, 1.0f);
 	Settings.TransitionTime = (std::max)(TheSettingManager->GetSettingF(Section, "TransitionTime"), 0.0f);
 	Settings.DebugView = std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 1);
+
+	// Both are meaningful at 0 -- no extended sharp zone, and background-only depth of field -- so a
+	// missing key reading as 0 is taken at its word.
+	Settings.NearFocusRange = (std::max)(TheSettingManager->GetSettingF(Section, "NearFocusRange"), 0.0f);
+	Settings.NearBlurStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NearBlurStrength"), 0.0f, 2.0f);
 }
 
 void CinematicDOFEffect::UpdateConstants() {
@@ -93,6 +99,7 @@ void CinematicDOFEffect::UpdateConstants() {
 	Constants.Data.y = Settings.MinFocusDistance;
 	Constants.Data.z = Settings.FocalLength;
 	Constants.Data.w = (float)Settings.DebugView;
+	Constants.Near = D3DXVECTOR4(Settings.NearFocusRange, Settings.NearBlurStrength, 0.0f, 0.0f);
 }
 
 bool CinematicDOFEffect::ShouldRender() {
