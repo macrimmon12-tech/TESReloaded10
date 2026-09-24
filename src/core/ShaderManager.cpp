@@ -1,3 +1,5 @@
+#include <set>
+
 #define RESZ_CODE 0x7FA05000
 
 /**
@@ -546,15 +548,31 @@ void ShaderManager::ReloadEffects() {
 }
 
 /*
-* Load generic Vertex Shaders as well as the ones for interiors and exteriors if the exist. 
+* Logs a shader name the first time GetShaderCollection fails to match it to any collection --
+* i.e. one NVR has no override for at all, not even a disabled one, so it renders 100% vanilla
+* (no PBR, no forward shadow, nothing). Diagnostic only: BloodShaders is an empty string on the
+* NewVegas side (unlike Oblivion's populated list), so whatever FNV's own geometry-decal shader
+* is actually named has never been identified. Deduped so this doesn't spam once every shader
+* name the game creates has been seen.
+*/
+void LogUnhandledShaderOnce(const char* Name) {
+	static std::set<std::string> Seen;
+	if (Seen.insert(Name).second) {
+		Logger::Log("No shader collection matched %s (no NVR override at all -- rendering 100%% vanilla)", Name);
+	}
+}
+
+/*
+* Load generic Vertex Shaders as well as the ones for interiors and exteriors if the exist.
 * Returns false if generic one isn't found (as other ones are optional)
 */
 bool ShaderManager::LoadShader(NiD3DVertexShader* Shader) {
-	
+
 	NiD3DVertexShaderEx* VertexShader = (NiD3DVertexShaderEx*)Shader;
 	ShaderCollection* Collection = GetShaderCollection(VertexShader->Name);
 
 	if (!Collection) {
+		LogUnhandledShaderOnce(VertexShader->Name);
 		VertexShader->ShaderProg[ShaderRecordType::Default] = NULL;
 		VertexShader->ShaderProg[ShaderRecordType::Exterior] = NULL;
 		VertexShader->ShaderProg[ShaderRecordType::Interior] = NULL;
@@ -591,6 +609,7 @@ bool ShaderManager::LoadShader(NiD3DPixelShader* Shader) {
 	ShaderCollection* Collection = GetShaderCollection(PixelShader->Name);
 
 	if (!Collection) {
+		LogUnhandledShaderOnce(PixelShader->Name);
 		PixelShader->ShaderProg[ShaderRecordType::Default] = NULL;
 		PixelShader->ShaderProg[ShaderRecordType::Exterior] = NULL;
 		PixelShader->ShaderProg[ShaderRecordType::Interior] = NULL;
