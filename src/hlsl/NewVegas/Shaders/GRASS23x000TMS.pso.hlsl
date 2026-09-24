@@ -20,9 +20,10 @@
 #include "includes/Shadow.hlsl"
 #include "includes/PBRScale.hlsl"
 
-// c145/c146: past PBRScale/SkyAmbient's c134-c144.
-float4 TESR_GrassLighting  : register(c145); // x: translucency, y: roundness, z: root darkening, w: specular
-float4 TESR_GrassLighting2 : register(c146); // x: translucency focus, y: specular glossiness
+// c146/c147: past PBRScale/SkyAmbient's c134-c145. The top is SkyAmbient's other skylighting mode,
+// whose TESR_SkyIrradiance[9] array runs c137-c145.
+float4 TESR_GrassLighting  : register(c146); // x: translucency, y: roundness, z: root darkening, w: specular
+float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specular glossiness
 
 sampler2D DiffuseMap : register(s0);
 
