@@ -23,7 +23,7 @@
 // c146/c147: past PBRScale/SkyAmbient's c134-c145. The top is SkyAmbient's other skylighting mode,
 // whose TESR_SkyIrradiance[9] array runs c137-c145.
 float4 TESR_GrassLighting  : register(c146); // x: translucency, y: roundness, z: root darkening, w: specular
-float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specular glossiness, z: debug view
+float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specular glossiness, z: debug view, w: diffuse wrap
 
 sampler2D DiffuseMap : register(s0);
 
@@ -60,6 +60,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float specular = TESR_GrassLighting.w;
     float translucencyFocus = max(TESR_GrassLighting2.x, 1.0f);
     float gloss = max(TESR_GrassLighting2.y, 1.0f);
+    float wrap = saturate(TESR_GrassLighting2.w);
 
     // Outside the guard: the skylight needs this normal whether or not forward shadows
     // are compiled in, and ForwardShadows is a live setting that can switch them off.
@@ -80,12 +81,19 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 V = normalize(IN.shadowWorldPos.xyz);   // camera-relative world position: camera to pixel
 
     // Rounded normal: the variant's sun normal tipped outward by the blade's offset from the clump
-    // centre. The 8-unit softening keeps the centre from flipping direction on a tiny offset.
+    // centre. The tilt builds up over the first ~24 units out rather than jumping to full at once:
+    // with a small softening the normal flipped from one side to the other within a few units of
+    // the centre, and a low sun drew a hard terminator straight down the middle of every clump.
     float3 offset = IN.bladeOffset.xyz;
-    float3 N = normalize(normalize(IN.blade.xyz) + roundness * offset / (length(offset) + 8.0f));
+    float3 N = normalize(normalize(IN.blade.xyz) + roundness * offset / (length(offset) + 24.0f));
+
+    // Wrapped diffuse. Blades are thin and light wraps around and through them, so the side of a
+    // clump facing away from the sun dims gradually instead of dropping to black the moment N.L
+    // passes zero. (N.L + w) / (1 + w): w = 0 is plain Lambert, 1 lights all but the exact back.
+    float wrapped = saturate((dot(L, N) + wrap) / (1.0f + wrap));
 
     // At Roundness 0 keep the vertex shader's own N.L, so vanilla stays vanilla to the bit.
-    float3 sun = (grassData && roundness > 0.0f) ? sunColor * saturate(dot(L, N)) : IN.sun.xyz;
+    float3 sun = (grassData && roundness > 0.0f) ? sunColor * wrapped : IN.sun.xyz;
     sun *= shadow;
 
     // Translucency: strongest looking straight toward the sun, narrowed by the focus exponent, and
@@ -117,7 +125,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Debug views ([Shaders.Grass.Main] DebugView): one term of the lighting on its own, unfogged,
     // keeping the blade's alpha so the grass keeps its shape. All read the live settings, so a
     // slider at 0 shows as its term going flat or black.
-    //   1 rounded normals, as colour      2 sun diffuse: N.L x shadow      3 sun shadow alone
+    //   1 rounded normals, as colour      2 sun diffuse: wrapped N.L x shadow   3 sun shadow alone
     //   4 translucency: the glow factor   5 sheen                          6 root (black) to tip (white)
     //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
     // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
@@ -125,7 +133,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float debugView = TESR_GrassLighting2.z;
     if (debugView > 0.5f) {
         float3 view = N * 0.5f + 0.5f;
-        view = debugView > 1.5f ? saturate(dot(L, N)) * shadow : view;
+        view = debugView > 1.5f ? wrapped * shadow : view;
         view = debugView > 2.5f ? shadow : view;
         view = debugView > 3.5f ? saturate(through * shadow) : view;
         view = debugView > 4.5f ? saturate(sheen * shadow) : view;
