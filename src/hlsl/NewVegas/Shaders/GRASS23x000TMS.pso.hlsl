@@ -71,9 +71,10 @@ sampler2D DiffuseMap : register(s0);
 // (light - camera) - pixel with the pixel camera-relative, so the large world coordinates cancel
 // before any per-pixel maths. No cube shadows: grass does not sample the point-shadow maps.
 // Also adds the light's sheen to specularOut: the same Blinn-Phong as the sun's, off the same normal
-// with the same glossiness, unscaled here (the caller applies Specular and the normal-map mask).
-// V is camera to pixel.
-float3 GrassPointLight(float4 light, float4 colour, float3 pixelFromCamera, float3 N, float3 V, float wrap, float gloss, inout float3 specularOut) {
+// with the same glossiness; and its translucency to transmitOut: the same glow through the blades as
+// the sun's, strongest with the light behind the blade as seen from the camera, narrowed by the same
+// focus. Both unscaled here: the caller applies Specular, Translucency and the rest. V is camera to pixel.
+float3 GrassPointLight(float4 light, float4 colour, float3 pixelFromCamera, float3 N, float3 V, float wrap, float gloss, float focus, inout float3 specularOut, inout float3 transmitOut) {
     float3 toLight = (light.xyz - TESR_CameraPosition.xyz) - pixelFromCamera;
     float distSq = dot(toLight, toLight);
     float att = 1.0f - saturate(distSq / max(light.w * light.w, 1.0f));
@@ -85,6 +86,7 @@ float3 GrassPointLight(float4 light, float4 colour, float3 pixelFromCamera, floa
     float3 H = L - V;
     H *= rsqrt(max(dot(H, H), 1e-8f));
     specularOut += lit * pow(saturate(dot(N, H)), gloss);
+    transmitOut += lit * pow(saturate(dot(V, L)), focus);
 
     return lit * diffuse;
 }
@@ -188,6 +190,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float through = 0.0f;
     float3 pointLight = 0.0f;
     float3 pointSheen = 0.0f;
+    float3 pointThrough = 0.0f;
     float sheen = 0.0f;
     float sheenMask = 1.0f;
     float3 mapView = 0.15f;   // DebugView 10 where there is no normal map
@@ -255,12 +258,15 @@ PS_OUTPUT main(PS_INPUT IN) {
             [loop]
             for (int i = 0; i < 12; i++) {
                 if (TESR_ShadowLightPosition[i].w <= 0.0f && TESR_LightPosition[i].w <= 0.0f) break;
-                pointLight += GrassPointLight(TESR_ShadowLightPosition[i], TESR_LightColor[i], IN.shadowWorldPos.xyz, N, V, wrap, gloss, pointSheen);
-                pointLight += GrassPointLight(TESR_LightPosition[i], TESR_LightColor[12 + i], IN.shadowWorldPos.xyz, N, V, wrap, gloss, pointSheen);
+                pointLight += GrassPointLight(TESR_ShadowLightPosition[i], TESR_LightColor[i], IN.shadowWorldPos.xyz, N, V, wrap, gloss, translucencyFocus, pointSheen, pointThrough);
+                pointLight += GrassPointLight(TESR_LightPosition[i], TESR_LightColor[12 + i], IN.shadowWorldPos.xyz, N, V, wrap, gloss, translucencyFocus, pointSheen, pointThrough);
             }
             pointLight *= pointStrength * detail;
             // Sheen from the lights: a campfire or lamp glinting on nearby blades, as the sun does.
             pointSheen *= pointStrength * detail * specular * sheenMask;
+            // Glow through the blades from the lights: a campfire behind the grass lighting it up,
+            // weighted to the tips like the sun's.
+            pointThrough *= pointStrength * detail * translucency * (0.5f + 0.5f * tip);
         }
 
         // Sheen: Blinn-Phong off the rounded normal. Normalised by hand: L - V is zero looking
@@ -287,7 +293,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 ambientNormal = (grassData && ambientBlend > 0.0f && ambientLength > 1e-3f) ? ambientBlended / ambientLength : shadowNormal;
 
     // Same split getSunLighting/getAmbientLighting apply on the object path.
-    float3 lighting = (PBRLight(sun + transmitted + pointLight) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(ambientNormal, present)) * ao;
+    float3 lighting = (PBRLight(sun + transmitted + pointLight + pointThrough) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(ambientNormal, present)) * ao;
 
     // Brightness: scales the grass texture's colour, for grass that reads too bright under the extra
     // light the grass lighting adds. Grass only, not hair; 1 (or an unset 0) leaves it untouched.
@@ -303,7 +309,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     // keeping the blade's alpha so the grass keeps its shape. All read the live settings, so a
     // slider at 0 shows as its term going flat or black.
     //   1 rounded (and normal-mapped) normals, as colour      2 sun diffuse: wrapped N.L x shadow   3 sun shadow alone
-    //   4 translucency: the glow factor   5 sheen, sun and point lights    6 root (black) to tip (white) over RootDarkeningHeight
+    //   4 translucency: the glow, sun and point lights   5 sheen, sun and point lights    6 root (black) to tip (white) over RootDarkeningHeight
     //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
     //   8 point lights alone, in their own colour
     //   9 distance falloffs: red = detail (DetailDistance), green = forward shadow reach (ShadowDistance);
@@ -317,7 +323,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         float3 view = N * 0.5f + 0.5f;
         view = debugView > 1.5f ? wrapped * shadow : view;
         view = debugView > 2.5f ? shadow : view;
-        view = debugView > 3.5f ? saturate(through * shadow) : view;
+        view = debugView > 3.5f ? saturate(through * shadow + pointThrough) : view;
         view = debugView > 4.5f ? saturate(sheen * shadow + pointSheen) : view;
         view = debugView > 5.5f ? tip : view;
         // Selects rather than an array: ps_3_0 cannot index a local array with a runtime value.
