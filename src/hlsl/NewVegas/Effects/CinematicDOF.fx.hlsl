@@ -62,6 +62,7 @@ float4 TESR_CinematicDOFNear;       // x: near focus range (units), y: near blur
 float4 TESR_CinematicDOFAperture;   // x: blades (below 3 = round), y: blade rotation (radians), z: blade curvature 0-1, w: anamorphic squeeze
 float4 TESR_CinematicDOFBokeh;      // x: cat's eye 0-1, y: ring brightness -1 to 1, z: highlight threshold 0-0.95
 float4 TESR_CinematicDOFShape;      // x: bokeh shape (0 aperture, 1 star, 2 donut, 3 heart, 4 cross), y: shape detail 0-1
+float4 TESR_CinematicDOFWeapon;     // x: weapon focus distance (units), y: weapon blur range (units), z: weapon max CoC (screen heights), w: weapon DoF strength 0-1
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
@@ -98,6 +99,10 @@ static const float ringBrightness = TESR_CinematicDOFBokeh.y;
 static const float highlightThreshold = TESR_CinematicDOFBokeh.z;
 static const float bokehShape = TESR_CinematicDOFShape.x;
 static const float shapeDetail = TESR_CinematicDOFShape.y;
+static const float weaponFocus = TESR_CinematicDOFWeapon.x;
+static const float weaponRange = TESR_CinematicDOFWeapon.y;
+static const float weaponMaxCoC = TESR_CinematicDOFWeapon.z;
+static const float weaponStrength = TESR_CinematicDOFWeapon.w;
 
 // BokehShape values. Compared with a half-step margin, since they arrive as floats.
 static const float SHAPE_STAR = 1.0f;
@@ -258,12 +263,33 @@ float CircleOfConfusion(float depth, float focus)
 	return clamp(coc * strength, -maxCoC, maxCoC);
 }
 
-// CoC at a full-resolution pixel, with the first-person weapon scaled by WeaponBlur.
+// Weapon depth of field: blur on the first-person weapon alone, growing toward the eye, the way a
+// camera focused past the gun renders the receiver and the scope's eyepiece soft and the muzzle crisp.
+//
+// Its own focus rather than the lens's. The weapon sits 5-60 units from the eye; with the lens focused
+// out in the world every part of it is so far in front of the focus plane that all of it hits the
+// same maximum blur, which is why WeaponBlur can only blur the whole gun evenly. Here the gun is sharp
+// beyond WeaponFocusDistance and ramps to WeaponMaxBlur over WeaponBlurRange nearer than that -- a
+// straight ramp, since at these distances only its shape matters and a thin lens would saturate.
+// Negative: near field, so its blur spreads softly over the world just behind the gun's edges.
+float WeaponCoC(float depth)
+{
+	return -weaponMaxCoC * saturate((weaponFocus - depth) / max(weaponRange, 1.0f)) * weaponStrength;
+}
+
+// CoC at a full-resolution pixel. Where weapon depth of field applies, the weapon takes the stronger
+// of the world lens's blur (scaled by WeaponBlur) and its own -- both near-field, so the stronger is
+// the more negative. Elsewhere on the weapon, and with weapon depth of field off, it is exactly the
+// lens's blur scaled by WeaponBlur, as before.
 float PixelCoC(float2 uv, float focus)
 {
-	float coc = CircleOfConfusion(readDepth(uv), focus);
-	float isViewModel = tex2D(TESR_DepthBufferViewModel, uv).x > 0.0f ? 1.0f : 0.0f;
-	return coc * lerp(1.0f, weaponBlur, isViewModel);
+	float depth = readDepth(uv);
+	float coc = CircleOfConfusion(depth, focus);
+	bool isViewModel = tex2D(TESR_DepthBufferViewModel, uv).x > 0.0f;
+	float lens = coc * weaponBlur;
+	float own = WeaponCoC(depth);
+	float weapon = own < 0.0f ? max(min(lens, own), -maxCoC) : lens;
+	return isViewModel ? weapon : coc;
 }
 
 // ---- Focus (1x1) ----

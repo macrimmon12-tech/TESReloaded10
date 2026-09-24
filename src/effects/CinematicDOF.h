@@ -32,6 +32,10 @@ public:
 		int		BokehShape;			// 0 aperture, 1 star, 2 donut, 3 heart, 4 cross
 		float	ShapeDetail;		// 0-1: star point depth, donut hole size, cross arm width
 		int		BokehQuality;		// 0: 48 samples, 1: 96, 2: 160
+		int		WeaponDOF;			// 0 off, 1 hip-fire only, 2 always
+		float	WeaponFocusDistance;	// units; the weapon is sharp beyond this
+		float	WeaponBlurRange;	// units over which the weapon's blur builds up nearer than that
+		float	WeaponMaxBlur;		// percent of screen height
 		int		DebugView;
 	};
 	CinematicDOFSettingsStruct	Settings;
@@ -44,6 +48,7 @@ public:
 		D3DXVECTOR4	Aperture;	// x: blades, y: blade rotation (radians), z: blade curvature, w: anamorphic
 		D3DXVECTOR4	Bokeh;	// x: cat's eye, y: ring brightness, z: highlight threshold
 		D3DXVECTOR4	Shape;	// x: bokeh shape, y: shape detail
+		D3DXVECTOR4	Weapon;	// x: weapon focus distance, y: weapon blur range, z: weapon max CoC, w: weapon DoF strength
 	};
 	CinematicDOFStruct	Constants;
 
@@ -67,6 +72,7 @@ public:
 
 private:
 	float	blend = 0.0f;			// current strength, eased toward 1 while active and 0 while not
+	float	weaponBlend = 0.0f;		// the same for weapon depth of field, which has its own conditions
 	bool	focusValid = false;		// the focus texture being read holds a real previous value
 	int		focusRead = 0;			// which FocusTexture holds last frame's focus
 

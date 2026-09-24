@@ -17,6 +17,7 @@ void CinematicDOFEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFAperture", &Constants.Aperture);
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFBokeh", &Constants.Bokeh);
 	TheShaderManager->RegisterConstant("TESR_CinematicDOFShape", &Constants.Shape);
+	TheShaderManager->RegisterConstant("TESR_CinematicDOFWeapon", &Constants.Weapon);
 }
 
 void CinematicDOFEffect::RegisterTextures() {
@@ -69,6 +70,13 @@ void CinematicDOFEffect::UpdateSettings() {
 	Settings.ShapeDetail = std::clamp(TheSettingManager->GetSettingF(Section, "ShapeDetail"), 0.0f, 1.0f);
 	// A missing key reads as 0, the 48-sample level this effect shipped with.
 	Settings.BokehQuality = std::clamp(TheSettingManager->GetSettingI(Section, "BokehQuality"), 0, 2);
+
+	// Weapon depth of field. Off when the key is missing; the distances fall back to their defaults
+	// rather than 0, which would put the whole weapon in focus or ramp it in a single step.
+	Settings.WeaponDOF = std::clamp(TheSettingManager->GetSettingI(Section, "WeaponDOF"), 0, 2);
+	Settings.WeaponFocusDistance = orDefault(TheSettingManager->GetSettingF(Section, "WeaponFocusDistance"), 40.0f);
+	Settings.WeaponBlurRange = orDefault(TheSettingManager->GetSettingF(Section, "WeaponBlurRange"), 30.0f);
+	Settings.WeaponMaxBlur = std::clamp(orDefault(TheSettingManager->GetSettingF(Section, "WeaponMaxBlur"), 0.6f), 0.05f, 3.0f);
 }
 
 void CinematicDOFEffect::UpdateConstants() {
@@ -91,13 +99,22 @@ void CinematicDOFEffect::UpdateConstants() {
 	// blur showed ghosted copies of the scene there. The debug view still runs, for diagnosing it.
 	bool vats = TheShaderManager->GameState.VATSIsOn;
 
+	// Weapon depth of field has its own conditions: first person with a weapon in view, so not in
+	// dialogue or VATS, and in hip-fire only mode not while aiming, where the sights have to stay sharp.
+	bool firstPerson = Player && Player->IsFirstPerson();
+	bool weaponActive = firstPerson && !dialogue &&
+		(Settings.WeaponDOF == 2 || (Settings.WeaponDOF == 1 && !aiming));
+
 	// Fade rather than snap, so raising the sights pulls focus instead of flicking a switch.
-	float target = active && !vats ? 1.0f : 0.0f;
-	if (Settings.TransitionTime <= 0.0f || vats) blend = target;
-	else if (dt > 0.0f) {
-		float step = dt / Settings.TransitionTime;
-		blend = blend < target ? (std::min)(blend + step, target) : (std::max)(blend - step, target);
-	}
+	auto ease = [&](float& value, float target) {
+		if (Settings.TransitionTime <= 0.0f || vats) value = target;
+		else if (dt > 0.0f) {
+			float step = dt / Settings.TransitionTime;
+			value = value < target ? (std::min)(value + step, target) : (std::max)(value - step, target);
+		}
+	};
+	ease(blend, active && !vats ? 1.0f : 0.0f);
+	ease(weaponBlend, weaponActive && !vats ? 1.0f : 0.0f);
 
 	// Thin lens, blur in screen heights: f^2 / (N (zf - f)) * (z - zf) / z, over the sensor height.
 	// The sensor is a 36mm-wide full frame matched to the screen's aspect, so FocalLength means what it
@@ -124,10 +141,14 @@ void CinematicDOFEffect::UpdateConstants() {
 	Constants.Aperture = D3DXVECTOR4((float)Settings.ApertureBlades, D3DXToRadian(Settings.BladeRotation), Settings.BladeCurvature, Settings.Anamorphic);
 	Constants.Bokeh = D3DXVECTOR4(Settings.CatsEye, Settings.RingBrightness, Settings.HighlightThreshold, 0.0f);
 	Constants.Shape = D3DXVECTOR4((float)Settings.BokehShape, Settings.ShapeDetail, 0.0f, 0.0f);
+	// Like Data.x, forced to full in the debug view so the weapon's blur shows on the map -- but only
+	// when weapon depth of field is switched on at all.
+	float weaponStrength = Settings.WeaponDOF == 0 ? 0.0f : (Settings.DebugView > 0 ? 1.0f : weaponBlend);
+	Constants.Weapon = D3DXVECTOR4(Settings.WeaponFocusDistance, Settings.WeaponBlurRange, Settings.WeaponMaxBlur / 100.0f, weaponStrength);
 }
 
 bool CinematicDOFEffect::ShouldRender() {
-	return blend > 0.001f || Settings.DebugView > 0;
+	return blend > 0.001f || weaponBlend > 0.001f || Settings.DebugView > 0;
 }
 
 bool CinematicDOFEffect::DrawTechnique(Technique technique) {
