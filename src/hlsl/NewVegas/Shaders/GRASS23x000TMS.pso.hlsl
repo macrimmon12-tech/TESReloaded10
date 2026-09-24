@@ -153,7 +153,7 @@ struct PS_INPUT {
     float3 ambient        : TEXCOORD4_centroid;
     float4 sun            : TEXCOORD5_centroid;   // .w = distance fade
     float4 sunColor       : TEXCOORD6_centroid;   // xyz: sun before N.L, w: GRASS_VS_SENTINEL
-    float3 sunDir         : TEXCOORD7_centroid;
+    float4 sunDir         : TEXCOORD7_centroid;   // xyz: sun direction, w: view ray against the ground's up
     float4 fog            : COLOR0;               // .w = fog amount
 };
 
@@ -266,7 +266,7 @@ PS_OUTPUT main(PS_INPUT IN) {
 
     [branch]
     if (grassData && detail > 0.0f) {
-        float3 L = normalize(IN.sunDir);
+        float3 L = normalize(IN.sunDir.xyz);
         float3 V = viewDir;
 
         // Rounded normal: the variant's sun normal tipped outward by the blade's offset from the
@@ -361,8 +361,10 @@ PS_OUTPUT main(PS_INPUT IN) {
     // mostly the blade tips, lighter and lit, and little of the dark roots and ground between clumps,
     // so grass seen near edge-on is lifted and its root darkening eased. Looking down, unchanged.
     // Every distance: it is what makes a far field read as a lighter sheet. pow 4 keeps it to low
-    // angles.
-    float grazing = grassData ? pow(saturate(1.0f - abs(viewDir.z)), 4.0f) * saturate(TESR_GrassVariation.w) : 0.0f;
+    // angles. Edge-on to the ground the grass stands on, not to the horizontal: the vertex shaders
+    // measure the view ray against the slope-aligned instance up (sunDir.w), so a hillside faced
+    // head-on is not brightened and a slope seen across is.
+    float grazing = grassData ? pow(saturate(1.0f - abs(IN.sunDir.w)), 4.0f) * saturate(TESR_GrassVariation.w) : 0.0f;
 
     // Root darkening: lets the roots sit in their own shade.
     float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
