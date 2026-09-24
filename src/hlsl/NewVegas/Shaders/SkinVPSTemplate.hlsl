@@ -20,9 +20,9 @@
 // defined.
 //
 // Mirrors pr0bability/fnv-vanilla-plus-skin's shaders/SkinTemplate.hlsl for the register
-// layout and variant table (VS: SKIN2000-2013/2020-2025 ADTS/AD/ADTS10 families; PS:
-// SKIN2000-2012 ADTS/AD/DiffusePt/ADTS10 families) -- see SkinShaders::Templates() in
-// src/effects/Skin.h for exactly which names route here and with which defines.
+// layout and variant table (VS: SKIN2000-2013 ADTS/AD families; PS: SKIN2000-2011 ADTS/AD/
+// DiffusePt/ADTS10 families) -- see SkinShaders::Templates() in src/effects/Skin.h for exactly
+// which names route here and with which defines.
 
 #if defined(__INTELLISENSE__)
     #define PS
