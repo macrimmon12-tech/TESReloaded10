@@ -89,6 +89,9 @@ void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
 	}
 	(*SetShaders)(This, PassIndex);
 
+	// A new pass: whatever GrassNormals last left on the device may since have been overwritten.
+	GrassNormals::InvalidateState();
+
 	if (TheSettingManager->SettingsMain.Develop.DebugMode) DumpVanillaGrassPixelShader(PixelShader);
 
 }

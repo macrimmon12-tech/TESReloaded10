@@ -61,10 +61,10 @@ float4 TESR_LightColor[24]          : register(c174);
 
 float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit), z: brightness, w: ambient normal
 // c199: GrassNormalParams, below.
-float4 TESR_GrassLighting5 : register(c200); // rgb: translucency colour (unset black reads as white)
+float4 TESR_GrassLighting5 : register(c200); // rgb: translucency colour
 float4 TESR_GrassVariation : register(c201); // x: colour variation strength, y: patch size (units), z: brightness variation, w: grazing brightening
 float4 TESR_GrassDryTips   : register(c202); // x: strength, y: start height (units), z: fade length (units)
-float4 TESR_GrassDryColor  : register(c203); // rgb: dry tip colour (unset black reads as the default straw)
+float4 TESR_GrassDryColor  : register(c203); // rgb: dry tip colour
 
 // Colour variation across fields: smooth value noise over the ground plane, from a sin-free hash
 // (Dave Hoskins' hash22) so it is exact at world coordinates in the tens of thousands. Two channels
@@ -87,9 +87,12 @@ float2 GrassNoise2(float2 p) {
 }
 
 // Per-texture normal map, bound per grass geometry by the DLL (NewVegas/Hooks/GrassNormals.cpp) when
-// the grass texture has a <name>_n.dds beside it. Not TESR_ names: set directly, not through NVR's
-// constant table. x: strength, 0 when this grass has no map (s10 then unbound); y: green sign.
+// the grass texture has a <name>_n.dds beside it, and the colour-variation noise texture it makes.
+// Not TESR_ names: set directly, not through NVR's constant table.
+//   x: normal map strength, 0 when this grass has no map (s10 then unbound); y: green sign
+//   z: 1 when the noise texture is bound on s11 (else the variation falls back to GrassNoise2)
 sampler2D GrassNormalMap    : register(s10);
+sampler2D GrassNoiseMap     : register(s11);   // 64x64, two random channels, wrap, bilinear, no mips
 float4    GrassNormalParams : register(c199);
 
 // The engine's alpha test for grass: reference 10, GREATER, as read off the device in game.
@@ -217,6 +220,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     //               on grass a few pixels tall, which is most of the grass on screen.
     //   shadowReach ShadowDistance / ShadowFade: the forward sun shadow fades out the same way.
     float pixelDistance = length(IN.shadowWorldPos.xyz);
+    float3 viewDir = IN.shadowWorldPos.xyz / max(pixelDistance, 1e-4f);   // camera to pixel
     float detailStart = TESR_GrassLighting3.z;
     float detail = detailStart > 0.0f ? 1.0f - saturate((pixelDistance - detailStart) / max(TESR_GrassLighting3.w, 1.0f)) : 1.0f;
     float shadowStart = TESR_GrassLighting4.x;
@@ -249,15 +253,21 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 pointThrough = 0.0f;
     // Translucency colour: tints the light that comes through the blades, sun and point lights alike,
     // on top of the grass texture's own colour. White leaves it as the texture tints it.
-    float3 throughTint = max(max(TESR_GrassLighting5.r, TESR_GrassLighting5.g), TESR_GrassLighting5.b) > 0.0f ? TESR_GrassLighting5.rgb : 1.0f;
+    // GrassShaders::UpdateSettings never lets it reach black.
+    float3 throughTint = TESR_GrassLighting5.rgb;
     float sheen = 0.0f;
     float sheenMask = 1.0f;
     float3 mapView = 0.15f;   // DebugView 10 where there is no normal map
+    // Normal-based ambient (AmbientNormal): the sky light is taken from the flat card normal, blended
+    // toward the lit normal -- rounded and normal-mapped -- so the side of a clump facing away from
+    // the sky gets less of it too. 0 is the flat card normal alone, the look before this setting.
+    // Worked out in the detail branch, where the lit normal exists, and faded with it.
+    float3 ambientNormal = shadowNormal;
 
     [branch]
     if (grassData && detail > 0.0f) {
         float3 L = normalize(IN.sunDir);
-        float3 V = IN.shadowWorldPos.xyz / max(pixelDistance, 1e-4f);   // camera to pixel
+        float3 V = viewDir;
 
         // Rounded normal: the variant's sun normal tipped outward by the blade's offset from the
         // clump centre. The tilt builds up over the first ~24 units out rather than jumping to full
@@ -333,6 +343,14 @@ PS_OUTPUT main(PS_INPUT IN) {
         float3 H = L - V;
         H *= rsqrt(max(dot(H, H), 1e-8f));
         sheen = pow(saturate(dot(N, H)), gloss) * specular * present * detail * sheenMask;
+
+        float ambientBlend = saturate(TESR_GrassLighting4.w) * detail;
+        [branch]
+        if (ambientBlend > 0.0f) {
+            float3 blended = lerp(shadowNormal, N, ambientBlend);
+            float blendedLength = length(blended);
+            ambientNormal = blendedLength > 1e-3f ? blended / blendedLength : shadowNormal;
+        }
     }
     sun *= shadow;
 
@@ -343,29 +361,20 @@ PS_OUTPUT main(PS_INPUT IN) {
     // mostly the blade tips, lighter and lit, and little of the dark roots and ground between clumps,
     // so grass seen near edge-on is lifted and its root darkening eased. Looking down, unchanged.
     // Every distance: it is what makes a far field read as a lighter sheet. pow 4 keeps it to low
-    // angles. The view direction is the camera-relative position over its length.
-    float3 viewDir = IN.shadowWorldPos.xyz / max(pixelDistance, 1e-4f);
+    // angles.
     float grazing = grassData ? pow(saturate(1.0f - abs(viewDir.z)), 4.0f) * saturate(TESR_GrassVariation.w) : 0.0f;
 
     // Root darkening: lets the roots sit in their own shade.
     float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
     ao = lerp(ao, 1.0f, grazing);
 
-    // Normal-based ambient (AmbientNormal): the sky light is taken from the flat card normal, blended
-    // toward the lit normal -- rounded and normal-mapped -- so the side of a clump facing away from
-    // the sky gets less of it too. 0 is the flat card normal alone, the look before this setting.
-    // Fades with the detail lighting it borrows the normal from. Selects keep hair's undefined N out.
-    float ambientBlend = saturate(TESR_GrassLighting4.w) * detail;
-    float3 ambientBlended = lerp(shadowNormal, N * rsqrt(max(dot(N, N), 1e-8f)), ambientBlend);
-    float ambientLength = length(ambientBlended);
-    float3 ambientNormal = (grassData && ambientBlend > 0.0f && ambientLength > 1e-3f) ? ambientBlended / ambientLength : shadowNormal;
-
     // Same split getSunLighting/getAmbientLighting apply on the object path.
     float3 lighting = (PBRLight(sun + transmitted + pointLight + pointThrough) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(ambientNormal, present)) * ao;
 
     // Brightness: scales the grass texture's colour, for grass that reads too bright under the extra
-    // light the grass lighting adds. Grass only, not hair; 1 (or an unset 0) leaves it untouched.
-    float brightness = TESR_GrassLighting4.z > 0.0f ? TESR_GrassLighting4.z : 1.0f;
+    // light the grass lighting adds. Grass only, not hair; 1 leaves it untouched (never 0: see
+    // GrassShaders::UpdateSettings).
+    float brightness = TESR_GrassLighting4.z;
 
     // Colour variation (ColorVariation): patches of drier, straw-tinted grass and lusher, greener grass
     // across a field, with their brightness varied too, instead of one uniform tint. Anchored to the
@@ -377,7 +386,16 @@ PS_OUTPUT main(PS_INPUT IN) {
     [branch]
     if (grassData && variationStrength > 0.0f) {
         float2 ground = (IN.shadowWorldPos.xy + TESR_CameraPosition.xy) / max(TESR_GrassVariation.y, 1.0f);
-        float2 n = GrassNoise2(ground) * 2.0f - 1.0f;    // -1..1; value noise sits near 0, so stretched a little
+        // The DLL's noise texture: one bilinear read for the same smooth two-channel noise, one texel
+        // per patch. Without it (the hook not installed), the same noise worked out in arithmetic,
+        // about 80 operations a pixel -- on every grass pixel, at every distance.
+        float2 n;
+        [branch]
+        if (GrassNormalParams.z > 0.5f)
+            n = tex2Dlod(GrassNoiseMap, float4(ground / 64.0f, 0.0f, 0.0f)).rg;
+        else
+            n = GrassNoise2(ground);
+        n = n * 2.0f - 1.0f;    // -1..1; value noise sits near 0, so stretched a little
         float hue = clamp(n.x * 1.6f, -1.0f, 1.0f);
         const float3 dryTint = float3(1.12f, 1.02f, 0.72f);
         const float3 lushTint = float3(0.88f, 1.04f, 0.90f);
@@ -389,7 +407,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     // geometry -- the same height above the clump's base that root darkening uses -- so tall clumps dry
     // out over their top and short tufts barely change. Every distance; grass only (blade.w is
     // undefined without grass data, hence the select).
-    float3 dryColor = max(max(TESR_GrassDryColor.r, TESR_GrassDryColor.g), TESR_GrassDryColor.b) > 0.0f ? TESR_GrassDryColor.rgb : float3(1.2f, 1.05f, 0.6f);
+    float3 dryColor = TESR_GrassDryColor.rgb;   // never black: see GrassShaders::UpdateSettings
     float dryAmount = saturate(TESR_GrassDryTips.x) * saturate((IN.blade.w - TESR_GrassDryTips.y) / max(TESR_GrassDryTips.z, 1.0f));
     dryAmount = grassData ? dryAmount : 0.0f;
     float3 dryTint = lerp(1.0f, dryColor, dryAmount);

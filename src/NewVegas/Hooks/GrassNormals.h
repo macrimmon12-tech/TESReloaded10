@@ -11,5 +11,6 @@
 // before drawing it: the same vtable slot NVR already hooks on SkyShader, and verified at install
 // against both classes' RTTI before anything is patched.
 namespace GrassNormals {
-	void Install();		// once, from AttachHooks
+	void Install();			// once, from AttachHooks
+	void InvalidateState();	// from SetShadersHook: anything may since have changed s10, s11 or c199
 }

@@ -15,7 +15,9 @@ namespace GrassNormals {
 	// Must match GRASS23x000TMS.pso.hlsl: GrassNormalMap : register(s10), GrassNormalParams : register(c199).
 	// s10 is free in the grass shader (s0 diffuse, s9 shadow atlas); c199 sits past its TESR_ constants.
 	static constexpr UInt32 kSampler = 10;
+	static constexpr UInt32 kNoiseSampler = 11;
 	static constexpr UInt32 kParamsRegister = 199;
+	static constexpr UInt32 kNoiseSize = 64;
 
 	static VirtFuncDetour s_detour;
 	static bool s_installed = false;
@@ -33,6 +35,17 @@ namespace GrassNormals {
 	static std::unordered_map<std::string, IDirect3DTexture9*> s_normalsByPath;	// loaded once, kept for the session
 	static bool s_loggedNoTexture = false;
 	static bool s_loggedFirst = false;
+
+	// Colour-variation noise (GRASS23x000TMS.pso, s11): made once, bound with the normal map.
+	static IDirect3DTexture9* s_noise = nullptr;
+	static bool s_noiseFailed = false;
+
+	// What this module last put on the device, so a run of grass draws with nothing changing makes no
+	// device calls at all. Anything else may have changed s10, s11 or c199 once the engine switches
+	// shaders, so SetShadersHook clears it (InvalidateState) and the next grass draw sets all again.
+	static bool s_stateValid = false;
+	static IDirect3DTexture9* s_boundNormal = nullptr;
+	static float s_boundParams[4] = {};
 
 	// ---- Memory reads that may be wrong, and so are guarded -------------------------------------
 	// Nothing here trusts a guessed structure layout past what NVR's headers already assert: the grass
@@ -273,25 +286,73 @@ namespace GrassNormals {
 	}
 
 	static IDirect3DTexture9* NormalMapFor(const void* apTexture) {
-		char filename[MAX_PATH];
-		const char* namePointer = FilenameOf(apTexture, filename, sizeof(filename));
-		if (!namePointer) return nullptr;
+		// The filename pointer alone identifies a cached entry; the name is only copied out on a miss.
+		UInt32 namePointer = 0;
+		if (!ReadWord((const UInt8*)apTexture + 0x30, namePointer) || !namePointer) return nullptr;
 
 		auto entry = s_textures.find(apTexture);
-		if (entry != s_textures.end() && entry->second.path == namePointer)
+		if (entry != s_textures.end() && entry->second.path == (const char*)namePointer)
 			return entry->second.normal;
 
+		char filename[MAX_PATH];
+		if (!FilenameOf(apTexture, filename, sizeof(filename))) return nullptr;
 		IDirect3DTexture9* normal = LoadNormalMap(filename);
 		if (s_textures.size() > 8192) s_textures.clear();
-		s_textures[apTexture] = { namePointer, normal };
+		s_textures[apTexture] = { (const char*)namePointer, normal };
 		return normal;
+	}
+
+	// 64x64, two independent random channels (R, G), fixed seed so the pattern is the same every run.
+	// Bilinear filtering between random texels is value noise: the smooth patches the variation wants,
+	// for one texture read. Managed pool, so it survives a device reset.
+	static IDirect3DTexture9* NoiseTexture() {
+		if (s_noise || s_noiseFailed) return s_noise;
+		if (FAILED(TheRenderManager->device->CreateTexture(kNoiseSize, kNoiseSize, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &s_noise, nullptr))) {
+			s_noise = nullptr;
+			s_noiseFailed = true;
+			Logger::Log("[GrassNormals] could not create the colour-variation noise texture; the shader works it out instead");
+			return nullptr;
+		}
+		D3DLOCKED_RECT locked;
+		if (FAILED(s_noise->LockRect(0, &locked, nullptr, 0))) {
+			s_noise->Release();
+			s_noise = nullptr;
+			s_noiseFailed = true;
+			return nullptr;
+		}
+		UInt32 seed = 0x9E3779B9u;
+		for (UInt32 y = 0; y < kNoiseSize; y++) {
+			UInt32* row = (UInt32*)((UInt8*)locked.pBits + y * locked.Pitch);
+			for (UInt32 x = 0; x < kNoiseSize; x++) {
+				seed = seed * 1664525u + 1013904223u;
+				UInt32 red = seed >> 24;
+				seed = seed * 1664525u + 1013904223u;
+				UInt32 green = seed >> 24;
+				row[x] = 0xFF000000u | (red << 16) | (green << 8);
+			}
+		}
+		s_noise->UnlockRect(0);
+		return s_noise;
+	}
+
+	static void SetSamplerStates(NiDX9RenderState* apRenderState, UInt32 aSampler, UInt32 aMipFilter) {
+		apRenderState->SetSamplerState(aSampler, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP, false);
+		apRenderState->SetSamplerState(aSampler, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP, false);
+		apRenderState->SetSamplerState(aSampler, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR, false);
+		apRenderState->SetSamplerState(aSampler, D3DSAMP_MINFILTER, D3DTEXF_LINEAR, false);
+		apRenderState->SetSamplerState(aSampler, D3DSAMP_MIPFILTER, aMipFilter, false);
+		apRenderState->SetSamplerState(aSampler, D3DSAMP_SRGBTEXTURE, FALSE, false);
 	}
 
 	// ---- The hook ------------------------------------------------------------------------------------
 
+	void InvalidateState() {
+		s_stateValid = false;
+	}
+
 	static void Bind(const NiPropertyState* apProperties) {
 		GrassShaders* grass = TheShaderManager->Shaders.Grass;
-		if (!grass || !grass->Enabled || !apProperties) return;
+		if (!s_installed || !grass || !grass->Enabled || !apProperties) return;
 
 		NiDX9RenderState* renderState = TheRenderManager->renderState;
 		IDirect3DTexture9* normal = nullptr;
@@ -299,21 +360,27 @@ namespace GrassNormals {
 			const void* texture = FindTexture(apProperties, renderState->GetTexture(0));
 			if (texture) normal = NormalMapFor(texture);
 		}
+		IDirect3DTexture9* noise = NoiseTexture();
 
-		// x: strength, 0 when this grass has no map; y: green channel sign.
-		float params[4] = { normal ? grass->NormalMapStrength : 0.0f, grass->NormalMapFlipGreen ? -1.0f : 1.0f, 0.0f, 0.0f };
+		// x: strength, 0 when this grass has no map; y: green channel sign; z: noise texture bound.
+		float params[4] = { normal ? grass->NormalMapStrength : 0.0f, grass->NormalMapFlipGreen ? -1.0f : 1.0f, noise ? 1.0f : 0.0f, 0.0f };
+
 		// Through the render state, not the device, so NiDX9RenderState's texture cache stays in step.
-		// Unbound when this grass has no map, so nothing from another grass type is left on s10.
-		renderState->SetTexture(kSampler, normal);
-		if (normal) {
-			renderState->SetSamplerState(kSampler, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP, false);
-			renderState->SetSamplerState(kSampler, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP, false);
-			renderState->SetSamplerState(kSampler, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR, false);
-			renderState->SetSamplerState(kSampler, D3DSAMP_MINFILTER, D3DTEXF_LINEAR, false);
-			renderState->SetSamplerState(kSampler, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR, false);
-			renderState->SetSamplerState(kSampler, D3DSAMP_SRGBTEXTURE, FALSE, false);
+		// s10 is unbound when this grass has no map, so nothing from another grass type is left on it.
+		if (!s_stateValid || normal != s_boundNormal) {
+			renderState->SetTexture(kSampler, normal);
+			if (normal) SetSamplerStates(renderState, kSampler, D3DTEXF_LINEAR);
+			s_boundNormal = normal;
 		}
-		TheRenderManager->device->SetPixelShaderConstantF(kParamsRegister, params, 1);
+		if (!s_stateValid && noise) {
+			renderState->SetTexture(kNoiseSampler, noise);
+			SetSamplerStates(renderState, kNoiseSampler, D3DTEXF_NONE);
+		}
+		if (!s_stateValid || memcmp(params, s_boundParams, sizeof(params))) {
+			TheRenderManager->device->SetPixelShaderConstantF(kParamsRegister, params, 1);
+			memcpy(s_boundParams, params, sizeof(params));
+		}
+		s_stateValid = true;
 	}
 
 	static void __fastcall TallGrassShader__UpdateConstants(TallGrassShader* apThis, void*, const NiPropertyState* apProperties) {
