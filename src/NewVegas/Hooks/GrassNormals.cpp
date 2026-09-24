@@ -22,18 +22,22 @@ namespace GrassNormals {
 	static VirtFuncDetour s_detour;
 	static bool s_installed = false;
 
+	// Keyed by the D3D texture bound on stage 0 when grass draws -- its diffuse -- so the memory search
+	// below runs once per grass texture. Keyed by grass geometry, as it was, it ran for every geometry
+	// the engine creates as grass streams in around the player: hundreds in dense grass, each a walk
+	// through memory, and a full re-search of everything on screen whenever the cache filled.
 	struct TextureEntry {
-		const char* path;				// the NiSourceTexture's filename pointer when this was built
+		const void* texture;			// the Gamebryo texture owning it; null: not found, retried after kRetryMs
+		const char* path;				// its filename pointer when this was built
 		IDirect3DTexture9* normal;		// null: no normal map for this texture
+		DWORD searched;					// GetTickCount when it was looked for
 	};
-	struct PropertyEntry {
-		const void* texture;			// null: none found, and not looked for again
-		bool matched;					// found as the texture bound for the draw, so revalidated against it
-	};
-	static std::unordered_map<UInt64, PropertyEntry> s_propertyTextures;	// (texturing, shade, geometry) -> diffuse
-	static std::unordered_map<const void*, TextureEntry> s_textures;
+	static constexpr DWORD kRetryMs = 60000;	// a failed search is rare (not grass-textured), and costs the walk again
+	static constexpr size_t kMaxTextures = 1024;	// distinct grass textures; stale ones only pile up over a long session
+	static std::unordered_map<IDirect3DBaseTexture9*, TextureEntry> s_textures;
 	static std::unordered_map<std::string, IDirect3DTexture9*> s_normalsByPath;	// loaded once, kept for the session
 	static bool s_loggedNoTexture = false;
+	static bool s_loggedNoBound = false;
 	static bool s_loggedFirst = false;
 
 	// Colour-variation noise (GRASS23x000TMS.pso, s11): made once, bound with the normal map.
@@ -137,7 +141,6 @@ namespace GrassNormals {
 	struct SearchState {
 		IDirect3DBaseTexture9* bound;
 		const void* match;			// the texture bound for the draw
-		const void* firstNamed;		// else the first texture with a .dds filename
 		const void* visited[256];
 		UInt32 visitedCount;
 	};
@@ -157,9 +160,7 @@ namespace GrassNormals {
 
 			const void* candidate = (const void*)value;
 			if (IsTexture(candidate)) {
-				char name[MAX_PATH];
-				if (arState.bound && D3DTextureOf(candidate) == arState.bound) arState.match = candidate;
-				else if (!arState.firstNamed && FilenameOf(candidate, name, sizeof(name))) arState.firstNamed = candidate;
+				if (D3DTextureOf(candidate) == arState.bound) arState.match = candidate;
 				continue;
 			}
 			if (aDepth > 1) Scan(candidate, aDepth - 1, arState);
@@ -202,40 +203,26 @@ namespace GrassNormals {
 		return (const void*)geometry;
 	}
 
+	// The Gamebryo texture whose D3D texture is apBound, searched for from the draw's properties and
+	// geometry. Slow (a guarded walk through memory), so NormalMapFor caches what it finds.
 	static const void* FindTexture(const NiPropertyState* apProperties, IDirect3DBaseTexture9* apBound) {
 		const void* texturing = apProperties->m_spTextureProperty;
 		const void* shade = apProperties->m_spShadeProperty;
 		const void* geometry = CurrentGeometry();
-		UInt64 key = (((UInt64)(UInt32)texturing << 32) | (UInt32)shade) ^ ((UInt64)(UInt32)geometry * 0x9E3779B97F4A7C15ull);
-
-		auto cached = s_propertyTextures.find(key);
-		if (cached != s_propertyTextures.end()) {
-			const PropertyEntry& entry = cached->second;
-			if (!entry.texture) return nullptr;
-			// Revalidated every time, since objects freed with their cell can be reallocated at the
-			// same address with another texture: still a texture, and still the bound one if it was.
-			if (IsTexture(entry.texture) && (!entry.matched || D3DTextureOf(entry.texture) == apBound))
-				return entry.texture;
-		}
 
 		SearchState state = {};
 		state.bound = apBound;
 		if (texturing) Scan(texturing, 4, state);
 		if (!state.match && shade) Scan(shade, 4, state);
 		if (!state.match && geometry) Scan(geometry, 3, state);
-		const void* result = state.match ? state.match : state.firstNamed;
 
-		if (s_propertyTextures.size() > 8192) s_propertyTextures.clear();
-		s_propertyTextures[key] = { result, state.match != nullptr };
-
-		if (result && !s_loggedFirst) {
+		if (state.match && !s_loggedFirst) {
 			s_loggedFirst = true;
 			char filename[MAX_PATH] = "(no filename)";
-			FilenameOf(result, filename, sizeof(filename));
-			Logger::Log("[GrassNormals] first grass texture found: %s (%s)", filename,
-				state.match ? "the texture bound for the draw" : "not the one bound yet; taken from the geometry");
+			FilenameOf(state.match, filename, sizeof(filename));
+			Logger::Log("[GrassNormals] first grass texture found: %s", filename);
 		}
-		if (!result && !s_loggedNoTexture) {
+		if (!state.match && !s_loggedNoTexture) {
 			s_loggedNoTexture = true;
 			Logger::Log("[GrassNormals] could not find the texture of a grass geometry; its grass draws without a normal map. Dump follows (once):");
 			Logger::Log("[GrassNormals] texture bound on stage 0: %08X", (UInt32)apBound);
@@ -243,7 +230,7 @@ namespace GrassNormals {
 			if (shade) DumpObject("shade property", shade, 2, 0);
 			if (geometry) DumpObject("geometry", geometry, 1, 0);
 		}
-		return result;
+		return state.match;
 	}
 
 	// ---- Normal map files ------------------------------------------------------------------------
@@ -285,21 +272,42 @@ namespace GrassNormals {
 		return texture;
 	}
 
-	static IDirect3DTexture9* NormalMapFor(const void* apTexture) {
-		// The filename pointer alone identifies a cached entry; the name is only copied out on a miss.
-		UInt32 namePointer = 0;
-		if (!ReadWord((const UInt8*)apTexture + 0x30, namePointer) || !namePointer) return nullptr;
+	// The normal map for the grass texture bound on stage 0, from the cache when it is still valid.
+	static IDirect3DTexture9* NormalMapFor(const NiPropertyState* apProperties, IDirect3DBaseTexture9* apBound) {
+		if (!apBound) {
+			if (!s_loggedNoBound) {
+				s_loggedNoBound = true;
+				Logger::Log("[GrassNormals] a grass draw had no texture bound on stage 0; it draws without a normal map");
+			}
+			return nullptr;
+		}
 
-		auto entry = s_textures.find(apTexture);
-		if (entry != s_textures.end() && entry->second.path == (const char*)namePointer)
-			return entry->second.normal;
+		auto cached = s_textures.find(apBound);
+		if (cached != s_textures.end()) {
+			const TextureEntry& entry = cached->second;
+			if (!entry.texture) {
+				if (GetTickCount() - entry.searched < kRetryMs) return nullptr;
+			}
+			else {
+				// Revalidated every time, a few guarded reads: a texture freed with its cell can be
+				// replaced by another at the same address, which must not keep the old one's map.
+				UInt32 namePointer = 0;
+				if (IsTexture(entry.texture) && D3DTextureOf(entry.texture) == apBound &&
+					ReadWord((const UInt8*)entry.texture + 0x30, namePointer) && (const char*)namePointer == entry.path)
+					return entry.normal;
+			}
+		}
 
-		char filename[MAX_PATH];
-		if (!FilenameOf(apTexture, filename, sizeof(filename))) return nullptr;
-		IDirect3DTexture9* normal = LoadNormalMap(filename);
-		if (s_textures.size() > 8192) s_textures.clear();
-		s_textures[apTexture] = { (const char*)namePointer, normal };
-		return normal;
+		TextureEntry entry = { FindTexture(apProperties, apBound), nullptr, nullptr, GetTickCount() };
+		if (entry.texture) {
+			UInt32 namePointer = 0;
+			char filename[MAX_PATH];
+			if (ReadWord((const UInt8*)entry.texture + 0x30, namePointer)) entry.path = (const char*)namePointer;
+			if (FilenameOf(entry.texture, filename, sizeof(filename))) entry.normal = LoadNormalMap(filename);
+		}
+		if (s_textures.size() >= kMaxTextures) s_textures.clear();
+		s_textures[apBound] = entry;
+		return entry.normal;
 	}
 
 	// 64x64, two independent random channels (R, G), fixed seed so the pattern is the same every run.
@@ -357,8 +365,7 @@ namespace GrassNormals {
 		NiDX9RenderState* renderState = TheRenderManager->renderState;
 		IDirect3DTexture9* normal = nullptr;
 		if (grass->NormalMapStrength > 0.0f) {
-			const void* texture = FindTexture(apProperties, renderState->GetTexture(0));
-			if (texture) normal = NormalMapFor(texture);
+			normal = NormalMapFor(apProperties, renderState->GetTexture(0));
 		}
 		IDirect3DTexture9* noise = NoiseTexture();
 
