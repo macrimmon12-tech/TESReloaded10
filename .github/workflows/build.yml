@@ -123,6 +123,19 @@ jobs:
           $gradients = $lines | Select-String -Pattern '^\s*(dsx|dsy|texld )'
           $late = $gradients | Where-Object { $_.LineNumber -gt $first }
           Write-Host "Grass PS gradient ops: $($gradients.Count), after the first branch: $($late.Count)"
+          # GRASS23x000.pso, the non-TMS grass pixel shader, is compiled from the same source with
+          # GRASS_TMS 0 (GrassShaders::Templates): make sure that variant compiles too.
+          foreach ($variant in $variants) {
+            $defines = $variant -split ' '
+            $out = & $fxc.FullName /nologo /T ps_3_0 /E main /I $shaders /D REVERSED_DEPTH=1 /D GRASS_TMS=0 @defines /Fo "$env:RUNNER_TEMP\grass_notms.cso" $grass 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error file=$grass::GRASS23x000.pso (GRASS_TMS 0) failed to compile with $variant"
+              $out | ForEach-Object { Write-Host "    $_" }
+              $failed += 'GRASS23x000.pso (GRASS_TMS 0)'
+            }
+          }
+          Write-Host "ok    Shaders/GRASS23x000.pso (GRASS_TMS 0 variant of GRASS23x000TMS.pso.hlsl)"
+
           # The normal map is read with an explicit gradient (texldd), which is what makes it legal
           # inside the detail branch.
           $gradRead = $lines | Select-String -Pattern '^\s*texldd'

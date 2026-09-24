@@ -1,6 +1,9 @@
 // Grass PS -- vanilla GRASS23x000TMS.pso plus forward sun shadow and grass lighting.
 // Shared by GRASS23x002.vso (LFS) and GRASS23x003.vso (LVS).
 //
+// Also compiled as GRASS23x000.pso, the grass pixel shader the game uses with transparency
+// multisampling off (GrassShaders::Templates, GRASS_TMS 0), so every feature here covers both.
+//
 // The VS hands the lighting over already split, so only the sun is shadowed:
 //   TEXCOORD4.xyz ambient    TEXCOORD5.xyz sun    TEXCOORD5.w fade    COLOR0 fog (.w amount)
 // and, for the grass lighting below, the raw pieces to redo the sun per pixel:
@@ -82,6 +85,19 @@ float4    GrassNormalParams : register(c199);
 
 sampler2D DiffuseMap : register(s0);
 
+// Transparency multisampling: GRASS23x000TMS.pso (1, this file's own name) or GRASS23x000.pso (0, the
+// same source through GrassShaders::Templates). The TMS shader boosts alpha by 1.75 to thicken the
+// blades alpha-to-coverage would otherwise thin; the plain alpha-tested path is taken to use the
+// texture's alpha as it is.
+#ifndef GRASS_TMS
+    #define GRASS_TMS 1
+#endif
+#if GRASS_TMS
+    #define GRASS_ALPHA_SCALE 1.75f
+#else
+    #define GRASS_ALPHA_SCALE 1.0f
+#endif
+
 // Grass-data sentinel. This pixel shader is not only paired with the four grass vertex shaders: it
 // has also been found drawing hair, through a vertex shader that writes none of the grass data below,
 // so those interpolators hold undefined values there. The grass vertex shaders stamp 2.0 into
@@ -154,7 +170,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float2 duvdy = ddy(IN.uv.xy);
     float3 dpdx = ddx(IN.shadowWorldPos.xyz);
     float3 dpdy = ddy(IN.shadowWorldPos.xyz);
-    OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
+    OUT.color.a = saturate(albedo.a * GRASS_ALPHA_SCALE) * IN.sun.w;
 
     // Early out for pixels that can never show: a grass card is mostly transparent texture, and
     // overdraw multiplies whatever this shader does, so every one of those pixels used to pay for the
