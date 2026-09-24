@@ -27,6 +27,14 @@ float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specul
 
 sampler2D DiffuseMap : register(s0);
 
+// Grass-data sentinel. This pixel shader is not only paired with the four grass vertex shaders: it
+// has also been found drawing hair, through a vertex shader that writes none of the grass data below,
+// so those interpolators hold undefined values there. The grass vertex shaders stamp 2.0 into
+// sunColor.w; without it every grass-lighting term is skipped and the pixel is lit exactly as before
+// the grass lighting existed. Selects, not multiplications, so undefined inputs (possibly NaN) never
+// reach the result. Same idea as SHADOW_VS_SENTINEL, a different value so the two cannot be confused.
+#define GRASS_VS_SENTINEL 2.0f
+
 struct PS_INPUT {
     float2 uv             : TEXCOORD0;
     float4 shadowWorldPos : TEXCOORD1;
@@ -34,7 +42,7 @@ struct PS_INPUT {
     float4 bladeOffset    : TEXCOORD3_centroid;   // xyz: offset from the clump centre, w: VS variant 0-3
     float3 ambient        : TEXCOORD4_centroid;
     float4 sun            : TEXCOORD5_centroid;   // .w = distance fade
-    float3 sunColor       : TEXCOORD6_centroid;
+    float4 sunColor       : TEXCOORD6_centroid;   // xyz: sun before N.L, w: GRASS_VS_SENTINEL
     float3 sunDir         : TEXCOORD7_centroid;
     float4 fog            : COLOR0;               // .w = fog amount
 };
@@ -65,6 +73,9 @@ PS_OUTPUT main(PS_INPUT IN) {
          : 1.0f;
 #endif
 
+    bool grassData = abs(IN.sunColor.w - GRASS_VS_SENTINEL) < 0.001f;
+    float3 sunColor = IN.sunColor.rgb;
+
     float3 L = normalize(IN.sunDir);
     float3 V = normalize(IN.shadowWorldPos.xyz);   // camera-relative world position: camera to pixel
 
@@ -74,17 +85,18 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 N = normalize(normalize(IN.blade.xyz) + roundness * offset / (length(offset) + 8.0f));
 
     // At Roundness 0 keep the vertex shader's own N.L, so vanilla stays vanilla to the bit.
-    float3 sun = roundness > 0.0f ? IN.sunColor * saturate(dot(L, N)) : IN.sun.xyz;
+    float3 sun = (grassData && roundness > 0.0f) ? sunColor * saturate(dot(L, N)) : IN.sun.xyz;
     sun *= shadow;
 
     // Translucency: strongest looking straight toward the sun, narrowed by the focus exponent, and
     // weighted toward the tips, where blades are thinnest.
     float tip = saturate(IN.blade.w);
     float through = pow(saturate(dot(V, L)), translucencyFocus) * translucency * (0.5f + 0.5f * tip) * present;
-    float3 transmitted = IN.sunColor * shadow * through;
+    through = grassData ? through : 0.0f;
+    float3 transmitted = grassData ? sunColor * shadow * through : 0.0f;
 
     // Root darkening: lets the roots sit in their own shade.
-    float ao = lerp(1.0f - rootDarkening, 1.0f, tip);
+    float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
 
     // Same split getSunLighting/getAmbientLighting apply on the object path.
     float3 lighting = (PBRLight(sun + transmitted) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(shadowNormal, present)) * ao;
@@ -96,8 +108,8 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Normalised by hand: L - V is zero looking exactly into the sun, and normalize() would NaN.
     float3 H = L - V;
     H *= rsqrt(max(dot(H, H), 1e-8f));
-    float sheen = pow(saturate(dot(N, H)), gloss) * specular * present;
-    litColor += PBRLight(IN.sunColor * shadow) * sheen;
+    float sheen = grassData ? pow(saturate(dot(N, H)), gloss) * specular * present : 0.0f;
+    litColor += grassData ? PBRLight(sunColor * shadow) * sheen : 0.0f;
 
     OUT.color.rgb = lerp(litColor, IN.fog.rgb, IN.fog.w);
     OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
@@ -108,6 +120,8 @@ PS_OUTPUT main(PS_INPUT IN) {
     //   1 rounded normals, as colour      2 sun diffuse: N.L x shadow      3 sun shadow alone
     //   4 translucency: the glow factor   5 sheen                          6 root (black) to tip (white)
     //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
+    // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
+    // vertex shaders -- e.g. hair), so none of the grass lighting applies to it.
     float debugView = TESR_GrassLighting2.z;
     if (debugView > 0.5f) {
         float3 view = N * 0.5f + 0.5f;
@@ -120,7 +134,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         float variant = IN.bladeOffset.w;
         float3 variantColour = variant < 0.5f ? float3(1, 0, 0) : (variant < 1.5f ? float3(0, 1, 0) : (variant < 2.5f ? float3(0, 0, 1) : float3(1, 1, 0)));
         view = debugView > 6.5f ? variantColour : view;
-        OUT.color.rgb = view;
+        OUT.color.rgb = grassData ? view : float3(1.0f, 0.0f, 1.0f);
     }
 
     return OUT;
