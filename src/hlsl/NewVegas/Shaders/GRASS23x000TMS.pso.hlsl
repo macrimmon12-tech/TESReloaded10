@@ -45,6 +45,7 @@ float4 TESR_ShadowLightPosition[12] : register(c150);
 float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
 
+float4 TESR_GrassLighting5 : register(c200); // rgb: translucency colour (unset black reads as white)
 float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit), z: brightness, w: ambient normal
 
 // Per-texture normal map, bound per grass geometry by the DLL (NewVegas/Hooks/GrassNormals.cpp) when
@@ -191,6 +192,9 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 pointLight = 0.0f;
     float3 pointSheen = 0.0f;
     float3 pointThrough = 0.0f;
+    // Translucency colour: tints the light that comes through the blades, sun and point lights alike,
+    // on top of the grass texture's own colour. White leaves it as the texture tints it.
+    float3 throughTint = max(max(TESR_GrassLighting5.r, TESR_GrassLighting5.g), TESR_GrassLighting5.b) > 0.0f ? TESR_GrassLighting5.rgb : 1.0f;
     float sheen = 0.0f;
     float sheenMask = 1.0f;
     float3 mapView = 0.15f;   // DebugView 10 where there is no normal map
@@ -266,7 +270,7 @@ PS_OUTPUT main(PS_INPUT IN) {
             pointSheen *= pointStrength * detail * specular * sheenMask;
             // Glow through the blades from the lights: a campfire behind the grass lighting it up,
             // weighted to the tips like the sun's.
-            pointThrough *= pointStrength * detail * translucency * (0.5f + 0.5f * tip);
+            pointThrough *= pointStrength * detail * translucency * (0.5f + 0.5f * tip) * throughTint;
         }
 
         // Sheen: Blinn-Phong off the rounded normal. Normalised by hand: L - V is zero looking
@@ -278,7 +282,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     sun *= shadow;
 
     // Selects, not multiplications: without grass data sunColor is undefined, possibly NaN.
-    float3 transmitted = grassData ? sunColor * shadow * through : 0.0f;
+    float3 transmitted = grassData ? sunColor * shadow * through * throughTint : 0.0f;
 
     // Root darkening: lets the roots sit in their own shade.
     float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
@@ -323,7 +327,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         float3 view = N * 0.5f + 0.5f;
         view = debugView > 1.5f ? wrapped * shadow : view;
         view = debugView > 2.5f ? shadow : view;
-        view = debugView > 3.5f ? saturate(through * shadow + pointThrough) : view;
+        view = debugView > 3.5f ? saturate(through * shadow * throughTint + pointThrough) : view;
         view = debugView > 4.5f ? saturate(sheen * shadow + pointSheen) : view;
         view = debugView > 5.5f ? tip : view;
         // Selects rather than an array: ps_3_0 cannot index a local array with a runtime value.

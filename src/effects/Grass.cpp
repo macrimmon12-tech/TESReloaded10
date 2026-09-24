@@ -8,6 +8,7 @@ void GrassShaders::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_GrassLighting2", &Constants.Lighting2);
 	TheShaderManager->RegisterConstant("TESR_GrassLighting3", &Constants.Lighting3);
 	TheShaderManager->RegisterConstant("TESR_GrassLighting4", &Constants.Lighting4);
+	TheShaderManager->RegisterConstant("TESR_GrassLighting5", &Constants.Lighting5);
 }
 
 // iMinGrassSize, fTexturePctThreshold, fGrass*Distance and fGrassWindMagnitude* are consumed
@@ -52,6 +53,12 @@ void GrassShaders::UpdateSettings() {
 	Constants.Lighting4.z = brightness > 0.0f ? std::clamp(brightness, 0.1f, 2.0f) : 1.0f;
 	// Sky light from the lit normal instead of the flat card's. Off at 0, which is also a missing key.
 	Constants.Lighting4.w = std::clamp(TheSettingManager->GetSettingF(Section, "AmbientNormal"), 0.0f, 1.0f);
+
+	// Translucency colour. All three missing read 0, which would put the glow out: that means white.
+	D3DXVECTOR4 tint(std::clamp(TheSettingManager->GetSettingF(Section, "TranslucencyColorR"), 0.0f, 2.0f),
+		std::clamp(TheSettingManager->GetSettingF(Section, "TranslucencyColorG"), 0.0f, 2.0f),
+		std::clamp(TheSettingManager->GetSettingF(Section, "TranslucencyColorB"), 0.0f, 2.0f), 0.0f);
+	Constants.Lighting5 = (tint.x + tint.y + tint.z > 0.0f) ? tint : D3DXVECTOR4(1.0f, 1.0f, 1.0f, 0.0f);
 
 	// Normal maps: <grass texture>_n.dds beside each grass texture, loose under Data\Textures. Off at 0.
 	NormalMapStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NormalMaps"), 0.0f, 2.0f);
