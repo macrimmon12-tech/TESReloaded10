@@ -26,7 +26,17 @@
 // whose TESR_SkyIrradiance[9] array runs c137-c145.
 float4 TESR_GrassLighting  : register(c146); // x: translucency, y: roundness, z: root darkening, w: specular
 float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specular glossiness, z: debug view, w: diffuse wrap
-float4 TESR_GrassLighting3 : register(c148); // x: root darkening height (units)
+float4 TESR_GrassLighting3 : register(c148); // x: root darkening height (units), y: point light strength
+
+// Point lights: NVR's nearby-light lists, filled every frame by ShaderManager::GetNearbyLights before
+// the world renders. Vanilla never gives grass any point light (its passes are all BSSM_GRASS_DIRONLY),
+// so these are the same lists the water shaders read. Positions are ABSOLUTE world with the radius in
+// w, each list packed from index 0 with empty slots zeroed. Colour is rgb with the dimmer in w, the
+// shadow-casting lights' at [0..11] and the rest at [12..23]. c149-c197, inside ps_3_0's 224.
+float4 TESR_CameraPosition          : register(c149);
+float4 TESR_ShadowLightPosition[12] : register(c150);
+float4 TESR_LightPosition[12]       : register(c162);
+float4 TESR_LightColor[24]          : register(c174);
 
 sampler2D DiffuseMap : register(s0);
 
@@ -37,6 +47,19 @@ sampler2D DiffuseMap : register(s0);
 // the grass lighting existed. Selects, not multiplications, so undefined inputs (possibly NaN) never
 // reach the result. Same idea as SHADOW_VS_SENTINEL, a different value so the two cannot be confused.
 #define GRASS_VS_SENTINEL 2.0f
+
+// One point light on a grass pixel: the vanilla attenuation NVR's object shaders use,
+// 1 - saturate(d^2 / r^2), times the same wrapped diffuse as the sun. toLight is built as
+// (light - camera) - pixel with the pixel camera-relative, so the large world coordinates cancel
+// before any per-pixel maths. No cube shadows: grass does not sample the point-shadow maps.
+float3 GrassPointLight(float4 light, float4 colour, float3 pixelFromCamera, float3 N, float wrap) {
+    float3 toLight = (light.xyz - TESR_CameraPosition.xyz) - pixelFromCamera;
+    float distSq = dot(toLight, toLight);
+    float att = 1.0f - saturate(distSq / max(light.w * light.w, 1.0f));
+    float3 L = toLight * rsqrt(max(distSq, 1e-4f));
+    float diffuse = saturate((dot(L, N) + wrap) / (1.0f + wrap));
+    return light.w > 0.0f ? colour.rgb * colour.w * att * diffuse : 0.0f;
+}
 
 struct PS_INPUT {
     float2 uv             : TEXCOORD0;
@@ -107,11 +130,26 @@ PS_OUTPUT main(PS_INPUT IN) {
     through = grassData ? through : 0.0f;
     float3 transmitted = grassData ? sunColor * shadow * through : 0.0f;
 
+    // Point lights (PointLights strength; 0 skips the loop). Both lists are packed from slot 0, so
+    // the loop stops at the first slot where both are empty -- the usual handful of lights costs a
+    // handful of iterations, not 24.
+    float3 pointLight = 0.0f;
+    float pointStrength = TESR_GrassLighting3.y;
+    if (grassData && pointStrength > 0.0f) {
+        [loop]
+        for (int i = 0; i < 12; i++) {
+            if (TESR_ShadowLightPosition[i].w <= 0.0f && TESR_LightPosition[i].w <= 0.0f) break;
+            pointLight += GrassPointLight(TESR_ShadowLightPosition[i], TESR_LightColor[i], IN.shadowWorldPos.xyz, N, wrap);
+            pointLight += GrassPointLight(TESR_LightPosition[i], TESR_LightColor[12 + i], IN.shadowWorldPos.xyz, N, wrap);
+        }
+        pointLight *= pointStrength;
+    }
+
     // Root darkening: lets the roots sit in their own shade.
     float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
 
     // Same split getSunLighting/getAmbientLighting apply on the object path.
-    float3 lighting = (PBRLight(sun + transmitted) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(shadowNormal, present)) * ao;
+    float3 lighting = (PBRLight(sun + transmitted + pointLight) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(shadowNormal, present)) * ao;
 
     float4 albedo = tex2D(DiffuseMap, IN.uv.xy);
     float3 litColor = lighting * albedo.rgb;
@@ -132,6 +170,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     //   1 rounded normals, as colour      2 sun diffuse: wrapped N.L x shadow   3 sun shadow alone
     //   4 translucency: the glow factor   5 sheen    6 root (black) to tip (white) over RootDarkeningHeight
     //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
+    //   8 point lights alone, in their own colour
     // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
     // vertex shaders -- e.g. hair), so none of the grass lighting applies to it.
     float debugView = TESR_GrassLighting2.z;
@@ -146,6 +185,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         float variant = IN.bladeOffset.w;
         float3 variantColour = variant < 0.5f ? float3(1, 0, 0) : (variant < 1.5f ? float3(0, 1, 0) : (variant < 2.5f ? float3(0, 0, 1) : float3(1, 1, 0)));
         view = debugView > 6.5f ? variantColour : view;
+        view = debugView > 7.5f ? saturate(pointLight) : view;
         OUT.color.rgb = grassData ? view : float3(1.0f, 0.0f, 1.0f);
     }
 
