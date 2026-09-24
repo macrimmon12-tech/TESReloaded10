@@ -23,9 +23,10 @@ void GrassShaders::UpdateSettings() {
 	Constants.Scale.y = TheSettingManager->GetSettingF("Shaders.Grass.Main", "ScaleY");
 	Constants.Scale.z = TheSettingManager->GetSettingF("Shaders.Grass.Main", "ScaleZ");
 
-	// Grass lighting (GRASS23x000TMS.pso). Each of the four is off at 0, which is also what a missing
-	// key reads as, so a TOML without them renders vanilla grass. The two shape exponents fall back to
-	// their defaults instead: at 0 they would be meaningless rather than off.
+	// Grass lighting (GRASS23x000TMS.pso and the grass shaders compiled from it). Each term is off at 0,
+	// which is also what a missing key reads as, so a TOML without them renders vanilla grass; settings
+	// where 0 would be meaningless or harmful (exponents, heights, sizes, colours, brightness) fall back
+	// to their defaults instead.
 	const char* Section = "Shaders.Grass.Main";
 	Constants.Lighting.x = std::clamp(TheSettingManager->GetSettingF(Section, "Translucency"), 0.0f, 3.0f);
 	Constants.Lighting.y = std::clamp(TheSettingManager->GetSettingF(Section, "Roundness"), 0.0f, 3.0f);

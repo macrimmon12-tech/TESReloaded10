@@ -17,7 +17,8 @@
 //   TEXCOORD6 sun colour before N.L       TEXCOORD7 sun direction
 //
 // Grass lighting. Vanilla lights a whole clump as one flat card facing its up direction, so a field
-// is one tone wherever the sun is. Four additions, each off at 0 (and all at 0 is vanilla exactly):
+// is one tone wherever the sun is. The additions, each off at its neutral setting (with all of them
+// there, grass is lit as vanilla, plus NVR's forward shadow and sky light):
 //   - Roundness bends each blade's normal outward from the clump's centre, so the side of a clump
 //     facing away from the sun falls into shade and fields gain depth.
 //   - Root darkening shades blades toward the ground over the bottom RootDarkeningHeight units,
@@ -27,8 +28,11 @@
 //   - Translucency lets sunlight through the blades when the sun is behind them: the glow of a
 //     backlit field. Coloured by the grass texture, like light through a leaf, and shadowed.
 //   - Specular adds a soft sheen off the rounded normals toward the sun.
-// And, for grass textures that have one, a per-texture normal map (<name>_n.dds, NormalMaps) adds
-// blade detail on top of the rounded normal; its alpha masks the sheen.
+//   - Point lights (PointLights) light, glint on and glow through nearby blades.
+//   - Per-texture normal maps (<name>_n.dds, NormalMaps) add blade detail on top of the rounded
+//     normal; their alpha masks the sheen. AmbientNormal takes the sky light from that normal too.
+//   - Colour: Brightness, ColorVariation (dry and lush patches across fields), DryTips (straw toward
+//     the blade tops), TranslucencyColor, and GrazingBrightening (lighter fields seen edge-on).
 //
 // Cost. Grass is heavily overdrawn, so every instruction here runs many times per screen pixel.
 // Pixels the engine's alpha test would reject skip everything; the costly lighting (rounded normal,
@@ -55,10 +59,12 @@ float4 TESR_ShadowLightPosition[12] : register(c150);
 float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
 
+float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit), z: brightness, w: ambient normal
+// c199: GrassNormalParams, below.
 float4 TESR_GrassLighting5 : register(c200); // rgb: translucency colour (unset black reads as white)
+float4 TESR_GrassVariation : register(c201); // x: colour variation strength, y: patch size (units), z: brightness variation, w: grazing brightening
 float4 TESR_GrassDryTips   : register(c202); // x: strength, y: start height (units), z: fade length (units)
 float4 TESR_GrassDryColor  : register(c203); // rgb: dry tip colour (unset black reads as the default straw)
-float4 TESR_GrassVariation : register(c201); // x: colour variation strength, y: patch size (units), z: brightness variation, w: grazing brightening
 
 // Colour variation across fields: smooth value noise over the ground plane, from a sin-free hash
 // (Dave Hoskins' hash22) so it is exact at world coordinates in the tens of thousands. Two channels
@@ -79,7 +85,6 @@ float2 GrassNoise2(float2 p) {
     float2 d = GrassHash22(i + float2(1.0f, 1.0f));
     return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
 }
-float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit), z: brightness, w: ambient normal
 
 // Per-texture normal map, bound per grass geometry by the DLL (NewVegas/Hooks/GrassNormals.cpp) when
 // the grass texture has a <name>_n.dds beside it. Not TESR_ names: set directly, not through NVR's
@@ -164,8 +169,9 @@ PS_OUTPUT main(PS_INPUT IN) {
     float gloss = max(TESR_GrassLighting2.y, 1.0f);
     float wrap = saturate(TESR_GrassLighting2.w);
 
-    // Both gradient operations of this shader, first and at top level: the texture read (implicit
-    // derivatives) and the face normal (ddx/ddy). Neither is legal inside the dynamic branch below.
+    // Every gradient operation of this shader, first and at top level: the texture read (implicit
+    // derivatives), the face normal (ddx/ddy) and the derivatives below. None is legal inside the
+    // dynamic branches that follow.
     // The face normal is outside the forward-shadow guard because the skylight needs it whether or
     // not forward shadows are compiled in, and ForwardShadows is a live setting.
     float4 albedo = tex2D(DiffuseMap, IN.uv.xy);
@@ -196,8 +202,8 @@ PS_OUTPUT main(PS_INPUT IN) {
     [branch]
     if (OUT.color.a < GRASS_ALPHA_CUTOFF) {
         clip(-1.0f);
-        // Reads shadowNormal and the derivatives only to pin them above the branch. Used on one side alone, the
-        // compiler sinks the derivatives into the other, and derivatives under a branch that only
+        // Reads shadowNormal and the derivatives only to pin them above the branch. Used on one side
+        // alone, the compiler sinks the derivatives into the other, and derivatives under a branch that only
         // part of a 2x2 quad takes are undefined -- strictly so under DXVK/Vulkan. The pixel is
         // discarded, so the value itself never shows. CI checks the order in the disassembly.
         OUT.color.rgb = shadowNormal + float3(duvdx + duvdy, dpdx.x + dpdy.x);
