@@ -70,13 +70,23 @@ sampler2D DiffuseMap : register(s0);
 // 1 - saturate(d^2 / r^2), times the same wrapped diffuse as the sun. toLight is built as
 // (light - camera) - pixel with the pixel camera-relative, so the large world coordinates cancel
 // before any per-pixel maths. No cube shadows: grass does not sample the point-shadow maps.
-float3 GrassPointLight(float4 light, float4 colour, float3 pixelFromCamera, float3 N, float wrap) {
+// Also adds the light's sheen to specularOut: the same Blinn-Phong as the sun's, off the same normal
+// with the same glossiness, unscaled here (the caller applies Specular and the normal-map mask).
+// V is camera to pixel.
+float3 GrassPointLight(float4 light, float4 colour, float3 pixelFromCamera, float3 N, float3 V, float wrap, float gloss, inout float3 specularOut) {
     float3 toLight = (light.xyz - TESR_CameraPosition.xyz) - pixelFromCamera;
     float distSq = dot(toLight, toLight);
     float att = 1.0f - saturate(distSq / max(light.w * light.w, 1.0f));
     float3 L = toLight * rsqrt(max(distSq, 1e-4f));
     float diffuse = saturate((dot(L, N) + wrap) / (1.0f + wrap));
-    return light.w > 0.0f ? colour.rgb * colour.w * att * diffuse : 0.0f;
+    float3 lit = light.w > 0.0f ? colour.rgb * colour.w * att : 0.0f;
+
+    // Normalised by hand: L - V is zero looking exactly into the light, and normalize() would NaN.
+    float3 H = L - V;
+    H *= rsqrt(max(dot(H, H), 1e-8f));
+    specularOut += lit * pow(saturate(dot(N, H)), gloss);
+
+    return lit * diffuse;
 }
 
 struct PS_INPUT {
@@ -177,6 +187,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 sun = IN.sun.xyz;
     float through = 0.0f;
     float3 pointLight = 0.0f;
+    float3 pointSheen = 0.0f;
     float sheen = 0.0f;
     float sheenMask = 1.0f;
     float3 mapView = 0.15f;   // DebugView 10 where there is no normal map
@@ -244,10 +255,12 @@ PS_OUTPUT main(PS_INPUT IN) {
             [loop]
             for (int i = 0; i < 12; i++) {
                 if (TESR_ShadowLightPosition[i].w <= 0.0f && TESR_LightPosition[i].w <= 0.0f) break;
-                pointLight += GrassPointLight(TESR_ShadowLightPosition[i], TESR_LightColor[i], IN.shadowWorldPos.xyz, N, wrap);
-                pointLight += GrassPointLight(TESR_LightPosition[i], TESR_LightColor[12 + i], IN.shadowWorldPos.xyz, N, wrap);
+                pointLight += GrassPointLight(TESR_ShadowLightPosition[i], TESR_LightColor[i], IN.shadowWorldPos.xyz, N, V, wrap, gloss, pointSheen);
+                pointLight += GrassPointLight(TESR_LightPosition[i], TESR_LightColor[12 + i], IN.shadowWorldPos.xyz, N, V, wrap, gloss, pointSheen);
             }
             pointLight *= pointStrength * detail;
+            // Sheen from the lights: a campfire or lamp glinting on nearby blades, as the sun does.
+            pointSheen *= pointStrength * detail * specular * sheenMask;
         }
 
         // Sheen: Blinn-Phong off the rounded normal. Normalised by hand: L - V is zero looking
@@ -273,7 +286,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 litColor = lighting * albedo.rgb * (grassData ? brightness : 1.0f);
 
     // Sheen, in the light's colour rather than the texture's.
-    litColor += grassData ? PBRLight(sunColor * shadow) * sheen : 0.0f;
+    litColor += grassData ? PBRLight(sunColor * shadow) * sheen + PBRLight(pointSheen) : 0.0f;
 
     OUT.color.rgb = lerp(litColor, IN.fog.rgb, IN.fog.w);
 
@@ -281,7 +294,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     // keeping the blade's alpha so the grass keeps its shape. All read the live settings, so a
     // slider at 0 shows as its term going flat or black.
     //   1 rounded (and normal-mapped) normals, as colour      2 sun diffuse: wrapped N.L x shadow   3 sun shadow alone
-    //   4 translucency: the glow factor   5 sheen    6 root (black) to tip (white) over RootDarkeningHeight
+    //   4 translucency: the glow factor   5 sheen, sun and point lights    6 root (black) to tip (white) over RootDarkeningHeight
     //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
     //   8 point lights alone, in their own colour
     //   9 distance falloffs: red = detail (DetailDistance), green = forward shadow reach (ShadowDistance);
@@ -296,7 +309,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         view = debugView > 1.5f ? wrapped * shadow : view;
         view = debugView > 2.5f ? shadow : view;
         view = debugView > 3.5f ? saturate(through * shadow) : view;
-        view = debugView > 4.5f ? saturate(sheen * shadow) : view;
+        view = debugView > 4.5f ? saturate(sheen * shadow + pointSheen) : view;
         view = debugView > 5.5f ? tip : view;
         // Selects rather than an array: ps_3_0 cannot index a local array with a runtime value.
         float variant = IN.bladeOffset.w;
