@@ -32,6 +32,7 @@ public:
 		int		BokehShape;			// 0 aperture, 1 star, 2 donut, 3 heart, 4 cross
 		float	ShapeDetail;		// 0-1: star point depth, donut hole size, cross arm width
 		int		BokehQuality;		// 0: 48 samples, 1: 96, 2: 160
+		float	PostfilterRadius;	// half-res texels between the smoothing filter's taps; 1 is the original filter
 		int		WeaponDOF;			// 0 off, 1 hip-fire only, 2 always
 		float	WeaponFocusDistance;	// units; the weapon is sharp beyond this
 		float	WeaponBlurRange;	// units over which the weapon's blur builds up nearer than that
@@ -47,7 +48,7 @@ public:
 		D3DXVECTOR4	Near;	// x: near focus range (units), y: near blur strength
 		D3DXVECTOR4	Aperture;	// x: blades, y: blade rotation (radians), z: blade curvature, w: anamorphic
 		D3DXVECTOR4	Bokeh;	// x: cat's eye, y: ring brightness, z: highlight threshold
-		D3DXVECTOR4	Shape;	// x: bokeh shape, y: shape detail
+		D3DXVECTOR4	Shape;	// x: bokeh shape, y: shape detail, z: postfilter radius
 		D3DXVECTOR4	Weapon;	// x: weapon focus distance, y: weapon blur range, z: weapon max CoC, w: weapon DoF strength
 	};
 	CinematicDOFStruct	Constants;

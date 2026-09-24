@@ -70,6 +70,8 @@ void CinematicDOFEffect::UpdateSettings() {
 	Settings.ShapeDetail = std::clamp(TheSettingManager->GetSettingF(Section, "ShapeDetail"), 0.0f, 1.0f);
 	// A missing key reads as 0, the 48-sample level this effect shipped with.
 	Settings.BokehQuality = std::clamp(TheSettingManager->GetSettingI(Section, "BokehQuality"), 0, 2);
+	// 0 is a real setting here (no smoothing), so a missing key reading as 0 is taken at its word.
+	Settings.PostfilterRadius = std::clamp(TheSettingManager->GetSettingF(Section, "PostfilterRadius"), 0.0f, 2.0f);
 
 	// Weapon depth of field. Off when the key is missing; the distances fall back to their defaults
 	// rather than 0, which would put the whole weapon in focus or ramp it in a single step.
@@ -140,7 +142,7 @@ void CinematicDOFEffect::UpdateConstants() {
 	Constants.Near = D3DXVECTOR4(Settings.NearFocusRange, Settings.NearBlurStrength, 0.0f, 0.0f);
 	Constants.Aperture = D3DXVECTOR4((float)Settings.ApertureBlades, D3DXToRadian(Settings.BladeRotation), Settings.BladeCurvature, Settings.Anamorphic);
 	Constants.Bokeh = D3DXVECTOR4(Settings.CatsEye, Settings.RingBrightness, Settings.HighlightThreshold, 0.0f);
-	Constants.Shape = D3DXVECTOR4((float)Settings.BokehShape, Settings.ShapeDetail, 0.0f, 0.0f);
+	Constants.Shape = D3DXVECTOR4((float)Settings.BokehShape, Settings.ShapeDetail, Settings.PostfilterRadius, 0.0f);
 	// Like Data.x, forced to full in the debug view so the weapon's blur shows on the map -- but only
 	// when weapon depth of field is switched on at all.
 	float weaponStrength = Settings.WeaponDOF == 0 ? 0.0f : (Settings.DebugView > 0 ? 1.0f : weaponBlend);

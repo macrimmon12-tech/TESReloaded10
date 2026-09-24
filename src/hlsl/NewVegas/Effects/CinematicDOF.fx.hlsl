@@ -61,7 +61,7 @@ float4 TESR_CinematicDOFData;       // x: effect strength 0-1 (fades in and out)
 float4 TESR_CinematicDOFNear;       // x: near focus range (units), y: near blur strength
 float4 TESR_CinematicDOFAperture;   // x: blades (below 3 = round), y: blade rotation (radians), z: blade curvature 0-1, w: anamorphic squeeze
 float4 TESR_CinematicDOFBokeh;      // x: cat's eye 0-1, y: ring brightness -1 to 1, z: highlight threshold 0-0.95
-float4 TESR_CinematicDOFShape;      // x: bokeh shape (0 aperture, 1 star, 2 donut, 3 heart, 4 cross), y: shape detail 0-1
+float4 TESR_CinematicDOFShape;      // x: bokeh shape (0 aperture, 1 star, 2 donut, 3 heart, 4 cross), y: shape detail 0-1, z: postfilter radius (half-res texels)
 float4 TESR_CinematicDOFWeapon;     // x: weapon focus distance (units), y: weapon blur range (units), z: weapon max CoC (screen heights), w: weapon DoF strength 0-1
 
 sampler2D TESR_SourceBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
@@ -99,6 +99,7 @@ static const float ringBrightness = TESR_CinematicDOFBokeh.y;
 static const float highlightThreshold = TESR_CinematicDOFBokeh.z;
 static const float bokehShape = TESR_CinematicDOFShape.x;
 static const float shapeDetail = TESR_CinematicDOFShape.y;
+static const float postfilterRadius = TESR_CinematicDOFShape.z;
 static const float weaponFocus = TESR_CinematicDOFWeapon.x;
 static const float weaponRange = TESR_CinematicDOFWeapon.y;
 static const float weaponMaxCoC = TESR_CinematicDOFWeapon.z;
@@ -456,16 +457,25 @@ float4 BokehPS(VSOUT IN, uniform int sampleCount) : COLOR0
 }
 
 // ---- Postfilter (half) ----
-// Four bilinear taps half a texel out make a 9-tap tent, smoothing the gather's sampling pattern.
+// A 3x3 tent (1 2 1 by 1 2 1, over 16) smoothing the gather's sampling pattern, its taps
+// PostfilterRadius half-res texels apart. At 1 every tap lands on a texel centre, so this is exactly
+// the 9-texel tent the effect has always used; 0 collapses it onto the pixel (no smoothing); above 1
+// it widens, the bilinear sampler blending between texels, which hides a sparse gather's dots at the
+// cost of softening bokeh edges and shapes.
 float4 PostfilterPS(VSOUT IN) : COLOR0
 {
-	float2 uv = IN.UVCoord + 0.5f * TESR_ReciprocalResolution.xy;
-	float2 d = TESR_ReciprocalResolution.xy;   // half a half-res texel
-	float4 acc = tex2D(TESR_CinematicDOFHalfB, uv + float2(-d.x, -d.y));
-	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2(d.x, -d.y));
-	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2(-d.x, d.y));
-	acc += tex2D(TESR_CinematicDOFHalfB, uv + d);
-	acc *= 0.25f;
+	float2 uv = IN.UVCoord + 0.5f * TESR_ReciprocalResolution.xy;   // half-res texel centre
+	float2 d = TESR_ReciprocalResolution.xy * 2.0f * postfilterRadius;
+	float4 acc = tex2D(TESR_CinematicDOFHalfB, uv) * 4.0f;
+	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2(-d.x, 0.0f)) * 2.0f;
+	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2( d.x, 0.0f)) * 2.0f;
+	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2(0.0f, -d.y)) * 2.0f;
+	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2(0.0f,  d.y)) * 2.0f;
+	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2(-d.x, -d.y));
+	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2( d.x, -d.y));
+	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2(-d.x,  d.y));
+	acc += tex2D(TESR_CinematicDOFHalfB, uv + float2( d.x,  d.y));
+	acc /= 16.0f;
 	return float4(CompressHighlights(acc.rgb), acc.a);
 }
 
