@@ -147,8 +147,19 @@ jobs:
             $out | ForEach-Object { Write-Host "    $_" }
             $failed += 'GrassPrepass depth shader'
           } else {
-            Get-Content $prepassAsm | Where-Object { $_ -match '^\s*(dcl_|texld|texkill|mul|mov|add|mad|instruction)' -or $_ -match 'slots used' } | ForEach-Object { Write-Host "    $_" }
-            Write-Host "ok    GrassPrepass depth shader"
+            $prepassLines = Get-Content $prepassAsm
+            $prepassLines | Where-Object { $_ -match '^\s*(dcl_|texld|texkill|mul|mov|add|mad|if|else|endif)' -or $_ -match 'slots used' } | ForEach-Object { Write-Host "    $_" }
+            # It must cut exactly where the grass shader does: alpha built as mul_sat then mul, compared
+            # with if_lt, never folded into a mad with the threshold. See GrassPrepass.cpp.
+            $hasCompare = ($prepassLines | Select-String -Pattern '^\s*if_lt').Count -ge 1
+            $hasKill = ($prepassLines | Select-String -Pattern '^\s*texkill').Count -ge 1
+            $hasMad = ($prepassLines | Select-String -Pattern '^\s*mad').Count -gt 0
+            if (-not $hasCompare -or -not $hasKill -or $hasMad) {
+              Write-Host "::error file=src/NewVegas/Hooks/GrassPrepass.cpp::depth shader alpha cut does not match the grass shader's (if_lt: $hasCompare, texkill: $hasKill, mad: $hasMad)"
+              $failed += 'GrassPrepass depth shader alpha cut'
+            } else {
+              Write-Host "ok    GrassPrepass depth shader"
+            }
           }
 
           if ($failed.Count -gt 0) { Write-Host "Failed: $($failed -join ', ')"; exit 1 }

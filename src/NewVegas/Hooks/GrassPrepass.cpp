@@ -12,7 +12,13 @@ namespace GrassPrepass {
 	// The depth pass. It has to discard exactly the pixels the grass shader discards, so it repeats
 	// GRASS23x000TMS.pso's alpha to the letter: same texture (s0), same interpolators with the same
 	// centroid sampling, same formula, same early-out cut. The engine's alpha test state is left alone
-	// and so applies to both draws alike. Colour writes are masked off; the value never shows.
+	// and reads the same output alpha, so it applies to both draws alike. Colour writes are masked off;
+	// the value never shows.
+	// The cut is a branch around the discard, as in the grass shader, not clip(alpha - 1/255): fxc
+	// folds that subtraction into the fade multiply as one mad on the unrounded product, which can
+	// land a pixel sitting exactly on the threshold on the other side of it from the grass shader's
+	// plain compare of the rounded alpha. Kept and dropped pixels would then differ between the two
+	// draws. CI checks the compiled form.
 	static const char* kDepthPixelShaderSource =
 		"sampler2D DiffuseMap : register(s0);\n"
 		"struct PS_INPUT {\n"
@@ -21,7 +27,8 @@ namespace GrassPrepass {
 		"};\n"
 		"float4 main(PS_INPUT IN) : COLOR0 {\n"
 		"    float alpha = saturate(tex2D(DiffuseMap, IN.uv.xy).a * 1.75f) * IN.sun.w;\n"
-		"    clip(alpha - 1.0f / 255.0f);\n"
+		"    [branch]\n"
+		"    if (alpha < 1.0f / 255.0f) clip(-1.0f);\n"
 		"    return float4(0.0f, 0.0f, 0.0f, alpha);\n"
 		"}\n";
 
