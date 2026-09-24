@@ -5,11 +5,14 @@ class GrassShaders : public ShaderCollection
 public:
 	GrassShaders() : ShaderCollection("Grass") {};
 
-	// GRASS23x000.pso, the grass pixel shader used with transparency multisampling off, is compiled
-	// from the TMS shader's source so both carry the same grass lighting.
+	// The game's other grass pixel shaders are compiled from GRASS23x000TMS.pso's source, so all carry
+	// the same grass lighting: the non-multisampled one, and the one-point-light pass (whose vanilla
+	// shader reads attenuation coordinates the replacement grass vertex shaders no longer write).
 	std::map<std::string_view, ShaderTemplate> Templates() {
 		return std::map<std::string_view, ShaderTemplate>{
 			{ "GRASS23x000.pso", ShaderTemplate{ "GRASS23x000TMS.pso", {{"GRASS_TMS", "0"}} } },
+			{ "GRASS23x001.pso", ShaderTemplate{ "GRASS23x000TMS.pso", {{"GRASS_TMS", "0"}} } },
+			{ "GRASS23x001TMS.pso", ShaderTemplate{ "GRASS23x000TMS.pso", {{"GRASS_TMS", "1"}} } },
 		};
 	};
 

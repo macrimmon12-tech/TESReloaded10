@@ -1,8 +1,14 @@
 // Grass PS -- vanilla GRASS23x000TMS.pso plus forward sun shadow and grass lighting.
 // Shared by GRASS23x002.vso (LFS) and GRASS23x003.vso (LVS).
 //
-// Also compiled as GRASS23x000.pso, the grass pixel shader the game uses with transparency
-// multisampling off (GrassShaders::Templates, GRASS_TMS 0), so every feature here covers both.
+// Also compiled, through GrassShaders::Templates, as the game's other grass pixel shaders, so every
+// feature here covers them all:
+//   GRASS23x000.pso     transparency multisampling off (GRASS_TMS 0)
+//   GRASS23x001.pso     BSSM_GRASS_1POINT_*: grass lit by one point light, multisampling off. Vanilla
+//                       it reads attenuation coordinates from TEXCOORD1, which the replacement grass
+//                       vertex shaders now fill with the shadow position; this shader lights the pass
+//                       from NVR's own point-light lists instead, so it needs no coordinates.
+//   GRASS23x001TMS.pso  the same with multisampling on, if the game has it.
 //
 // The VS hands the lighting over already split, so only the sun is shadowed:
 //   TEXCOORD4.xyz ambient    TEXCOORD5.xyz sun    TEXCOORD5.w fade    COLOR0 fog (.w amount)
@@ -39,7 +45,8 @@ float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specul
 float4 TESR_GrassLighting3 : register(c148); // x: root darkening height (units), y: point light strength, z: detail distance, w: detail fade
 
 // Point lights: NVR's nearby-light lists, filled every frame by ShaderManager::GetNearbyLights before
-// the world renders. Vanilla never gives grass any point light (its passes are all BSSM_GRASS_DIRONLY),
+// the world renders. Vanilla lights grass with at most one point light, and only in its own
+// BSSM_GRASS_1POINT passes (GRASS23x001.pso, routed through this shader too),
 // so these are the same lists the water shaders read. Positions are ABSOLUTE world with the radius in
 // w, each list packed from index 0 with empty slots zeroed. Colour is rgb with the dimmer in w, the
 // shadow-casting lights' at [0..11] and the rest at [12..23]. c149-c197, inside ps_3_0's 224.
@@ -85,17 +92,16 @@ float4    GrassNormalParams : register(c199);
 
 sampler2D DiffuseMap : register(s0);
 
-// Transparency multisampling: GRASS23x000TMS.pso (1, this file's own name) or GRASS23x000.pso (0, the
-// same source through GrassShaders::Templates). The TMS shader boosts alpha by 1.75 to thicken the
-// blades alpha-to-coverage would otherwise thin; the plain alpha-tested path is taken to use the
-// texture's alpha as it is.
+// Transparency multisampling: 1 for GRASS23x000TMS.pso (this file's own name), 0 for GRASS23x000.pso
+// and GRASS23x001.pso (the same source through GrassShaders::Templates). The two alphas are vanilla's,
+// from the disassembly of both: with TMS, texture alpha boosted by 1.75 for alpha-to-coverage; without,
+// a hard cut in the shader itself -- 1 where texture alpha is above the game's AlphaTestRef (c3), else
+// 0 -- both times the distance fade.
 #ifndef GRASS_TMS
     #define GRASS_TMS 1
 #endif
-#if GRASS_TMS
-    #define GRASS_ALPHA_SCALE 1.75f
-#else
-    #define GRASS_ALPHA_SCALE 1.0f
+#if !GRASS_TMS
+float4 AlphaTestRef : register(c3);
 #endif
 
 // Grass-data sentinel. This pixel shader is not only paired with the four grass vertex shaders: it
@@ -170,7 +176,11 @@ PS_OUTPUT main(PS_INPUT IN) {
     float2 duvdy = ddy(IN.uv.xy);
     float3 dpdx = ddx(IN.shadowWorldPos.xyz);
     float3 dpdy = ddy(IN.shadowWorldPos.xyz);
-    OUT.color.a = saturate(albedo.a * GRASS_ALPHA_SCALE) * IN.sun.w;
+#if GRASS_TMS
+    OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
+#else
+    OUT.color.a = (albedo.a > AlphaTestRef.x ? 1.0f : 0.0f) * IN.sun.w;
+#endif
 
     // Early out for pixels that can never show: a grass card is mostly transparent texture, and
     // overdraw multiplies whatever this shader does, so every one of those pixels used to pay for the
