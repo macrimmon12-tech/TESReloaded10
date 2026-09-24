@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compile effect shaders (fxc fx_2_0)
+      - name: Compile effect and game shaders (fxc)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
@@ -76,4 +76,21 @@ jobs:
               $out | Where-Object { "$_" -match 'warning' -and "$_" -notmatch 'X4717' } | ForEach-Object { Write-Host "    $_" }
             }
           }
+
+          # Game shaders: the replacements the game compiles through D3DXCompileShader, vs_3_0 or
+          # ps_3_0 by suffix with entry point main, with forward shadows compiled in so that path is
+          # checked too. Includes resolve from the Shaders folder, as in game.
+          $shaders = (Resolve-Path src/hlsl/NewVegas/Shaders).Path
+          foreach ($file in Get-ChildItem $shaders -File | Where-Object { $_.Name -match '\.(vso|pso)\.hlsl$' } | Sort-Object Name) {
+            $profile = if ($file.Name -match '\.vso\.hlsl$') { 'vs_3_0' } else { 'ps_3_0' }
+            $out = & $fxc.FullName /nologo /T $profile /E main /I $shaders /D REVERSED_DEPTH=1 /D FORWARD_SHADOWS=1 /Fo "$env:RUNNER_TEMP\$($file.BaseName).cso" $file.FullName 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              $failed += "Shaders/$($file.Name)"
+              Write-Host "::error file=$($file.FullName)::$($file.Name) failed to compile"
+              $out | ForEach-Object { Write-Host "    $_" }
+            } else {
+              Write-Host "ok    Shaders/$($file.Name)"
+            }
+          }
+
           if ($failed.Count -gt 0) { Write-Host "Failed: $($failed -join ', ')"; exit 1 }
