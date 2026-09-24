@@ -9,6 +9,7 @@ void GrassShaders::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_GrassLighting3", &Constants.Lighting3);
 	TheShaderManager->RegisterConstant("TESR_GrassLighting4", &Constants.Lighting4);
 	TheShaderManager->RegisterConstant("TESR_GrassLighting5", &Constants.Lighting5);
+	TheShaderManager->RegisterConstant("TESR_GrassVariation", &Constants.Variation);
 }
 
 // iMinGrassSize, fTexturePctThreshold, fGrass*Distance and fGrassWindMagnitude* are consumed
@@ -33,7 +34,7 @@ void GrassShaders::UpdateSettings() {
 	float gloss = TheSettingManager->GetSettingF(Section, "SpecularGlossiness");
 	Constants.Lighting2.x = focus > 0.0f ? std::clamp(focus, 1.0f, 32.0f) : 4.0f;
 	Constants.Lighting2.y = gloss > 0.0f ? std::clamp(gloss, 1.0f, 128.0f) : 16.0f;
-	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 10);
+	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 11);
 	// 0 is plain Lambert, a real setting, so a missing key is taken at its word.
 	Constants.Lighting2.w = std::clamp(TheSettingManager->GetSettingF(Section, "DiffuseWrap"), 0.0f, 1.0f);
 	float rootHeight = TheSettingManager->GetSettingF(Section, "RootDarkeningHeight");
@@ -59,6 +60,12 @@ void GrassShaders::UpdateSettings() {
 		std::clamp(TheSettingManager->GetSettingF(Section, "TranslucencyColorG"), 0.0f, 2.0f),
 		std::clamp(TheSettingManager->GetSettingF(Section, "TranslucencyColorB"), 0.0f, 2.0f), 0.0f);
 	Constants.Lighting5 = (tint.x + tint.y + tint.z > 0.0f) ? tint : D3DXVECTOR4(1.0f, 1.0f, 1.0f, 0.0f);
+
+	// Colour variation across fields. Off at 0 (also a missing key); a missing patch size means 1500.
+	Constants.Variation.x = std::clamp(TheSettingManager->GetSettingF(Section, "ColorVariation"), 0.0f, 1.0f);
+	float patchSize = TheSettingManager->GetSettingF(Section, "ColorVariationScale");
+	Constants.Variation.y = patchSize > 0.0f ? std::clamp(patchSize, 100.0f, 20000.0f) : 1500.0f;
+	Constants.Variation.z = std::clamp(TheSettingManager->GetSettingF(Section, "ColorVariationBrightness"), 0.0f, 1.0f);
 
 	// Normal maps: <grass texture>_n.dds beside each grass texture, loose under Data\Textures. Off at 0.
 	NormalMapStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NormalMaps"), 0.0f, 2.0f);

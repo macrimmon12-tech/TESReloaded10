@@ -46,6 +46,27 @@ float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
 
 float4 TESR_GrassLighting5 : register(c200); // rgb: translucency colour (unset black reads as white)
+float4 TESR_GrassVariation : register(c201); // x: colour variation strength, y: patch size (units), z: brightness variation
+
+// Colour variation across fields: smooth value noise over the ground plane, from a sin-free hash
+// (Dave Hoskins' hash22) so it is exact at world coordinates in the tens of thousands. Two channels
+// from one lookup: x drives the dry/lush tint, y the brightness. Arithmetic only, no texture.
+float2 GrassHash22(float2 p) {
+    float3 p3 = frac(p.xyx * float3(0.1031f, 0.1030f, 0.0973f));
+    p3 += dot(p3, p3.yzx + 33.33f);
+    return frac((p3.xx + p3.yz) * p3.zy);
+}
+
+float2 GrassNoise2(float2 p) {
+    float2 i = floor(p);
+    float2 f = p - i;
+    float2 u = f * f * (3.0f - 2.0f * f);
+    float2 a = GrassHash22(i);
+    float2 b = GrassHash22(i + float2(1.0f, 0.0f));
+    float2 c = GrassHash22(i + float2(0.0f, 1.0f));
+    float2 d = GrassHash22(i + float2(1.0f, 1.0f));
+    return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
 float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit), z: brightness, w: ambient normal
 
 // Per-texture normal map, bound per grass geometry by the DLL (NewVegas/Hooks/GrassNormals.cpp) when
@@ -302,7 +323,26 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Brightness: scales the grass texture's colour, for grass that reads too bright under the extra
     // light the grass lighting adds. Grass only, not hair; 1 (or an unset 0) leaves it untouched.
     float brightness = TESR_GrassLighting4.z > 0.0f ? TESR_GrassLighting4.z : 1.0f;
-    float3 litColor = lighting * albedo.rgb * (grassData ? brightness : 1.0f);
+
+    // Colour variation (ColorVariation): patches of drier, straw-tinted grass and lusher, greener grass
+    // across a field, with their brightness varied too, instead of one uniform tint. Anchored to the
+    // world -- absolute ground position, camera-relative position plus the camera -- so the patches
+    // stay put as you move, and applied at every distance: whole fields are where it shows. The patch
+    // size is ColorVariationScale; a clump is far smaller, so each clump reads as one colour.
+    float3 variationTint = 1.0f;
+    float variationStrength = TESR_GrassVariation.x;
+    [branch]
+    if (grassData && variationStrength > 0.0f) {
+        float2 ground = (IN.shadowWorldPos.xy + TESR_CameraPosition.xy) / max(TESR_GrassVariation.y, 1.0f);
+        float2 n = GrassNoise2(ground) * 2.0f - 1.0f;    // -1..1; value noise sits near 0, so stretched a little
+        float hue = clamp(n.x * 1.6f, -1.0f, 1.0f);
+        const float3 dryTint = float3(1.12f, 1.02f, 0.72f);
+        const float3 lushTint = float3(0.88f, 1.04f, 0.90f);
+        variationTint = lerp(1.0f, hue > 0.0f ? dryTint : lushTint, abs(hue) * variationStrength);
+        variationTint *= 1.0f + clamp(n.y * 1.6f, -1.0f, 1.0f) * variationStrength * TESR_GrassVariation.z;
+    }
+
+    float3 litColor = lighting * albedo.rgb * (grassData ? brightness * variationTint : 1.0f);
 
     // Sheen, in the light's colour rather than the texture's.
     litColor += grassData ? PBRLight(sunColor * shadow) * sheen + PBRLight(pointSheen) : 0.0f;
@@ -319,6 +359,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     //   9 distance falloffs: red = detail (DetailDistance), green = forward shadow reach (ShadowDistance);
     //     yellow is full lighting, green shadows only, black neither
     //  10 normal maps: the normal-mapped normal as colour where this grass has a map, dark grey where not
+    //  11 colour variation: the tint it applies, at half brightness (mid grey = unchanged)
     // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
     // vertex shaders -- e.g. hair), so none of the grass lighting applies to it.
     float debugView = TESR_GrassLighting2.z;
@@ -337,6 +378,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         view = debugView > 7.5f ? saturate(pointLight) : view;
         view = debugView > 8.5f ? float3(detail, shadowReach, 0.0f) : view;
         view = debugView > 9.5f ? mapView : view;
+        view = debugView > 10.5f ? variationTint * 0.5f : view;
         OUT.color.rgb = grassData ? view : float3(1.0f, 0.0f, 1.0f);
     }
 
