@@ -46,6 +46,8 @@ float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
 
 float4 TESR_GrassLighting5 : register(c200); // rgb: translucency colour (unset black reads as white)
+float4 TESR_GrassDryTips   : register(c202); // x: strength, y: start height (units), z: fade length (units)
+float4 TESR_GrassDryColor  : register(c203); // rgb: dry tip colour (unset black reads as the default straw)
 float4 TESR_GrassVariation : register(c201); // x: colour variation strength, y: patch size (units), z: brightness variation, w: grazing brightening
 
 // Colour variation across fields: smooth value noise over the ground plane, from a sin-free hash
@@ -351,7 +353,16 @@ PS_OUTPUT main(PS_INPUT IN) {
         variationTint *= 1.0f + clamp(n.y * 1.6f, -1.0f, 1.0f) * variationStrength * TESR_GrassVariation.z;
     }
 
-    float3 litColor = lighting * albedo.rgb * (grassData ? brightness * variationTint * (1.0f + grazing) : 1.0f);
+    // Dry tips (DryTips): each blade shifts toward a straw colour over its upper part, measured from the
+    // geometry -- the same height above the clump's base that root darkening uses -- so tall clumps dry
+    // out over their top and short tufts barely change. Every distance; grass only (blade.w is
+    // undefined without grass data, hence the select).
+    float3 dryColor = max(max(TESR_GrassDryColor.r, TESR_GrassDryColor.g), TESR_GrassDryColor.b) > 0.0f ? TESR_GrassDryColor.rgb : float3(1.2f, 1.05f, 0.6f);
+    float dryAmount = saturate(TESR_GrassDryTips.x) * saturate((IN.blade.w - TESR_GrassDryTips.y) / max(TESR_GrassDryTips.z, 1.0f));
+    dryAmount = grassData ? dryAmount : 0.0f;
+    float3 dryTint = lerp(1.0f, dryColor, dryAmount);
+
+    float3 litColor = lighting * albedo.rgb * (grassData ? brightness * variationTint * dryTint * (1.0f + grazing) : 1.0f);
 
     // Sheen, in the light's colour rather than the texture's.
     litColor += grassData ? PBRLight(sunColor * shadow) * sheen + PBRLight(pointSheen) : 0.0f;
@@ -370,6 +381,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     //  10 normal maps: the normal-mapped normal as colour where this grass has a map, dark grey where not
     //  11 colour variation: the tint it applies, at half brightness (mid grey = unchanged)
     //  12 grazing-angle brightening: how much it lifts this pixel, black none to white full
+    //  13 dry tips: how dry this pixel is, black none to white full
     // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
     // vertex shaders -- e.g. hair), so none of the grass lighting applies to it.
     float debugView = TESR_GrassLighting2.z;
@@ -390,6 +402,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         view = debugView > 9.5f ? mapView : view;
         view = debugView > 10.5f ? variationTint * 0.5f : view;
         view = debugView > 11.5f ? grazing : view;
+        view = debugView > 12.5f ? dryAmount : view;
         OUT.color.rgb = grassData ? view : float3(1.0f, 0.0f, 1.0f);
     }
 

@@ -10,6 +10,8 @@ void GrassShaders::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_GrassLighting4", &Constants.Lighting4);
 	TheShaderManager->RegisterConstant("TESR_GrassLighting5", &Constants.Lighting5);
 	TheShaderManager->RegisterConstant("TESR_GrassVariation", &Constants.Variation);
+	TheShaderManager->RegisterConstant("TESR_GrassDryTips", &Constants.DryTips);
+	TheShaderManager->RegisterConstant("TESR_GrassDryColor", &Constants.DryColor);
 }
 
 // iMinGrassSize, fTexturePctThreshold, fGrass*Distance and fGrassWindMagnitude* are consumed
@@ -34,7 +36,7 @@ void GrassShaders::UpdateSettings() {
 	float gloss = TheSettingManager->GetSettingF(Section, "SpecularGlossiness");
 	Constants.Lighting2.x = focus > 0.0f ? std::clamp(focus, 1.0f, 32.0f) : 4.0f;
 	Constants.Lighting2.y = gloss > 0.0f ? std::clamp(gloss, 1.0f, 128.0f) : 16.0f;
-	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 12);
+	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 13);
 	// 0 is plain Lambert, a real setting, so a missing key is taken at its word.
 	Constants.Lighting2.w = std::clamp(TheSettingManager->GetSettingF(Section, "DiffuseWrap"), 0.0f, 1.0f);
 	float rootHeight = TheSettingManager->GetSettingF(Section, "RootDarkeningHeight");
@@ -68,6 +70,17 @@ void GrassShaders::UpdateSettings() {
 	Constants.Variation.z = std::clamp(TheSettingManager->GetSettingF(Section, "ColorVariationBrightness"), 0.0f, 1.0f);
 	// Grazing-angle brightening. Off at 0, also a missing key.
 	Constants.Variation.w = std::clamp(TheSettingManager->GetSettingF(Section, "GrazingBrightening"), 0.0f, 1.0f);
+
+	// Dry tips. Off at 0 (also a missing key); missing heights and colour fall back to the defaults.
+	Constants.DryTips.x = std::clamp(TheSettingManager->GetSettingF(Section, "DryTips"), 0.0f, 1.0f);
+	float dryStart = TheSettingManager->GetSettingF(Section, "DryTipsHeight");
+	float dryFade = TheSettingManager->GetSettingF(Section, "DryTipsFade");
+	Constants.DryTips.y = dryStart > 0.0f ? std::clamp(dryStart, 0.0f, 300.0f) : 25.0f;
+	Constants.DryTips.z = dryFade > 0.0f ? std::clamp(dryFade, 1.0f, 300.0f) : 30.0f;
+	D3DXVECTOR4 dry(std::clamp(TheSettingManager->GetSettingF(Section, "DryTipsColorR"), 0.0f, 2.0f),
+		std::clamp(TheSettingManager->GetSettingF(Section, "DryTipsColorG"), 0.0f, 2.0f),
+		std::clamp(TheSettingManager->GetSettingF(Section, "DryTipsColorB"), 0.0f, 2.0f), 0.0f);
+	Constants.DryColor = (dry.x + dry.y + dry.z > 0.0f) ? dry : D3DXVECTOR4(1.2f, 1.05f, 0.6f, 0.0f);
 
 	// Normal maps: <grass texture>_n.dds beside each grass texture, loose under Data\Textures. Off at 0.
 	NormalMapStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NormalMaps"), 0.0f, 2.0f);
