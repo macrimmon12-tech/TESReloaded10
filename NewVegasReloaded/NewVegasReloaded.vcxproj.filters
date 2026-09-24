@@ -226,6 +226,9 @@
     <ClInclude Include="..\src\NewVegas\Hooks\Hooks.h">
       <Filter>NewVegas\Hooks</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\NewVegas\Hooks\GrassPrepass.h">
+      <Filter>NewVegas\Hooks</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\NewVegas\Hooks\MaterialPass.h">
       <Filter>NewVegas\Hooks</Filter>
     </ClInclude>
@@ -472,6 +475,9 @@
       <Filter>NewVegas\Hooks</Filter>
     </ClCompile>
     <ClCompile Include="..\src\NewVegas\Hooks\Hooks.cpp">
+      <Filter>NewVegas\Hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\NewVegas\Hooks\GrassPrepass.cpp">
       <Filter>NewVegas\Hooks</Filter>
     </ClCompile>
     <ClCompile Include="..\src\NewVegas\Hooks\MaterialPass.cpp">

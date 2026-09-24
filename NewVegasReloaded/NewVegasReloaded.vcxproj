@@ -206,6 +206,7 @@
     </ClCompile>
     <ClCompile Include="..\src\NewVegas\Hooks\FlyCam.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\Game.cpp" />
+    <ClCompile Include="..\src\NewVegas\Hooks\GrassPrepass.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\Hooks.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\MaterialPass.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\Render.cpp" />
@@ -306,6 +307,7 @@
     <ClInclude Include="..\src\NewVegas\nvse\GameNi.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\FlyCam.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\Game.h" />
+    <ClInclude Include="..\src\NewVegas\Hooks\GrassPrepass.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\Hooks.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\MaterialPass.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\Render.h" />

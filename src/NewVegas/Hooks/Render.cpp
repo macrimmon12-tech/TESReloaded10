@@ -17,6 +17,9 @@ void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTe
 	// nothing while the light is off.
 	FlashlightEffect* Flashlight = TheShaderManager->Effects.Flashlight;
 	MaterialPass::BeginFrame(Flashlight->Enabled && Flashlight->spotLightActive);
+	GrassShaders* Grass = TheShaderManager->Shaders.Grass;
+	GrassPrepass::SetEnabled(Grass && Grass->Enabled && Grass->DepthPrepass);
+	GrassPrepass::BeginFrame();
 
 	//if (SettingsMain->Develop.TraceShaders && InterfaceManager->IsActive(Menu::MenuType::kMenuType_None) && Global->OnKeyDown(SettingsMain->Develop.TraceShaders) && DWNode::Get() == NULL) DWNode::Create();
 	(*Render)(This, RenderedTexture, Arg2, Arg3);
@@ -57,6 +60,10 @@ void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
 		//DWNode::AddNode(Name, Geometry->m_parent, Geometry);
 	}
 	(*SetShaders)(This, PassIndex);
+
+	// After the original, which binds the shaders: arms the grass depth prepass for this pass's
+	// draws if both shaders are NVR's grass shaders, disarms it otherwise.
+	GrassPrepass::OnSetShaders(VertexShader, PixelShader);
 
 }
 
