@@ -45,7 +45,7 @@ float4 TESR_ShadowLightPosition[12] : register(c150);
 float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
 
-float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit)
+float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit), z: brightness
 
 // Per-texture normal map, bound per grass geometry by the DLL (NewVegas/Hooks/GrassNormals.cpp) when
 // the grass texture has a <name>_n.dds beside it. Not TESR_ names: set directly, not through NVR's
@@ -267,7 +267,10 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Same split getSunLighting/getAmbientLighting apply on the object path.
     float3 lighting = (PBRLight(sun + transmitted + pointLight) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(shadowNormal, present)) * ao;
 
-    float3 litColor = lighting * albedo.rgb;
+    // Brightness: scales the grass texture's colour, for grass that reads too bright under the extra
+    // light the grass lighting adds. Grass only, not hair; 1 (or an unset 0) leaves it untouched.
+    float brightness = TESR_GrassLighting4.z > 0.0f ? TESR_GrassLighting4.z : 1.0f;
+    float3 litColor = lighting * albedo.rgb * (grassData ? brightness : 1.0f);
 
     // Sheen, in the light's colour rather than the texture's.
     litColor += grassData ? PBRLight(sunColor * shadow) * sheen : 0.0f;

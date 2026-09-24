@@ -47,6 +47,10 @@ void GrassShaders::UpdateSettings() {
 	Constants.Lighting4.x = std::clamp(TheSettingManager->GetSettingF(Section, "ShadowDistance"), 0.0f, 20000.0f);
 	Constants.Lighting4.y = std::clamp(TheSettingManager->GetSettingF(Section, "ShadowFade"), 1.0f, 10000.0f);
 
+	// Grass texture brightness. A missing key reads 0, which would blacken the grass: it means 1.
+	float brightness = TheSettingManager->GetSettingF(Section, "Brightness");
+	Constants.Lighting4.z = brightness > 0.0f ? std::clamp(brightness, 0.1f, 2.0f) : 1.0f;
+
 	// Normal maps: <grass texture>_n.dds beside each grass texture, loose under Data\Textures. Off at 0.
 	NormalMapStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NormalMaps"), 0.0f, 2.0f);
 	NormalMapFlipGreen = TheSettingManager->GetSettingI(Section, "NormalMapFlipGreen") != 0;
