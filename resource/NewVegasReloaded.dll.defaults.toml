@@ -359,6 +359,12 @@ Enabled = true                         # Volumetric light shaft in the air along
 ScaleX = 1.0
 ScaleY = 1.0
 ScaleZ = 1.0
+Translucency = 0.6                    # [0.0-3.0] Sunlight through the blades when the sun is behind them: the glow of a backlit field, tinted by the grass colour and cut by shadows. 0 off.
+TranslucencyFocus = 4.0               # [1-32] How tightly the glow gathers around the sun's direction. Higher is a narrower, more concentrated rim around the sun; lower spreads it across more of the view.
+Roundness = 0.6                       # [0.0-3.0] Bends each blade's lighting outward from the clump's centre, so the side of a clump facing away from the sun falls into shade instead of a whole field being one flat tone. 0 is vanilla flat cards.
+RootDarkening = 0.35                  # [0.0-1.0] Shades blades toward the ground, like the clump shadowing its own base. Uses the vertex alpha the wind uses for sway, so grass meshes without it are unaffected. 0 off.
+Specular = 0.15                       # [0.0-2.0] Soft sheen on blades facing between you and the sun. Needs Roundness above 0 to vary across a clump. 0 off.
+SpecularGlossiness = 16.0             # [1-128] Size of the sheen: higher is a smaller, sharper highlight; lower a broad, soft one.
 
 [_Shaders.Grass.Status]
 Enabled = true                        # Replaces the grass shaders.
