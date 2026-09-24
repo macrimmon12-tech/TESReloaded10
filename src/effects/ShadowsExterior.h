@@ -212,6 +212,7 @@ public:
 
 private:
 	bool		texturesInitialized;
+	int			heldShadowMode = -1;	// last Mode refused at runtime, so the log says it once
 
 	bool		UpdateSettingsFromQuality(int quality);
 };

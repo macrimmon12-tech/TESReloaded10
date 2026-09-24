@@ -219,6 +219,12 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 			break;
 		}
 		AppendDefine("SHADOW_FIXED_MODE", shadowMode == 0 ? "0" : shadowMode == 1 ? "1" : "2");
+
+		// Publish it: this is the only place the compiled-in encoding is decided, and
+		// ShadowsExteriorEffect has to hold the runtime Mode to it. Every shader in a session
+		// gets the same value - the setting cannot change between two of these calls without
+		// UpdateSettings having already pinned it back.
+		TheShaderManager->CompiledShadowMode = shadowMode;
 	}
 
 	HRESULT prepass = D3DXPreprocessShaderFromFileA(ShaderSourcePath, Macros, NULL, &ShaderSource, &Errors);

@@ -162,6 +162,10 @@ public:
     bool                    orthoRequired;
     bool                    avglumaRequired;
 	bool					EffectReloadQueued;
+	// Atlas encoding the game shaders were actually compiled for, -1 before the first one
+	// loads. ShadowsExteriorEffect holds the Mode setting to this, because neither end of
+	// the shadow map can be recompiled mid-session. See ShaderRecord::LoadShader.
+	int						CompiledShadowMode = -1;
 	D3DXVECTOR4				SpotLightPosition[SpotLightsMax];
 	D3DXVECTOR4				SpotLightColor[SpotLightsMax];
 	D3DXVECTOR4				SpotLightDirection[SpotLightsMax];

@@ -732,7 +732,7 @@ RenderDistance = 180000              # Max distance at which to compute screen s
 Intensity = 0.315                    # Rescale the intensity of screenspace shadows, to combat jitter and blur making them very faint even at maximum brightness.
 
 [_Shaders.ShadowsExteriors.ShadowMaps]
-Mode = 2							 # Shadow mode, higher means higher quality, but higher computational cost. 0: VSM, 1: EVSM2, 2: EVSM4
+Mode = 2							 # Shadow mode, higher means higher quality, but higher computational cost. 0: VSM, 1: EVSM2, 2: EVSM4. Needs a RESTART: both the shadow map shader and the forward path compile the channel layout in, so a change is saved and applied on the next launch, not immediately. Format below can be changed freely.
 Format = 0							 # Texture format, higher means higher quality, but higher bandwidth cost. 0: 16 bit, 1: 32 bit
 CascadeResolution = 1				 # Resolution used for shadow cascades. 0: 1024, 1: 1536, 2: 2048,
                                      # 3: 2560, 4: 3072, 5: 3584. The atlas holds 2x2 cascades, so
