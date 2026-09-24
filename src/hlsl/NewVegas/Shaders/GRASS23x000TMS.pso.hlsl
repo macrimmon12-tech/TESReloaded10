@@ -108,7 +108,11 @@ PS_OUTPUT main(PS_INPUT IN) {
     [branch]
     if (OUT.color.a < 1.0f / 255.0f) {
         clip(-1.0f);
-        OUT.color.rgb = 0.0f;
+        // Reads shadowNormal only to pin its ddx/ddy above the branch. Used on one side alone, the
+        // compiler sinks the derivatives into the other, and derivatives under a branch that only
+        // part of a 2x2 quad takes are undefined -- strictly so under DXVK/Vulkan. The pixel is
+        // discarded, so the value itself never shows. CI checks the order in the disassembly.
+        OUT.color.rgb = shadowNormal;
         return OUT;
     }
 

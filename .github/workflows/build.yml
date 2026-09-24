@@ -118,5 +118,15 @@ jobs:
             Write-Host "::error file=$grass::early-out branch or discard missing from the compiled grass pixel shader"
             $failed += 'GRASS23x000TMS early-out check'
           }
+          # Derivatives (dsx/dsy, and texld's implicit ones) must all come before the first branch:
+          # inside a branch only part of a quad takes, they are undefined.
+          $gradients = $lines | Select-String -Pattern '^\s*(dsx|dsy|texld )'
+          $late = $gradients | Where-Object { $_.LineNumber -gt $first }
+          Write-Host "Grass PS gradient ops: $($gradients.Count), after the first branch: $($late.Count)"
+          if ($gradients.Count -lt 3 -or $late.Count -gt 0) {
+            $late | ForEach-Object { Write-Host "    late: $($_.Line)" }
+            Write-Host "::error file=$grass::gradient operations missing or moved inside the early-out branch"
+            $failed += 'GRASS23x000TMS gradient placement check'
+          }
 
           if ($failed.Count -gt 0) { Write-Host "Failed: $($failed -join ', ')"; exit 1 }
