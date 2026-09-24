@@ -39,7 +39,9 @@ void CinematicDOFEffect::UpdateSettings() {
 	// blur or a division by zero -- so 0 falls back to the shipped value instead.
 	auto orDefault = [](float value, float fallback) { return value > 0.0f ? value : fallback; };
 
-	Settings.Mode = std::clamp(TheSettingManager->GetSettingI(Section, "Mode"), 0, 3);
+	// 0 always, 1 dialogue only. Aiming no longer switches the world blur on; the old values 2
+	// (dialogue) and 3 (aiming or dialogue) both mean dialogue now, and so does the old 1 (aiming).
+	Settings.Mode = TheSettingManager->GetSettingI(Section, "Mode") == 0 ? 0 : 1;
 	Settings.FocalLength = std::clamp(orDefault(TheSettingManager->GetSettingF(Section, "FocalLength"), 50.0f), 10.0f, 300.0f);
 	Settings.FStop = std::clamp(orDefault(TheSettingManager->GetSettingF(Section, "FStop"), 2.0f), 0.7f, 32.0f);
 	Settings.AutoFocus = TheSettingManager->GetSettingI(Section, "AutoFocus") != 0;
@@ -85,17 +87,11 @@ void CinematicDOFEffect::UpdateConstants() {
 	float dt = (float)TheFrameRateManager->ElapsedTime;
 	if (!(dt > 0.0f) || dt > 0.5f) dt = 0.0f; // paused, first frame, or a hitch: hold rather than jump
 
-	// When the effect should be on. Aiming is the common modern use: the world behind the target
-	// falls away while you are down the sights, and comes back when you lower them.
+	// When the world blur is on: always, or only in dialogue. Aiming is still tracked, but only for
+	// weapon depth of field below, which switches off while aiming so the sights stay sharp.
 	bool aiming = Player && Player->IsAiming();
 	bool dialogue = TheShaderManager->GameState.isDialog || TheShaderManager->GameState.isPersuasion;
-	bool active = false;
-	switch (Settings.Mode) {
-		case 0: active = true; break;
-		case 1: active = aiming; break;
-		case 2: active = dialogue; break;
-		case 3: active = aiming || dialogue; break;
-	}
+	bool active = Settings.Mode == 0 || dialogue;
 
 	// Off in VATS, and cut rather than faded: VATS drives its own camera and screen effects, and the
 	// blur showed ghosted copies of the scene there. The debug view still runs, for diagnosing it.

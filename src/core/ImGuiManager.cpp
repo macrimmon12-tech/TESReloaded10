@@ -2191,6 +2191,9 @@ static const char* kShadowOrthoResolutionNames[] = {
 static const char* kEdgeDetectionNames[] = {
 	"0 - Luma", "1 - Color", "2 - Depth", "3 - Luma + Depth",
 };
+static const char* kCinematicDofModeNames[] = {
+	"0 - Always", "1 - Dialogue only",
+};
 static const char* kTAADebugNames[] = {
 	"0 - Off", "1 - Motion", "2 - Reprojection error", "3 - History use", "4 - Weapon mask", "5 - Depth",
 };
@@ -2231,6 +2234,7 @@ static const std::unordered_map<std::string, EnumOptions> kEnumSettings = {
 	{ "Shaders.CinematicDOF.Main.BokehQuality",                ENUM_OPT(kBokehQualityNames) },
 	{ "Shaders.CinematicDOF.Main.WeaponDOF",                   ENUM_OPT(kWeaponDofNames) },
 	{ "Shaders.CinematicDOF.Main.DebugView",                   ENUM_OPT(kCinematicDofDebugNames) },
+	{ "Shaders.CinematicDOF.Main.Mode",                        ENUM_OPT(kCinematicDofModeNames) },
 	{ "Shaders.TAA.Main.DebugView",                            ENUM_OPT(kTAADebugNames) },
 	{ "Shaders.Grass.Main.DebugView",                          ENUM_OPT(kGrassDebugNames) },
 };

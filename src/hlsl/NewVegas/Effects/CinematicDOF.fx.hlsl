@@ -47,9 +47,9 @@
 //    centre is not where its outline is simplest to describe, keep the round disc's samples and mask
 //    out the ones that fall outside, using a distance to the edge so the cut is as soft as the rim's.
 //
-//  - Autofocus on WORLD depth. The combined depth buffer contains the first-person weapon, and when
-//    aiming down sights the sights sit dead centre -- autofocus on that would focus on the gun and
-//    blur the world. The world-only depth buffer is decoded with CombineDepth's own conversion.
+//  - Autofocus on WORLD depth. The combined depth buffer contains the first-person weapon, which can
+//    sit across the centre of the screen -- autofocus on that would focus on the gun and blur the
+//    world. The world-only depth buffer is decoded with CombineDepth's own conversion.
 
 #define PI 3.14159265f
 

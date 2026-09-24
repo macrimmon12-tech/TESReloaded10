@@ -9,7 +9,7 @@ public:
 	CinematicDOFEffect() : EffectRecord("CinematicDOF") {};
 
 	struct CinematicDOFSettingsStruct {
-		int		Mode;				// 0 always, 1 aiming, 2 dialogue, 3 aiming or dialogue
+		int		Mode;				// 0 always, 1 dialogue only
 		float	FocalLength;		// mm, virtual -- independent of the game's FOV
 		float	FStop;
 		bool	AutoFocus;
