@@ -47,7 +47,7 @@ float4 TESR_ShadowFade; // x: sunrise/sunset fade, y: shadow maps active
 
 float4 TESR_FogData; // x: fog near, y: fog far, z: sun glare, w: fog power
 float4 TESR_GameTime; // y: game hour -- read by Includes/FogDensity.hlsl
-float4 TESR_SunAmount; // x: daylight ramp -- read by Includes/FogDensity.hlsl
+float4 TESR_SunAmount; // x: daylight ramp -- read by Includes/FogDensity.hlsl and the night fade in CompositeLight
 
 // VolumetricFog's density constants, read through Includes/FogDensity.hlsl so these shafts scatter
 // through the same air VolumetricFog paints. Published by VolumetricFogEffect::UpdateSettings,
@@ -655,6 +655,12 @@ void AccumulateTap(float2 tapUV, float centerDepth, inout float4 sum, inout floa
 // behind it, much more), and bilinear then smears that mixture several full-res pixels to either
 // side of the edge -- a halo of light detached from the object that should bound it. Scaling the
 // march by path length widens precisely that near/far gap, so this matters more now, not less.
+// TESR_SunAmount.x range over which the effect fades out toward night. END must stay at 0.5: that
+// is where the light direction stops being the sun (see the fade in CompositeLight). START only sets
+// how gradual the fade is; 0.6 is a few game-minutes of dawn and dusk.
+static const float NIGHT_FADE_START = 0.6f;
+static const float NIGHT_FADE_END = 0.5f;
+
 float4 CompositeLight(VSOUT IN) : COLOR0 {
     float2 uv = IN.UVCoord.xy;
 
@@ -684,6 +690,19 @@ float4 CompositeLight(VSOUT IN) : COLOR0 {
     float4 volumeLight = weightSum < 0.0001f
         ? tex2D(TESR_VolumetricLightBuffer, uv)
         : sum / weightSum;
+
+    // Fade the whole effect out at night -- the in-scattered light AND the opacity, so a faded
+    // pixel is the scene passed through untouched rather than a darkened one.
+    //
+    // At night there is no sun to scatter. The engine's directional light is the moon, and
+    // ShaderManager hands it to TESR_SmoothedSunDir/TESR_SunColor whenever dayLight <= 0.5 (the sun
+    // mesh position is only used above that), so without this the march draws moon shafts: the
+    // distant air toward the moon glows. TESR_SunAmount.x is smoothstep(dayLight), so 0.5 here is
+    // exactly the point where the direction switches over. The fade reaches zero there, which also
+    // hides the jump from the sun's direction to the moon's. VolumetricLightEffect::ShouldRender
+    // skips the effect outright below it, so night costs nothing.
+    float dayFade = smoothstep(NIGHT_FADE_END, NIGHT_FADE_START, TESR_SunAmount.x);
+    volumeLight *= dayFade;
 
     // The volumetric rendering equation: what reaches the eye is the scene behind the medium,
     // attenuated by the medium's transmittance, plus the light the medium scattered into the ray.

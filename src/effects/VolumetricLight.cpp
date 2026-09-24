@@ -94,7 +94,12 @@ void VolumetricLightEffect::RegisterTextures() {
 }
 
 bool VolumetricLightEffect::ShouldRender() {
-	return TheShaderManager->GameState.isExterior && !TheShaderManager->GameState.isUnderwater;
+	// dayLight <= 0.5 is night as far as this effect is concerned: ShaderManager switches the light
+	// direction from the sun mesh to the engine's directional light (the moon) there, and the shader
+	// has already faded the effect to nothing by that point (see CompositeLight). Skipping it saves
+	// the march all night.
+	return TheShaderManager->GameState.isExterior && !TheShaderManager->GameState.isUnderwater &&
+		TheShaderManager->GameState.dayLight > 0.5f;
 }
 
 bool VolumetricLightEffect::TemporalActive() {
