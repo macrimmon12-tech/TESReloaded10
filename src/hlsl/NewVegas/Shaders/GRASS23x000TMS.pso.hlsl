@@ -111,7 +111,13 @@ PS_OUTPUT main(PS_INPUT IN) {
     float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
 
     // Same split getSunLighting/getAmbientLighting apply on the object path.
-    float3 lighting = (PBRLight(sun + transmitted) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(shadowNormal, present)) * ao;
+    // Skylight off the grass's own shape too. shadowNormal is the face normal of whichever card the
+    // pixel is on, from screen-space derivatives: on two-sided grass cards it points sideways and flips
+    // with the view, so the sky term would vary card by card rather than with the clump. With
+    // Roundness on, the rounded clump normal the sun uses is the right one; at 0 the card normal stays,
+    // so vanilla remains vanilla. (The shadow lookup keeps shadowNormal: its bias needs the true face.)
+    float3 skyNormal = (grassData && roundness > 0.0f) ? N : shadowNormal;
+    float3 lighting = (PBRLight(sun + transmitted) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(skyNormal, present)) * ao;
 
     float4 albedo = tex2D(DiffuseMap, IN.uv.xy);
     float3 litColor = lighting * albedo.rgb;
