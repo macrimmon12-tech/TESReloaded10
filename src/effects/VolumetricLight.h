@@ -22,6 +22,7 @@ public:
 		bool	Dither;
 		D3DXVECTOR3	ScatterColor;
 		float	AccumDistance;
+		float	NightDistance;
 		float	ScatterReference;
 		float	FogInfluence;
 		float	Extinction;
@@ -35,6 +36,7 @@ public:
 
 	struct VolumetricLightStruct {
 		D3DXVECTOR4	Data1;	// xyz: scatter color tint, w: reference path length / march range
+		D3DXVECTOR4	Data2;	// x: march range at night
 		D3DXVECTOR4	Data3;	// x: strength, y: extinction, z: fog influence, w: anisotropy
 		D3DXVECTOR4	Data4;	// x: scatter reference, y: dither, z: height falloff, w: dither offset this frame (0-1)
 		D3DXVECTOR4	Temporal;			// x: history weight, y: history valid (0/1), z: clip gamma

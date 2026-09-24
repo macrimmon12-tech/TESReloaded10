@@ -57,6 +57,7 @@ float4 TESR_VolumetricFogScatter;      // z: NoiseStrength
 float4 TESR_VolumetricFogNight;        // x: DensityScale
 float4 TESR_VolumetricFogNightScatter; // x: NoiseStrengthScale
 float4 TESR_VolumetricLightData1; // xyz: scatter color tint, w: reference path length / march range
+float4 TESR_VolumetricLightData2; // x: march range at night
 float4 TESR_VolumetricLightData3; // x: strength, y: extinction, z: fog influence, w: anisotropy
 float4 TESR_VolumetricLightData4; // x: scatter reference path, y: dither toggle, z: height falloff, w: dither offset this frame (0-1)
 float4 TESR_VolumetricLightTemporal;        // x: history weight, y: history valid (0/1), z: clip gamma
@@ -478,7 +479,17 @@ float4 VolumetricLight(VSOUT IN) : COLOR0 {
     // "ray hit something near" and "ray reached sky" is what read as soft blobs of light
     // hanging in mid-air, untethered from any geometry.
     float accumDistance = max(TESR_VolumetricLightData1.w, 1.0f);
-    float rayLength = isSky ? accumDistance : min(length(cameraVector), accumDistance);
+
+    // Shorter reach at night. After dark the light is the moon, and marched the full range, every
+    // ray that runs a long way through open air -- the sky, the far terrain -- adds up thousands of
+    // units of moonlit medium with no occluder in it, and the forward-scattering lobe turns that into
+    // a smooth glow over the distance in the moon's direction. That is the part that looks wrong.
+    // Night shafts come from occluders near the camera, where rays stop at geometry well inside this
+    // range anyway, so cutting the range removes the far glow and leaves them alone. The distant glow
+    // scales with the range, so NightDistance / AccumDistance is roughly how much of it remains.
+    // Fades in through dusk on the same curve as VolumetricFog's night settings.
+    float marchRange = lerp(accumDistance, max(TESR_VolumetricLightData2.x, 1.0f), GetFogNightFactor(1.0f));
+    float rayLength = isSky ? marchRange : min(length(cameraVector), marchRange);
 
     // Blue noise, not the 4x4 ordered pattern this used to use.
     //

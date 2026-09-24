@@ -33,6 +33,7 @@ void VolumetricLightEffect::UpdateSettings() {
 	Settings.Anisotropy = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Anisotropy");
 	Settings.Dither = TheSettingManager->GetSettingI("Shaders.VolumetricLight.Main", "Dither");
 	Settings.AccumDistance = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "AccumDistance");
+	Settings.NightDistance = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "NightDistance");
 	Settings.ScatterReference = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "ScatterReference");
 	Settings.FogInfluence = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "FogInfluence");
 	Settings.Extinction = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Main", "Extinction");
@@ -52,6 +53,10 @@ void VolumetricLightEffect::UpdateSettings() {
 	Settings.ScatterColor.z = TheSettingManager->GetSettingF("Shaders.VolumetricLight.Coloring", "ScatterB");
 
 	Constants.Data1 = D3DXVECTOR4(Settings.ScatterColor.x, Settings.ScatterColor.y, Settings.ScatterColor.z, Settings.AccumDistance);
+	// A missing key reads as 0, which falls back to AccumDistance: no separate night range. Never
+	// longer than AccumDistance either -- this only ever shortens the reach at night.
+	float nightDistance = Settings.NightDistance > 0.0f ? (std::min)(Settings.NightDistance, Settings.AccumDistance) : Settings.AccumDistance;
+	Constants.Data2 = D3DXVECTOR4(max(nightDistance, 1.0f), 0.0f, 0.0f, 0.0f);
 	// Extinction floored above zero rather than at it: the shader divides by sigmaT to integrate
 	// each step analytically. It carries its own epsilon for that, but keeping a real value here
 	// means the medium always has some attenuation, which is what makes transmittance meaningful.
@@ -69,6 +74,7 @@ void VolumetricLightEffect::UpdateSettings() {
 
 void VolumetricLightEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_VolumetricLightData1", &Constants.Data1);
+	TheShaderManager->RegisterConstant("TESR_VolumetricLightData2", &Constants.Data2);
 	TheShaderManager->RegisterConstant("TESR_VolumetricLightData3", &Constants.Data3);
 	TheShaderManager->RegisterConstant("TESR_VolumetricLightData4", &Constants.Data4);
 	TheShaderManager->RegisterConstant("TESR_VolumetricLightTemporal", &Constants.Temporal);
