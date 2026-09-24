@@ -2191,6 +2191,16 @@ static const char* kShadowOrthoResolutionNames[] = {
 static const char* kEdgeDetectionNames[] = {
 	"0 - Luma", "1 - Color", "2 - Depth", "3 - Luma + Depth",
 };
+static const char* kTAADebugNames[] = {
+	"0 - Off", "1 - Motion", "2 - Reprojection error", "3 - History use", "4 - Weapon mask", "5 - Depth",
+};
+static const char* kCinematicDofDebugNames[] = {
+	"0 - Off", "1 - Blur map (red far, blue near)", "2 - Weapon blur", "3 - Focus & autofocus taps",
+};
+static const char* kGrassDebugNames[] = {
+	"0 - Off", "1 - Rounded normals", "2 - Sun diffuse", "3 - Sun shadow", "4 - Translucency",
+	"5 - Sheen", "6 - Root to tip", "7 - Vertex shader variant",
+};
 static const char* kWeaponDofNames[] = {
 	"0 - Off", "1 - Hip-fire only", "2 - Always",
 };
@@ -2220,6 +2230,9 @@ static const std::unordered_map<std::string, EnumOptions> kEnumSettings = {
 	{ "Shaders.CinematicDOF.Main.BokehShape",                  ENUM_OPT(kBokehShapeNames) },
 	{ "Shaders.CinematicDOF.Main.BokehQuality",                ENUM_OPT(kBokehQualityNames) },
 	{ "Shaders.CinematicDOF.Main.WeaponDOF",                   ENUM_OPT(kWeaponDofNames) },
+	{ "Shaders.CinematicDOF.Main.DebugView",                   ENUM_OPT(kCinematicDofDebugNames) },
+	{ "Shaders.TAA.Main.DebugView",                            ENUM_OPT(kTAADebugNames) },
+	{ "Shaders.Grass.Main.DebugView",                          ENUM_OPT(kGrassDebugNames) },
 };
 
 #undef ENUM_OPT

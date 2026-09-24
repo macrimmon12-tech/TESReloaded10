@@ -50,7 +50,7 @@ void CinematicDOFEffect::UpdateSettings() {
 	Settings.HighlightBoost = std::clamp(TheSettingManager->GetSettingF(Section, "HighlightBoost"), 0.0f, 0.95f);
 	Settings.WeaponBlur = std::clamp(TheSettingManager->GetSettingF(Section, "WeaponBlur"), 0.0f, 1.0f);
 	Settings.TransitionTime = (std::max)(TheSettingManager->GetSettingF(Section, "TransitionTime"), 0.0f);
-	Settings.DebugView = std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 1);
+	Settings.DebugView = std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 3);
 
 	// Both are meaningful at 0 -- no extended sharp zone, and background-only depth of field -- so a
 	// missing key reading as 0 is taken at its word.

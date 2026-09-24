@@ -40,7 +40,7 @@ struct VS_OUTPUT {
     float4 fog            : COLOR0;      // .w = fog amount
     // Grass lighting (GRASS23x000TMS.pso), raw so the PS can shade per pixel with its own settings.
     float4 blade          : TEXCOORD2;   // xyz: this variant's sun normal, w: root (0) to tip (1), the sway weight
-    float4 bladeOffset    : TEXCOORD3;   // xyz: horizontal offset from the clump's centre (model units)
+    float4 bladeOffset    : TEXCOORD3;   // xyz: horizontal offset from the clump's centre (model units), w: VS variant 0-3
     float4 sunColor       : TEXCOORD6;   // xyz: the sun term before N.L
     float4 sunDir         : TEXCOORD7;   // xyz: DiffuseDir
 };
@@ -84,7 +84,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     OUT.shadowWorldPos = float4(GetShadowWorldPos(OUT.position), SHADOW_VS_SENTINEL);
 
     OUT.blade = float4(orient, IN.color.w);
-    OUT.bladeOffset = float4(placed - orient * dot(placed, orient), 0.0f);
+    OUT.bladeOffset = float4(placed - orient * dot(placed, orient), 0.0f);   // w: which grass VS this is, for DebugView 7
     OUT.sunColor = float4((lightScale * IN.color.rgb) * DiffuseColor * AddlParams.x, 0.0f);
     OUT.sunDir = float4(DiffuseDir, 0.0f);
 

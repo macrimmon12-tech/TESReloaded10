@@ -486,7 +486,32 @@ float4 CombinePS(VSOUT IN) : COLOR0
 
 	// DebugView 1: red = far blur, blue = near blur, full brightness at MaxBlur; black = in focus.
 	float3 cocView = float3(saturate(coc / maxCoC), 0.0f, saturate(-coc / maxCoC));
+
+	// DebugView 2, weapon: the world as a dim grey backdrop, the first-person weapon from green
+	// (sharp) to blue (at WeaponMaxBlur). Shows where weapon depth of field starts along the gun
+	// while tuning WeaponFocusDistance and WeaponBlurRange.
+	float gray = dot(color, float3(0.299f, 0.587f, 0.114f)) * 0.3f;
+	bool isViewModel = tex2D(TESR_DepthBufferViewModel, uv).x > 0.0f;
+	float weaponAmount = saturate(-coc / max(weaponMaxCoC, 1e-5f));
+	float3 weaponView = isViewModel ? lerp(float3(0.0f, 0.6f, 0.0f), float3(0.0f, 0.2f, 1.0f), weaponAmount) : gray;
+
+	// DebugView 3, focus: the dim backdrop with the surfaces at the current focus distance (within
+	// 3%) in yellow, and the five autofocus taps as red dots. Shows what autofocus has locked onto.
+	float focus = FocusDistance();
+	float depth = readDepth(uv);
+	float3 focusView = abs(depth - focus) < focus * 0.03f ? float3(1.0f, 0.9f, 0.1f) : gray;
+	float2 pixel = uv / TESR_ReciprocalResolution.xy;
+	float2 screen = 1.0f / TESR_ReciprocalResolution.xy;
+	float nearestTap = length(pixel - screen * float2(0.5f, 0.5f));
+	nearestTap = min(nearestTap, length(pixel - screen * float2(0.48f, 0.5f)));
+	nearestTap = min(nearestTap, length(pixel - screen * float2(0.52f, 0.5f)));
+	nearestTap = min(nearestTap, length(pixel - screen * float2(0.5f, 0.48f)));
+	nearestTap = min(nearestTap, length(pixel - screen * float2(0.5f, 0.52f)));
+	focusView = nearestTap < 3.0f ? float3(1.0f, 0.0f, 0.0f) : focusView;
+
 	result = debugView > 0.5f ? cocView : result;
+	result = debugView > 1.5f ? weaponView : result;
+	result = debugView > 2.5f ? focusView : result;
 	return float4(result, 1.0f);
 }
 

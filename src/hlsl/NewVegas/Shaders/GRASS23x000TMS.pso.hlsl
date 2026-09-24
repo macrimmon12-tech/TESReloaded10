@@ -23,7 +23,7 @@
 // c146/c147: past PBRScale/SkyAmbient's c134-c145. The top is SkyAmbient's other skylighting mode,
 // whose TESR_SkyIrradiance[9] array runs c137-c145.
 float4 TESR_GrassLighting  : register(c146); // x: translucency, y: roundness, z: root darkening, w: specular
-float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specular glossiness
+float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specular glossiness, z: debug view
 
 sampler2D DiffuseMap : register(s0);
 
@@ -31,7 +31,7 @@ struct PS_INPUT {
     float2 uv             : TEXCOORD0;
     float4 shadowWorldPos : TEXCOORD1;
     float4 blade          : TEXCOORD2_centroid;   // xyz: sun normal, w: root (0) to tip (1)
-    float3 bladeOffset    : TEXCOORD3_centroid;
+    float4 bladeOffset    : TEXCOORD3_centroid;   // xyz: offset from the clump centre, w: VS variant 0-3
     float3 ambient        : TEXCOORD4_centroid;
     float4 sun            : TEXCOORD5_centroid;   // .w = distance fade
     float3 sunColor       : TEXCOORD6_centroid;
@@ -70,7 +70,7 @@ PS_OUTPUT main(PS_INPUT IN) {
 
     // Rounded normal: the variant's sun normal tipped outward by the blade's offset from the clump
     // centre. The 8-unit softening keeps the centre from flipping direction on a tiny offset.
-    float3 offset = IN.bladeOffset;
+    float3 offset = IN.bladeOffset.xyz;
     float3 N = normalize(normalize(IN.blade.xyz) + roundness * offset / (length(offset) + 8.0f));
 
     // At Roundness 0 keep the vertex shader's own N.L, so vanilla stays vanilla to the bit.
@@ -96,10 +96,32 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Normalised by hand: L - V is zero looking exactly into the sun, and normalize() would NaN.
     float3 H = L - V;
     H *= rsqrt(max(dot(H, H), 1e-8f));
-    litColor += PBRLight(IN.sunColor * shadow) * pow(saturate(dot(N, H)), gloss) * specular * present;
+    float sheen = pow(saturate(dot(N, H)), gloss) * specular * present;
+    litColor += PBRLight(IN.sunColor * shadow) * sheen;
 
     OUT.color.rgb = lerp(litColor, IN.fog.rgb, IN.fog.w);
     OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
+
+    // Debug views ([Shaders.Grass.Main] DebugView): one term of the lighting on its own, unfogged,
+    // keeping the blade's alpha so the grass keeps its shape. All read the live settings, so a
+    // slider at 0 shows as its term going flat or black.
+    //   1 rounded normals, as colour      2 sun diffuse: N.L x shadow      3 sun shadow alone
+    //   4 translucency: the glow factor   5 sheen                          6 root (black) to tip (white)
+    //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
+    float debugView = TESR_GrassLighting2.z;
+    if (debugView > 0.5f) {
+        float3 view = N * 0.5f + 0.5f;
+        view = debugView > 1.5f ? saturate(dot(L, N)) * shadow : view;
+        view = debugView > 2.5f ? shadow : view;
+        view = debugView > 3.5f ? saturate(through * shadow) : view;
+        view = debugView > 4.5f ? saturate(sheen * shadow) : view;
+        view = debugView > 5.5f ? tip : view;
+        // Selects rather than an array: ps_3_0 cannot index a local array with a runtime value.
+        float variant = IN.bladeOffset.w;
+        float3 variantColour = variant < 0.5f ? float3(1, 0, 0) : (variant < 1.5f ? float3(0, 1, 0) : (variant < 2.5f ? float3(0, 0, 1) : float3(1, 1, 0)));
+        view = debugView > 6.5f ? variantColour : view;
+        OUT.color.rgb = view;
+    }
 
     return OUT;
 };
