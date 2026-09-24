@@ -1,4 +1,5 @@
 #pragma once
+#include <d3dx9shader.h>
 
 void (__thiscall* Render)(Main*, BSRenderedTexture*, int, int) = (void (__thiscall*)(Main*, BSRenderedTexture*, int, int))Hooks::Render;
 void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTexture, int Arg2, int Arg3) {
@@ -21,6 +22,36 @@ void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTe
 	//if (SettingsMain->Develop.TraceShaders && InterfaceManager->IsActive(Menu::MenuType::kMenuType_None) && Global->OnKeyDown(SettingsMain->Develop.TraceShaders) && DWNode::Get() == NULL) DWNode::Create();
 	(*Render)(This, RenderedTexture, Arg2, Arg3);
 
+}
+
+// DebugMode: the vanilla grass pixel shaders' disassembly, once per shader, so the log shows exactly
+// what the replacements have to match (alpha handling of the TMS and non-TMS variants). Taken when
+// grass is first drawn with it, where the vanilla D3D shader certainly exists; every way it can fail
+// says so.
+static void DumpVanillaGrassPixelShader(NiD3DPixelShaderEx* apShader) {
+	static std::vector<std::string> dumped;
+	if (!apShader || !apShader->Name || strncmp(apShader->Name, "GRASS", 5)) return;
+	if (std::find(dumped.begin(), dumped.end(), apShader->Name) != dumped.end()) return;
+	dumped.push_back(apShader->Name);
+
+	IDirect3DPixelShader9* vanilla = (IDirect3DPixelShader9*)apShader->ShaderHandleBackup;
+	if (!vanilla) {
+		Logger::Log("Vanilla %s disassembly: no vanilla shader object", apShader->Name);
+		return;
+	}
+	UINT size = 0;
+	if (FAILED(vanilla->GetFunction(nullptr, &size)) || !size) {
+		Logger::Log("Vanilla %s disassembly: GetFunction gave no bytecode", apShader->Name);
+		return;
+	}
+	std::vector<DWORD> code((size + 3) / 4);
+	ID3DXBuffer* listing = nullptr;
+	if (FAILED(vanilla->GetFunction(code.data(), &size)) || FAILED(D3DXDisassembleShader(code.data(), FALSE, nullptr, &listing)) || !listing) {
+		Logger::Log("Vanilla %s disassembly: could not disassemble", apShader->Name);
+		return;
+	}
+	Logger::Log("Vanilla %s disassembly:\n%s", apShader->Name, (const char*)listing->GetBufferPointer());
+	listing->Release();
 }
 
 void (__thiscall* SetShaders)(BSShader*, UInt32) = (void (__thiscall*)(BSShader*, UInt32))Hooks::SetShaders;
@@ -57,6 +88,8 @@ void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
 		//DWNode::AddNode(Name, Geometry->m_parent, Geometry);
 	}
 	(*SetShaders)(This, PassIndex);
+
+	if (TheSettingManager->SettingsMain.Develop.DebugMode) DumpVanillaGrassPixelShader(PixelShader);
 
 }
 

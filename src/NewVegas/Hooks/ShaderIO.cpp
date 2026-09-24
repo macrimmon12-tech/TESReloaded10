@@ -1,5 +1,4 @@
 #pragma once
-#include <d3dx9shader.h>
 
 NiD3DVertexShader* (__thiscall* CreateVertexShader)(BSShader*, char*, char*, char*, char*) = (NiD3DVertexShader* (__thiscall*)(BSShader*, char*, char*, char*, char*))Hooks::CreateVertexShader;
 NiD3DVertexShader* __fastcall CreateVertexShaderHook(BSShader* This, UInt32 edx, char* FileName, char* Arg2, char* ShaderType, char* ShaderName) {
@@ -45,21 +44,6 @@ NiD3DPixelShader* __fastcall CreatePixelShaderHook(BSShader* This, UInt32 edx, c
 		TheShaderManager->WaterPixelShaders[1] = PixelShader;
 	}
 	TheShaderManager->LoadShader(PixelShader);
-
-	// DebugMode: the vanilla grass pixel shaders' disassembly, once each, so the log shows exactly
-	// what the replacements have to match (alpha handling of the TMS and non-TMS variants).
-	if (TheSettingManager->SettingsMain.Develop.DebugMode && !strncmp(ShaderName, "GRASS", 5) && PixelShader->ShaderHandleBackup) {
-		IDirect3DPixelShader9* vanilla = (IDirect3DPixelShader9*)PixelShader->ShaderHandleBackup;
-		UINT size = 0;
-		if (SUCCEEDED(vanilla->GetFunction(nullptr, &size)) && size) {
-			std::vector<DWORD> code((size + 3) / 4);
-			ID3DXBuffer* listing = nullptr;
-			if (SUCCEEDED(vanilla->GetFunction(code.data(), &size)) && SUCCEEDED(D3DXDisassembleShader(code.data(), FALSE, nullptr, &listing)) && listing) {
-				Logger::Log("Vanilla %s disassembly:\n%s", ShaderName, (const char*)listing->GetBufferPointer());
-				listing->Release();
-			}
-		}
-	}
 	return (NiD3DPixelShader*)PixelShader;
 
 }
