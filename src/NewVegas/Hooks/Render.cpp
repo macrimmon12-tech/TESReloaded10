@@ -27,12 +27,19 @@ void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTe
 // DebugMode: the vanilla grass pixel shaders' disassembly, once per shader, so the log shows exactly
 // what the replacements have to match (alpha handling of the TMS and non-TMS variants). Taken when
 // grass is first drawn with it, where the vanilla D3D shader certainly exists; every way it can fail
-// says so.
-static void DumpVanillaGrassPixelShader(NiD3DPixelShaderEx* apShader) {
+// says so. The pass and vertex shader it was first drawn with are logged too: a grass pixel shader
+// can only be replaced safely alongside the vertex shaders it is paired with.
+static void DumpVanillaGrassPixelShader(NiD3DPixelShaderEx* apShader, NiD3DVertexShaderEx* apVertexShader, UInt32 auiPassIndex) {
 	static std::vector<std::string> dumped;
 	if (!apShader || !apShader->Name || strncmp(apShader->Name, "GRASS", 5)) return;
 	if (std::find(dumped.begin(), dumped.end(), apShader->Name) != dumped.end()) return;
 	dumped.push_back(apShader->Name);
+
+	const char* vertexName = apVertexShader && apVertexShader->Name ? apVertexShader->Name : "(no vertex shader)";
+	Logger::Log("Grass pixel shader %s (%s) first drawn by pass %i %s with %s (%s)", apShader->Name,
+		apShader->ShaderHandle == apShader->ShaderHandleBackup ? "vanilla" : "replaced",
+		auiPassIndex, Pointers::Functions::GetPassDescription(auiPassIndex), vertexName,
+		!apVertexShader ? "-" : apVertexShader->ShaderHandle == apVertexShader->ShaderHandleBackup ? "vanilla" : "replaced");
 
 	IDirect3DPixelShader9* vanilla = (IDirect3DPixelShader9*)apShader->ShaderHandleBackup;
 	if (!vanilla) {
@@ -92,7 +99,7 @@ void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
 	// A new pass: whatever GrassNormals last left on the device may since have been overwritten.
 	GrassNormals::InvalidateState();
 
-	if (TheSettingManager->SettingsMain.Develop.DebugMode) DumpVanillaGrassPixelShader(PixelShader);
+	if (TheSettingManager->SettingsMain.Develop.DebugMode) DumpVanillaGrassPixelShader(PixelShader, VertexShader, PassIndex);
 
 }
 
