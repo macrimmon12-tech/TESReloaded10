@@ -129,37 +129,4 @@ jobs:
             $failed += 'GRASS23x000TMS gradient placement check'
           }
 
-          # The grass depth prepass shader lives as a string in GrassPrepass.cpp and is compiled in
-          # game through D3DXCompileShader; a mistake there only shows as a log line and no prepass.
-          # Pull the string literals out, unescape them and compile the result the same way.
-          $prepassCpp = Get-Content src/NewVegas/Hooks/GrassPrepass.cpp -Raw
-          $block = [regex]::Match($prepassCpp, 'kDepthPixelShaderSource\s*=\s*(.*?"\s*;)', 'Singleline').Groups[1].Value
-          $prepassSrc = ([regex]::Matches($block, '"((?:[^"\\]|\\.)*)"') | ForEach-Object { $_.Groups[1].Value }) -join ''
-          $prepassSrc = $prepassSrc -replace '\\n', "`n"
-          $prepassFile = "$env:RUNNER_TEMP\GrassPrepassDepth.hlsl"
-          Set-Content -Path $prepassFile -Value $prepassSrc
-          Write-Host "Grass prepass depth shader source:"
-          Get-Content $prepassFile | ForEach-Object { Write-Host "    $_" }
-          $prepassAsm = "$env:RUNNER_TEMP\GrassPrepassDepth.asm"
-          $out = & $fxc.FullName /nologo /T ps_3_0 /E main /Fc $prepassAsm /Fo "$env:RUNNER_TEMP\GrassPrepassDepth.cso" $prepassFile 2>&1
-          if ($LASTEXITCODE -ne 0 -or -not $prepassSrc) {
-            Write-Host "::error file=src/NewVegas/Hooks/GrassPrepass.cpp::grass prepass depth shader failed to compile"
-            $out | ForEach-Object { Write-Host "    $_" }
-            $failed += 'GrassPrepass depth shader'
-          } else {
-            $prepassLines = Get-Content $prepassAsm
-            $prepassLines | Where-Object { $_ -match '^\s*(dcl_|texld|texkill|mul|mov|add|mad|if|else|endif)' -or $_ -match 'slots used' } | ForEach-Object { Write-Host "    $_" }
-            # It must cut exactly where the grass shader does: alpha built as mul_sat then mul, compared
-            # with if_lt, never folded into a mad with the threshold. See GrassPrepass.cpp.
-            $hasCompare = ($prepassLines | Select-String -Pattern '^\s*if_lt').Count -ge 1
-            $hasKill = ($prepassLines | Select-String -Pattern '^\s*texkill').Count -ge 1
-            $hasMad = ($prepassLines | Select-String -Pattern '^\s*mad').Count -gt 0
-            if (-not $hasCompare -or -not $hasKill -or $hasMad) {
-              Write-Host "::error file=src/NewVegas/Hooks/GrassPrepass.cpp::depth shader alpha cut does not match the grass shader's (if_lt: $hasCompare, texkill: $hasKill, mad: $hasMad)"
-              $failed += 'GrassPrepass depth shader alpha cut'
-            } else {
-              Write-Host "ok    GrassPrepass depth shader"
-            }
-          }
-
           if ($failed.Count -gt 0) { Write-Host "Failed: $($failed -join ', ')"; exit 1 }

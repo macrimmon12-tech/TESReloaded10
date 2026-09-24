@@ -13,7 +13,6 @@ public:
 		D3DXVECTOR4		Lighting3 = D3DXVECTOR4(0.0f, 0.0f, 0.0f, 0.0f);	// x: root darkening height (units), y: point light strength
 	};
 	GrassStruct	Constants;
-	bool		DepthPrepass = false;
 
 	void	UpdateConstants();
 	void	RegisterConstants();

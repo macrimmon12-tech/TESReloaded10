@@ -38,9 +38,6 @@ void GrassShaders::UpdateSettings() {
 	Constants.Lighting3.x = rootHeight > 0.0f ? std::clamp(rootHeight, 1.0f, 200.0f) : 20.0f;
 	// Off at 0, which is also what a missing key reads as.
 	Constants.Lighting3.y = std::clamp(TheSettingManager->GetSettingF(Section, "PointLights"), 0.0f, 3.0f);
-
-	// Depth prepass (NewVegas/Hooks/GrassPrepass.cpp, which reads it every frame). Off when the key is missing.
-	DepthPrepass = TheSettingManager->GetSettingI(Section, "DepthPrepass") != 0;
 }
 
 void GrassShaders::UpdateConstants() {}
