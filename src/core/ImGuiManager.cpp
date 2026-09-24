@@ -2203,6 +2203,7 @@ static const char* kCinematicDofDebugNames[] = {
 static const char* kGrassDebugNames[] = {
 	"0 - Off", "1 - Rounded normals", "2 - Sun diffuse", "3 - Sun shadow", "4 - Translucency",
 	"5 - Sheen", "6 - Root to tip", "7 - Vertex shader variant", "8 - Point lights",
+	"9 - Distance falloffs",
 };
 static const char* kWeaponDofNames[] = {
 	"0 - Off", "1 - Hip-fire only", "2 - Always",

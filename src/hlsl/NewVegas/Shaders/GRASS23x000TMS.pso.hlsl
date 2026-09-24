@@ -18,6 +18,11 @@
 //   - Translucency lets sunlight through the blades when the sun is behind them: the glow of a
 //     backlit field. Coloured by the grass texture, like light through a leaf, and shadowed.
 //   - Specular adds a soft sheen off the rounded normals toward the sun.
+//
+// Cost. Grass is heavily overdrawn, so every instruction here runs many times per screen pixel.
+// Pixels the engine's alpha test would reject skip everything; the costly lighting (rounded normal,
+// translucency, sheen, point lights) sits in one branch that fades out past DetailDistance; and the
+// forward sun shadow can be limited to ShadowDistance.
 
 #include "includes/Shadow.hlsl"
 #include "includes/PBRScale.hlsl"
@@ -26,7 +31,7 @@
 // whose TESR_SkyIrradiance[9] array runs c137-c145.
 float4 TESR_GrassLighting  : register(c146); // x: translucency, y: roundness, z: root darkening, w: specular
 float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specular glossiness, z: debug view, w: diffuse wrap
-float4 TESR_GrassLighting3 : register(c148); // x: root darkening height (units), y: point light strength
+float4 TESR_GrassLighting3 : register(c148); // x: root darkening height (units), y: point light strength, z: detail distance, w: detail fade
 
 // Point lights: NVR's nearby-light lists, filled every frame by ShaderManager::GetNearbyLights before
 // the world renders. Vanilla never gives grass any point light (its passes are all BSSM_GRASS_DIRONLY),
@@ -37,6 +42,11 @@ float4 TESR_CameraPosition          : register(c149);
 float4 TESR_ShadowLightPosition[12] : register(c150);
 float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
+
+float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit)
+
+// The engine's alpha test for grass: reference 10, GREATER, as read off the device in game.
+#define GRASS_ALPHA_CUTOFF (10.0f / 255.0f)
 
 sampler2D DiffuseMap : register(s0);
 
@@ -96,17 +106,19 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
     OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
 
-    // Early out for pixels that can never show: a grass card is mostly fully transparent texture, and
+    // Early out for pixels that can never show: a grass card is mostly transparent texture, and
     // overdraw multiplies whatever this shader does, so every one of those pixels used to pay for the
-    // whole lighting below before the alpha test threw it away. Under 1/255 the alpha is 0 once
-    // written, which fails the alpha test at any reference and gives zero alpha-to-coverage (TMS)
-    // samples, so discarding here removes nothing that would have been visible.
+    // whole lighting below before the alpha test threw it away. The engine draws grass with the alpha
+    // test on, reference 10, GREATER (read off the device in game), so anything under 10/255 fails it
+    // however it is lit; that covers fully transparent texels and the faint edge and fade-out pixels
+    // above them. Under alpha-to-coverage (TMS) such a pixel would be at most a sample or so of
+    // coverage, never a visible one.
     //
     // A real branch, not just clip(): under DXVK a discard can become demote-to-helper, which keeps
     // the invocation running, so clip() alone would save nothing. [branch] keeps the compiler from
     // flattening it; the only texture reads left below are the shadow atlas's tex2Dlod, legal here.
     [branch]
-    if (OUT.color.a < 1.0f / 255.0f) {
+    if (OUT.color.a < GRASS_ALPHA_CUTOFF) {
         clip(-1.0f);
         // Reads shadowNormal only to pin its ddx/ddy above the branch. Used on one side alone, the
         // compiler sinks the derivatives into the other, and derivatives under a branch that only
@@ -116,59 +128,95 @@ PS_OUTPUT main(PS_INPUT IN) {
         return OUT;
     }
 
+    // Distance falloffs, both off at 0 (what a missing setting reads as).
+    //   detail      DetailDistance / DetailFade: the rounded normal, wrapped diffuse, translucency,
+    //               sheen and point lights fade out with distance, and past it grass takes the vertex
+    //               shader's own sun term. They are the costly part of this shader and barely show
+    //               on grass a few pixels tall, which is most of the grass on screen.
+    //   shadowReach ShadowDistance / ShadowFade: the forward sun shadow fades out the same way.
+    float pixelDistance = length(IN.shadowWorldPos.xyz);
+    float detailStart = TESR_GrassLighting3.z;
+    float detail = detailStart > 0.0f ? 1.0f - saturate((pixelDistance - detailStart) / max(TESR_GrassLighting3.w, 1.0f)) : 1.0f;
+    float shadowStart = TESR_GrassLighting4.x;
+    float shadowReach = shadowStart > 0.0f ? 1.0f - saturate((pixelDistance - shadowStart) / max(TESR_GrassLighting4.y, 1.0f)) : 1.0f;
+
     float present = SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f;
     float shadow = 1.0f;
 #if FORWARD_SHADOWS
     // tex2Dlod inside (SampleShadowAtlas), so legal past the early-out branch above.
-    shadow = present > 0.5f
-         ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
-         : 1.0f;
+    [branch]
+    if (present > 0.5f && shadowReach > 0.0f)
+        shadow = lerp(1.0f, GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal), shadowReach);
 #endif
 
     bool grassData = abs(IN.sunColor.w - GRASS_VS_SENTINEL) < 0.001f;
     float3 sunColor = IN.sunColor.rgb;
 
-    float3 L = normalize(IN.sunDir);
-    float3 V = normalize(IN.shadowWorldPos.xyz);   // camera-relative world position: camera to pixel
+    // Root (0) to tip (1) over the bottom RootDarkeningHeight units of the clump. Cheap, so it stays
+    // at every distance.
+    float tip = saturate(IN.blade.w / max(TESR_GrassLighting3.x, 1.0f));
 
-    // Rounded normal: the variant's sun normal tipped outward by the blade's offset from the clump
-    // centre. The tilt builds up over the first ~24 units out rather than jumping to full at once:
-    // with a small softening the normal flipped from one side to the other within a few units of
-    // the centre, and a low sun drew a hard terminator straight down the middle of every clump.
-    float3 offset = IN.bladeOffset.xyz;
-    float3 N = normalize(normalize(IN.blade.xyz) + roundness * offset / (length(offset) + 24.0f));
+    // What grass past the detail distance, and anything without grass data, is lit with: the vertex
+    // shader's sun term and none of the extras. N is only read by DebugView 1 out there.
+    float3 N = IN.blade.xyz;
+    float wrapped = 0.0f;
+    float3 sun = IN.sun.xyz;
+    float through = 0.0f;
+    float3 pointLight = 0.0f;
+    float sheen = 0.0f;
 
-    // Wrapped diffuse. Blades are thin and light wraps around and through them, so the side of a
-    // clump facing away from the sun dims gradually instead of dropping to black the moment N.L
-    // passes zero. (N.L + w) / (1 + w): w = 0 is plain Lambert, 1 lights all but the exact back.
-    float wrapped = saturate((dot(L, N) + wrap) / (1.0f + wrap));
+    [branch]
+    if (grassData && detail > 0.0f) {
+        float3 L = normalize(IN.sunDir);
+        float3 V = IN.shadowWorldPos.xyz / max(pixelDistance, 1e-4f);   // camera to pixel
 
-    // At Roundness 0 keep the vertex shader's own N.L, so vanilla stays vanilla to the bit.
-    float3 sun = (grassData && roundness > 0.0f) ? sunColor * wrapped : IN.sun.xyz;
+        // Rounded normal: the variant's sun normal tipped outward by the blade's offset from the
+        // clump centre. The tilt builds up over the first ~24 units out rather than jumping to full
+        // at once: with a small softening the normal flipped from one side to the other within a few
+        // units of the centre, and a low sun drew a hard terminator straight down the middle of
+        // every clump.
+        float3 offset = IN.bladeOffset.xyz;
+        N = normalize(normalize(IN.blade.xyz) + roundness * offset / (length(offset) + 24.0f));
+
+        // Wrapped diffuse. Blades are thin and light wraps around and through them, so the side of a
+        // clump facing away from the sun dims gradually instead of dropping to black the moment N.L
+        // passes zero. (N.L + w) / (1 + w): w = 0 is plain Lambert, 1 lights all but the exact back.
+        wrapped = saturate((dot(L, N) + wrap) / (1.0f + wrap));
+
+        // At Roundness 0 keep the vertex shader's own N.L, so vanilla stays vanilla to the bit
+        // (lerp of a value with itself is exact).
+        float3 roundSun = roundness > 0.0f ? sunColor * wrapped : IN.sun.xyz;
+        sun = lerp(IN.sun.xyz, roundSun, detail);
+
+        // Translucency: strongest looking straight toward the sun, narrowed by the focus exponent,
+        // and weighted toward the tips, where blades are thinnest.
+        through = pow(saturate(dot(V, L)), translucencyFocus) * translucency * (0.5f + 0.5f * tip) * present * detail;
+
+        // Point lights (PointLights strength; 0 skips the loop). Both lists are packed from slot 0,
+        // so the loop stops at the first slot where both are empty -- the usual handful of lights
+        // costs a handful of iterations, not 24.
+        float pointStrength = TESR_GrassLighting3.y;
+        [branch]
+        if (pointStrength > 0.0f) {
+            [loop]
+            for (int i = 0; i < 12; i++) {
+                if (TESR_ShadowLightPosition[i].w <= 0.0f && TESR_LightPosition[i].w <= 0.0f) break;
+                pointLight += GrassPointLight(TESR_ShadowLightPosition[i], TESR_LightColor[i], IN.shadowWorldPos.xyz, N, wrap);
+                pointLight += GrassPointLight(TESR_LightPosition[i], TESR_LightColor[12 + i], IN.shadowWorldPos.xyz, N, wrap);
+            }
+            pointLight *= pointStrength * detail;
+        }
+
+        // Sheen: Blinn-Phong off the rounded normal. Normalised by hand: L - V is zero looking
+        // exactly into the sun, and normalize() would NaN.
+        float3 H = L - V;
+        H *= rsqrt(max(dot(H, H), 1e-8f));
+        sheen = pow(saturate(dot(N, H)), gloss) * specular * present * detail;
+    }
     sun *= shadow;
 
-    // Translucency: strongest looking straight toward the sun, narrowed by the focus exponent, and
-    // weighted toward the tips, where blades are thinnest.
-    // Root (0) to tip (1) over the bottom RootDarkeningHeight units of the clump.
-    float tip = saturate(IN.blade.w / max(TESR_GrassLighting3.x, 1.0f));
-    float through = pow(saturate(dot(V, L)), translucencyFocus) * translucency * (0.5f + 0.5f * tip) * present;
-    through = grassData ? through : 0.0f;
+    // Selects, not multiplications: without grass data sunColor is undefined, possibly NaN.
     float3 transmitted = grassData ? sunColor * shadow * through : 0.0f;
-
-    // Point lights (PointLights strength; 0 skips the loop). Both lists are packed from slot 0, so
-    // the loop stops at the first slot where both are empty -- the usual handful of lights costs a
-    // handful of iterations, not 24.
-    float3 pointLight = 0.0f;
-    float pointStrength = TESR_GrassLighting3.y;
-    if (grassData && pointStrength > 0.0f) {
-        [loop]
-        for (int i = 0; i < 12; i++) {
-            if (TESR_ShadowLightPosition[i].w <= 0.0f && TESR_LightPosition[i].w <= 0.0f) break;
-            pointLight += GrassPointLight(TESR_ShadowLightPosition[i], TESR_LightColor[i], IN.shadowWorldPos.xyz, N, wrap);
-            pointLight += GrassPointLight(TESR_LightPosition[i], TESR_LightColor[12 + i], IN.shadowWorldPos.xyz, N, wrap);
-        }
-        pointLight *= pointStrength;
-    }
 
     // Root darkening: lets the roots sit in their own shade.
     float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
@@ -178,11 +226,7 @@ PS_OUTPUT main(PS_INPUT IN) {
 
     float3 litColor = lighting * albedo.rgb;
 
-    // Sheen: Blinn-Phong off the rounded normal, in the light's colour rather than the texture's.
-    // Normalised by hand: L - V is zero looking exactly into the sun, and normalize() would NaN.
-    float3 H = L - V;
-    H *= rsqrt(max(dot(H, H), 1e-8f));
-    float sheen = grassData ? pow(saturate(dot(N, H)), gloss) * specular * present : 0.0f;
+    // Sheen, in the light's colour rather than the texture's.
     litColor += grassData ? PBRLight(sunColor * shadow) * sheen : 0.0f;
 
     OUT.color.rgb = lerp(litColor, IN.fog.rgb, IN.fog.w);
@@ -194,9 +238,12 @@ PS_OUTPUT main(PS_INPUT IN) {
     //   4 translucency: the glow factor   5 sheen    6 root (black) to tip (white) over RootDarkeningHeight
     //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
     //   8 point lights alone, in their own colour
+    //   9 distance falloffs: red = detail (DetailDistance), green = forward shadow reach (ShadowDistance);
+    //     yellow is full lighting, green shadows only, black neither
     // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
     // vertex shaders -- e.g. hair), so none of the grass lighting applies to it.
     float debugView = TESR_GrassLighting2.z;
+    [branch]
     if (debugView > 0.5f) {
         float3 view = N * 0.5f + 0.5f;
         view = debugView > 1.5f ? wrapped * shadow : view;
@@ -209,6 +256,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         float3 variantColour = variant < 0.5f ? float3(1, 0, 0) : (variant < 1.5f ? float3(0, 1, 0) : (variant < 2.5f ? float3(0, 0, 1) : float3(1, 1, 0)));
         view = debugView > 6.5f ? variantColour : view;
         view = debugView > 7.5f ? saturate(pointLight) : view;
+        view = debugView > 8.5f ? float3(detail, shadowReach, 0.0f) : view;
         OUT.color.rgb = grassData ? view : float3(1.0f, 0.0f, 1.0f);
     }
 
