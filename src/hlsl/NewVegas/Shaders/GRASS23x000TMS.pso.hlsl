@@ -18,6 +18,8 @@
 //   - Translucency lets sunlight through the blades when the sun is behind them: the glow of a
 //     backlit field. Coloured by the grass texture, like light through a leaf, and shadowed.
 //   - Specular adds a soft sheen off the rounded normals toward the sun.
+// And, for grass textures that have one, a per-texture normal map (<name>_n.dds, NormalMaps) adds
+// blade detail on top of the rounded normal; its alpha masks the sheen.
 //
 // Cost. Grass is heavily overdrawn, so every instruction here runs many times per screen pixel.
 // Pixels the engine's alpha test would reject skip everything; the costly lighting (rounded normal,
@@ -44,6 +46,12 @@ float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
 
 float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit)
+
+// Per-texture normal map, bound per grass geometry by the DLL (NewVegas/Hooks/GrassNormals.cpp) when
+// the grass texture has a <name>_n.dds beside it. Not TESR_ names: set directly, not through NVR's
+// constant table. x: strength, 0 when this grass has no map (s10 then unbound); y: green sign.
+sampler2D GrassNormalMap    : register(s10);
+float4    GrassNormalParams : register(c199);
 
 // The engine's alpha test for grass: reference 10, GREATER, as read off the device in game.
 #define GRASS_ALPHA_CUTOFF (10.0f / 255.0f)
@@ -104,6 +112,12 @@ PS_OUTPUT main(PS_INPUT IN) {
     // not forward shadows are compiled in, and ForwardShadows is a live setting.
     float4 albedo = tex2D(DiffuseMap, IN.uv.xy);
     float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    // Screen-space derivatives for the normal map's tangent frame and its explicit-gradient read,
+    // taken here for the same reason.
+    float2 duvdx = ddx(IN.uv.xy);
+    float2 duvdy = ddy(IN.uv.xy);
+    float3 dpdx = ddx(IN.shadowWorldPos.xyz);
+    float3 dpdy = ddy(IN.shadowWorldPos.xyz);
     OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
 
     // Early out for pixels that can never show: a grass card is mostly transparent texture, and
@@ -120,11 +134,11 @@ PS_OUTPUT main(PS_INPUT IN) {
     [branch]
     if (OUT.color.a < GRASS_ALPHA_CUTOFF) {
         clip(-1.0f);
-        // Reads shadowNormal only to pin its ddx/ddy above the branch. Used on one side alone, the
+        // Reads shadowNormal and the derivatives only to pin them above the branch. Used on one side alone, the
         // compiler sinks the derivatives into the other, and derivatives under a branch that only
         // part of a 2x2 quad takes are undefined -- strictly so under DXVK/Vulkan. The pixel is
         // discarded, so the value itself never shows. CI checks the order in the disassembly.
-        OUT.color.rgb = shadowNormal;
+        OUT.color.rgb = shadowNormal + float3(duvdx + duvdy, dpdx.x + dpdy.x);
         return OUT;
     }
 
@@ -164,6 +178,8 @@ PS_OUTPUT main(PS_INPUT IN) {
     float through = 0.0f;
     float3 pointLight = 0.0f;
     float sheen = 0.0f;
+    float sheenMask = 1.0f;
+    float3 mapView = 0.15f;   // DebugView 10 where there is no normal map
 
     [branch]
     if (grassData && detail > 0.0f) {
@@ -177,6 +193,32 @@ PS_OUTPUT main(PS_INPUT IN) {
         // every clump.
         float3 offset = IN.bladeOffset.xyz;
         N = normalize(normalize(IN.blade.xyz) + roundness * offset / (length(offset) + 24.0f));
+
+        // Normal map, if this grass texture has one. Grass vertices carry no tangents, so the frame
+        // comes from the screen-space derivatives of position and UV (a cotangent frame) around the
+        // card's face normal, which already faces the camera on either side of a two-sided card.
+        // The map's deviation from the flat card is added on top of the rounded normal, so it adds
+        // blade detail without undoing the clump shape. tex2Dgrad: an explicit-gradient read is legal
+        // in this branch, where tex2D's implicit derivatives would not be.
+        [branch]
+        if (GrassNormalParams.x > 0.0f) {
+            float3 Nf = shadowNormal;
+            float3 dp2perp = cross(dpdy, Nf);
+            float3 dp1perp = cross(Nf, dpdx);
+            float3 T = dp2perp * duvdx.x + dp1perp * duvdy.x;
+            float3 B = dp2perp * duvdx.y + dp1perp * duvdy.y;
+            float invScale = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20f));
+
+            float4 mapSample = tex2Dgrad(GrassNormalMap, IN.uv.xy, duvdx, duvdy);
+            float3 tangentNormal = mapSample.xyz * 2.0f - 1.0f;
+            tangentNormal.y *= GrassNormalParams.y;
+            float3 mapped = normalize((T * tangentNormal.x + B * tangentNormal.y) * invScale + Nf * tangentNormal.z);
+
+            N = normalize(N + (mapped - Nf) * GrassNormalParams.x);
+            // Bethesda normal maps carry the specular mask in alpha; one without alpha reads 1.
+            sheenMask = mapSample.a;
+            mapView = mapped * 0.5f + 0.5f;
+        }
 
         // Wrapped diffuse. Blades are thin and light wraps around and through them, so the side of a
         // clump facing away from the sun dims gradually instead of dropping to black the moment N.L
@@ -211,7 +253,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         // exactly into the sun, and normalize() would NaN.
         float3 H = L - V;
         H *= rsqrt(max(dot(H, H), 1e-8f));
-        sheen = pow(saturate(dot(N, H)), gloss) * specular * present * detail;
+        sheen = pow(saturate(dot(N, H)), gloss) * specular * present * detail * sheenMask;
     }
     sun *= shadow;
 
@@ -240,6 +282,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     //   8 point lights alone, in their own colour
     //   9 distance falloffs: red = detail (DetailDistance), green = forward shadow reach (ShadowDistance);
     //     yellow is full lighting, green shadows only, black neither
+    //  10 normal maps: the normal-mapped normal as colour where this grass has a map, dark grey where not
     // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
     // vertex shaders -- e.g. hair), so none of the grass lighting applies to it.
     float debugView = TESR_GrassLighting2.z;
@@ -257,6 +300,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         view = debugView > 6.5f ? variantColour : view;
         view = debugView > 7.5f ? saturate(pointLight) : view;
         view = debugView > 8.5f ? float3(detail, shadowReach, 0.0f) : view;
+        view = debugView > 9.5f ? mapView : view;
         OUT.color.rgb = grassData ? view : float3(1.0f, 0.0f, 1.0f);
     }
 

@@ -123,6 +123,14 @@ jobs:
           $gradients = $lines | Select-String -Pattern '^\s*(dsx|dsy|texld )'
           $late = $gradients | Where-Object { $_.LineNumber -gt $first }
           Write-Host "Grass PS gradient ops: $($gradients.Count), after the first branch: $($late.Count)"
+          # The normal map is read with an explicit gradient (texldd), which is what makes it legal
+          # inside the detail branch.
+          $gradRead = $lines | Select-String -Pattern '^\s*texldd'
+          Write-Host "Grass PS explicit-gradient reads (normal map): $($gradRead.Count)"
+          if ($gradRead.Count -lt 1) {
+            Write-Host "::error file=$grass::normal map read (texldd) missing from the compiled grass pixel shader"
+            $failed += 'GRASS23x000TMS normal map read check'
+          }
           if ($gradients.Count -lt 3 -or $late.Count -gt 0) {
             $late | ForEach-Object { Write-Host "    late: $($_.Line)" }
             Write-Host "::error file=$grass::gradient operations missing or moved inside the early-out branch"

@@ -32,7 +32,7 @@ void GrassShaders::UpdateSettings() {
 	float gloss = TheSettingManager->GetSettingF(Section, "SpecularGlossiness");
 	Constants.Lighting2.x = focus > 0.0f ? std::clamp(focus, 1.0f, 32.0f) : 4.0f;
 	Constants.Lighting2.y = gloss > 0.0f ? std::clamp(gloss, 1.0f, 128.0f) : 16.0f;
-	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 9);
+	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 10);
 	// 0 is plain Lambert, a real setting, so a missing key is taken at its word.
 	Constants.Lighting2.w = std::clamp(TheSettingManager->GetSettingF(Section, "DiffuseWrap"), 0.0f, 1.0f);
 	float rootHeight = TheSettingManager->GetSettingF(Section, "RootDarkeningHeight");
@@ -46,6 +46,10 @@ void GrassShaders::UpdateSettings() {
 	Constants.Lighting3.w = std::clamp(TheSettingManager->GetSettingF(Section, "DetailFade"), 1.0f, 10000.0f);
 	Constants.Lighting4.x = std::clamp(TheSettingManager->GetSettingF(Section, "ShadowDistance"), 0.0f, 20000.0f);
 	Constants.Lighting4.y = std::clamp(TheSettingManager->GetSettingF(Section, "ShadowFade"), 1.0f, 10000.0f);
+
+	// Normal maps: <grass texture>_n.dds beside each grass texture, loose under Data\Textures. Off at 0.
+	NormalMapStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NormalMaps"), 0.0f, 2.0f);
+	NormalMapFlipGreen = TheSettingManager->GetSettingI(Section, "NormalMapFlipGreen") != 0;
 }
 
 void GrassShaders::UpdateConstants() {}

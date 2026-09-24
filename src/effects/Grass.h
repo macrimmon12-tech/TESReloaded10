@@ -14,6 +14,9 @@ public:
 		D3DXVECTOR4		Lighting4 = D3DXVECTOR4(0.0f, 0.0f, 0.0f, 0.0f);	// x: shadow distance, y: shadow fade
 	};
 	GrassStruct	Constants;
+	// Per-texture normal maps (NewVegas/Hooks/GrassNormals.cpp reads these per grass geometry).
+	float		NormalMapStrength = 0.0f;
+	bool		NormalMapFlipGreen = false;
 
 	void	UpdateConstants();
 	void	RegisterConstants();
