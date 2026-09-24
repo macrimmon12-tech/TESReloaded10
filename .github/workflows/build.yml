@@ -78,19 +78,27 @@ jobs:
           }
 
           # Game shaders: the replacements the game compiles through D3DXCompileShader, vs_3_0 or
-          # ps_3_0 by suffix with entry point main, with forward shadows compiled in so that path is
-          # checked too. Includes resolve from the Shaders folder, as in game.
+          # ps_3_0 by suffix with entry point main. ShaderRecord::LoadShader compiles each one with
+          # FORWARD_SHADOWS and SKYLIGHTING_MODE from the settings, and the two modes declare
+          # different constants, so every combination is compiled: a clash that exists in only one
+          # of them is still a shader that fails for anyone using that setting. Includes resolve
+          # from the Shaders folder, as in game.
           $shaders = (Resolve-Path src/hlsl/NewVegas/Shaders).Path
+          $variants = @('/D FORWARD_SHADOWS=1 /D SKYLIGHTING_MODE=0', '/D FORWARD_SHADOWS=1 /D SKYLIGHTING_MODE=1',
+                        '/D FORWARD_SHADOWS=0 /D SKYLIGHTING_MODE=0', '/D FORWARD_SHADOWS=0 /D SKYLIGHTING_MODE=1')
           foreach ($file in Get-ChildItem $shaders -File | Where-Object { $_.Name -match '\.(vso|pso)\.hlsl$' } | Sort-Object Name) {
             $profile = if ($file.Name -match '\.vso\.hlsl$') { 'vs_3_0' } else { 'ps_3_0' }
-            $out = & $fxc.FullName /nologo /T $profile /E main /I $shaders /D REVERSED_DEPTH=1 /D FORWARD_SHADOWS=1 /Fo "$env:RUNNER_TEMP\$($file.BaseName).cso" $file.FullName 2>&1
-            if ($LASTEXITCODE -ne 0) {
-              $failed += "Shaders/$($file.Name)"
-              Write-Host "::error file=$($file.FullName)::$($file.Name) failed to compile"
-              $out | ForEach-Object { Write-Host "    $_" }
-            } else {
-              Write-Host "ok    Shaders/$($file.Name)"
+            $fileOk = $true
+            foreach ($variant in $variants) {
+              $defines = $variant -split ' '
+              $out = & $fxc.FullName /nologo /T $profile /E main /I $shaders /D REVERSED_DEPTH=1 @defines /Fo "$env:RUNNER_TEMP\$($file.BaseName).cso" $file.FullName 2>&1
+              if ($LASTEXITCODE -ne 0) {
+                $fileOk = $false
+                Write-Host "::error file=$($file.FullName)::$($file.Name) failed to compile with $variant"
+                $out | ForEach-Object { Write-Host "    $_" }
+              }
             }
+            if ($fileOk) { Write-Host "ok    Shaders/$($file.Name)" } else { $failed += "Shaders/$($file.Name)" }
           }
 
           if ($failed.Count -gt 0) { Write-Host "Failed: $($failed -join ', ')"; exit 1 }
