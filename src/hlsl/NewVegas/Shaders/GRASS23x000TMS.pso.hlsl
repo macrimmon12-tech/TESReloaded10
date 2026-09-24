@@ -4,15 +4,17 @@
 // The VS hands the lighting over already split, so only the sun is shadowed:
 //   TEXCOORD4.xyz ambient    TEXCOORD5.xyz sun    TEXCOORD5.w fade    COLOR0 fog (.w amount)
 // and, for the grass lighting below, the raw pieces to redo the sun per pixel:
-//   TEXCOORD2 sun normal + root-to-tip    TEXCOORD3 offset from the clump centre
+//   TEXCOORD2 sun normal + height above the base    TEXCOORD3 offset from the clump centre
 //   TEXCOORD6 sun colour before N.L       TEXCOORD7 sun direction
 //
 // Grass lighting. Vanilla lights a whole clump as one flat card facing its up direction, so a field
 // is one tone wherever the sun is. Four additions, each off at 0 (and all at 0 is vanilla exactly):
 //   - Roundness bends each blade's normal outward from the clump's centre, so the side of a clump
 //     facing away from the sun falls into shade and fields gain depth.
-//   - Root darkening shades blades toward the ground, using the vertex alpha the wind already uses
-//     as its root-to-tip weight (0 at the root, which is why roots do not sway).
+//   - Root darkening shades blades toward the ground over the bottom RootDarkeningHeight units,
+//     measured from the geometry: each vertex's height above the clump's base along its up axis.
+//     (Not the vertex alpha the wind weights its sway by: on FNV's grass meshes that runs sideways
+//     across the blades, not up them.)
 //   - Translucency lets sunlight through the blades when the sun is behind them: the glow of a
 //     backlit field. Coloured by the grass texture, like light through a leaf, and shadowed.
 //   - Specular adds a soft sheen off the rounded normals toward the sun.
@@ -24,6 +26,7 @@
 // whose TESR_SkyIrradiance[9] array runs c137-c145.
 float4 TESR_GrassLighting  : register(c146); // x: translucency, y: roundness, z: root darkening, w: specular
 float4 TESR_GrassLighting2 : register(c147); // x: translucency focus, y: specular glossiness, z: debug view, w: diffuse wrap
+float4 TESR_GrassLighting3 : register(c148); // x: root darkening height (units)
 
 sampler2D DiffuseMap : register(s0);
 
@@ -38,7 +41,7 @@ sampler2D DiffuseMap : register(s0);
 struct PS_INPUT {
     float2 uv             : TEXCOORD0;
     float4 shadowWorldPos : TEXCOORD1;
-    float4 blade          : TEXCOORD2_centroid;   // xyz: sun normal, w: root (0) to tip (1)
+    float4 blade          : TEXCOORD2_centroid;   // xyz: sun normal, w: height above the clump's base (units)
     float4 bladeOffset    : TEXCOORD3_centroid;   // xyz: offset from the clump centre, w: VS variant 0-3
     float3 ambient        : TEXCOORD4_centroid;
     float4 sun            : TEXCOORD5_centroid;   // .w = distance fade
@@ -98,7 +101,8 @@ PS_OUTPUT main(PS_INPUT IN) {
 
     // Translucency: strongest looking straight toward the sun, narrowed by the focus exponent, and
     // weighted toward the tips, where blades are thinnest.
-    float tip = saturate(IN.blade.w);
+    // Root (0) to tip (1) over the bottom RootDarkeningHeight units of the clump.
+    float tip = saturate(IN.blade.w / max(TESR_GrassLighting3.x, 1.0f));
     float through = pow(saturate(dot(V, L)), translucencyFocus) * translucency * (0.5f + 0.5f * tip) * present;
     through = grassData ? through : 0.0f;
     float3 transmitted = grassData ? sunColor * shadow * through : 0.0f;
@@ -126,7 +130,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     // keeping the blade's alpha so the grass keeps its shape. All read the live settings, so a
     // slider at 0 shows as its term going flat or black.
     //   1 rounded normals, as colour      2 sun diffuse: wrapped N.L x shadow   3 sun shadow alone
-    //   4 translucency: the glow factor   5 sheen                          6 root (black) to tip (white)
+    //   4 translucency: the glow factor   5 sheen    6 root (black) to tip (white) over RootDarkeningHeight
     //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
     // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
     // vertex shaders -- e.g. hair), so none of the grass lighting applies to it.

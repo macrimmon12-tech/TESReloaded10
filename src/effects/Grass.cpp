@@ -6,6 +6,7 @@ void GrassShaders::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_GrassScale", &Constants.Scale);
 	TheShaderManager->RegisterConstant("TESR_GrassLighting", &Constants.Lighting);
 	TheShaderManager->RegisterConstant("TESR_GrassLighting2", &Constants.Lighting2);
+	TheShaderManager->RegisterConstant("TESR_GrassLighting3", &Constants.Lighting3);
 }
 
 // iMinGrassSize, fTexturePctThreshold, fGrass*Distance and fGrassWindMagnitude* are consumed
@@ -33,6 +34,8 @@ void GrassShaders::UpdateSettings() {
 	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 7);
 	// 0 is plain Lambert, a real setting, so a missing key is taken at its word.
 	Constants.Lighting2.w = std::clamp(TheSettingManager->GetSettingF(Section, "DiffuseWrap"), 0.0f, 1.0f);
+	float rootHeight = TheSettingManager->GetSettingF(Section, "RootDarkeningHeight");
+	Constants.Lighting3.x = rootHeight > 0.0f ? std::clamp(rootHeight, 1.0f, 200.0f) : 20.0f;
 }
 
 void GrassShaders::UpdateConstants() {}
