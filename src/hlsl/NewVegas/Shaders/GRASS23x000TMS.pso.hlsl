@@ -88,13 +88,34 @@ PS_OUTPUT main(PS_INPUT IN) {
     float gloss = max(TESR_GrassLighting2.y, 1.0f);
     float wrap = saturate(TESR_GrassLighting2.w);
 
-    // Outside the guard: the skylight needs this normal whether or not forward shadows
-    // are compiled in, and ForwardShadows is a live setting that can switch them off.
+    // Both gradient operations of this shader, first and at top level: the texture read (implicit
+    // derivatives) and the face normal (ddx/ddy). Neither is legal inside the dynamic branch below.
+    // The face normal is outside the forward-shadow guard because the skylight needs it whether or
+    // not forward shadows are compiled in, and ForwardShadows is a live setting.
+    float4 albedo = tex2D(DiffuseMap, IN.uv.xy);
     float3 shadowNormal = GetShadowGeometricNormal(IN.shadowWorldPos.xyz);
+    OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
+
+    // Early out for pixels that can never show: a grass card is mostly fully transparent texture, and
+    // overdraw multiplies whatever this shader does, so every one of those pixels used to pay for the
+    // whole lighting below before the alpha test threw it away. Under 1/255 the alpha is 0 once
+    // written, which fails the alpha test at any reference and gives zero alpha-to-coverage (TMS)
+    // samples, so discarding here removes nothing that would have been visible.
+    //
+    // A real branch, not just clip(): under DXVK a discard can become demote-to-helper, which keeps
+    // the invocation running, so clip() alone would save nothing. [branch] keeps the compiler from
+    // flattening it; the only texture reads left below are the shadow atlas's tex2Dlod, legal here.
+    [branch]
+    if (OUT.color.a < 1.0f / 255.0f) {
+        clip(-1.0f);
+        OUT.color.rgb = 0.0f;
+        return OUT;
+    }
+
     float present = SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f;
     float shadow = 1.0f;
 #if FORWARD_SHADOWS
-    // ddx/ddy must stay at top level, outside dynamic flow control.
+    // tex2Dlod inside (SampleShadowAtlas), so legal past the early-out branch above.
     shadow = present > 0.5f
          ? GetSunShadow(IN.shadowWorldPos.xyz, shadowNormal)
          : 1.0f;
@@ -151,7 +172,6 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Same split getSunLighting/getAmbientLighting apply on the object path.
     float3 lighting = (PBRLight(sun + transmitted + pointLight) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(shadowNormal, present)) * ao;
 
-    float4 albedo = tex2D(DiffuseMap, IN.uv.xy);
     float3 litColor = lighting * albedo.rgb;
 
     // Sheen: Blinn-Phong off the rounded normal, in the light's colour rather than the texture's.
@@ -162,7 +182,6 @@ PS_OUTPUT main(PS_INPUT IN) {
     litColor += grassData ? PBRLight(sunColor * shadow) * sheen : 0.0f;
 
     OUT.color.rgb = lerp(litColor, IN.fog.rgb, IN.fog.w);
-    OUT.color.a = saturate(albedo.a * 1.75f) * IN.sun.w;
 
     // Debug views ([Shaders.Grass.Main] DebugView): one term of the lighting on its own, unfogged,
     // keeping the blade's alpha so the grass keeps its shape. All read the live settings, so a
