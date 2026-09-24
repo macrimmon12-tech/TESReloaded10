@@ -225,9 +225,10 @@ PS_OUTPUT main(PS_INPUT IN) {
         // passes zero. (N.L + w) / (1 + w): w = 0 is plain Lambert, 1 lights all but the exact back.
         wrapped = saturate((dot(L, N) + wrap) / (1.0f + wrap));
 
-        // At Roundness 0 keep the vertex shader's own N.L, so vanilla stays vanilla to the bit
-        // (lerp of a value with itself is exact).
-        float3 roundSun = roundness > 0.0f ? sunColor * wrapped : IN.sun.xyz;
+        // Per-pixel sun whenever there is a per-pixel normal to light: rounded, or normal-mapped. At
+        // Roundness 0 without a map keep the vertex shader's own N.L, so vanilla stays vanilla to the
+        // bit (lerp of a value with itself is exact).
+        float3 roundSun = (roundness > 0.0f || GrassNormalParams.x > 0.0f) ? sunColor * wrapped : IN.sun.xyz;
         sun = lerp(IN.sun.xyz, roundSun, detail);
 
         // Translucency: strongest looking straight toward the sun, narrowed by the focus exponent,
@@ -276,7 +277,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Debug views ([Shaders.Grass.Main] DebugView): one term of the lighting on its own, unfogged,
     // keeping the blade's alpha so the grass keeps its shape. All read the live settings, so a
     // slider at 0 shows as its term going flat or black.
-    //   1 rounded normals, as colour      2 sun diffuse: wrapped N.L x shadow   3 sun shadow alone
+    //   1 rounded (and normal-mapped) normals, as colour      2 sun diffuse: wrapped N.L x shadow   3 sun shadow alone
     //   4 translucency: the glow factor   5 sheen    6 root (black) to tip (white) over RootDarkeningHeight
     //   7 which grass vertex shader fed this pixel: red 000, green 001, blue 002, yellow 003
     //   8 point lights alone, in their own colour
