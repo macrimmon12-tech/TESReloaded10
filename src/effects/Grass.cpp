@@ -50,6 +50,8 @@ void GrassShaders::UpdateSettings() {
 	// Grass texture brightness. A missing key reads 0, which would blacken the grass: it means 1.
 	float brightness = TheSettingManager->GetSettingF(Section, "Brightness");
 	Constants.Lighting4.z = brightness > 0.0f ? std::clamp(brightness, 0.1f, 2.0f) : 1.0f;
+	// Sky light from the lit normal instead of the flat card's. Off at 0, which is also a missing key.
+	Constants.Lighting4.w = std::clamp(TheSettingManager->GetSettingF(Section, "AmbientNormal"), 0.0f, 1.0f);
 
 	// Normal maps: <grass texture>_n.dds beside each grass texture, loose under Data\Textures. Off at 0.
 	NormalMapStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NormalMaps"), 0.0f, 2.0f);

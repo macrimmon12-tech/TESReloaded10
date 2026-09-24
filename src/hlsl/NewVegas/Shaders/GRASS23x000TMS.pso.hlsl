@@ -45,7 +45,7 @@ float4 TESR_ShadowLightPosition[12] : register(c150);
 float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
 
-float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit), z: brightness
+float4 TESR_GrassLighting4 : register(c198); // x: shadow distance, y: shadow fade (units; distance 0 = no limit), z: brightness, w: ambient normal
 
 // Per-texture normal map, bound per grass geometry by the DLL (NewVegas/Hooks/GrassNormals.cpp) when
 // the grass texture has a <name>_n.dds beside it. Not TESR_ names: set directly, not through NVR's
@@ -277,8 +277,17 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Root darkening: lets the roots sit in their own shade.
     float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
 
+    // Normal-based ambient (AmbientNormal): the sky light is taken from the flat card normal, blended
+    // toward the lit normal -- rounded and normal-mapped -- so the side of a clump facing away from
+    // the sky gets less of it too. 0 is the flat card normal alone, the look before this setting.
+    // Fades with the detail lighting it borrows the normal from. Selects keep hair's undefined N out.
+    float ambientBlend = saturate(TESR_GrassLighting4.w) * detail;
+    float3 ambientBlended = lerp(shadowNormal, N * rsqrt(max(dot(N, N), 1e-8f)), ambientBlend);
+    float ambientLength = length(ambientBlended);
+    float3 ambientNormal = (grassData && ambientBlend > 0.0f && ambientLength > 1e-3f) ? ambientBlended / ambientLength : shadowNormal;
+
     // Same split getSunLighting/getAmbientLighting apply on the object path.
-    float3 lighting = (PBRLight(sun + transmitted + pointLight) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(shadowNormal, present)) * ao;
+    float3 lighting = (PBRLight(sun + transmitted + pointLight) + PBRAmbient(IN.ambient.xyz) + SkyAmbient(ambientNormal, present)) * ao;
 
     // Brightness: scales the grass texture's colour, for grass that reads too bright under the extra
     // light the grass lighting adds. Grass only, not hair; 1 (or an unset 0) leaves it untouched.
