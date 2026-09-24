@@ -46,7 +46,7 @@ float4 TESR_LightPosition[12]       : register(c162);
 float4 TESR_LightColor[24]          : register(c174);
 
 float4 TESR_GrassLighting5 : register(c200); // rgb: translucency colour (unset black reads as white)
-float4 TESR_GrassVariation : register(c201); // x: colour variation strength, y: patch size (units), z: brightness variation
+float4 TESR_GrassVariation : register(c201); // x: colour variation strength, y: patch size (units), z: brightness variation, w: grazing brightening
 
 // Colour variation across fields: smooth value noise over the ground plane, from a sin-free hash
 // (Dave Hoskins' hash22) so it is exact at world coordinates in the tens of thousands. Two channels
@@ -305,8 +305,17 @@ PS_OUTPUT main(PS_INPUT IN) {
     // Selects, not multiplications: without grass data sunColor is undefined, possibly NaN.
     float3 transmitted = grassData ? sunColor * shadow * through * throughTint : 0.0f;
 
+    // Grazing-angle brightening (GrazingBrightening): looking across a field at a low angle you see
+    // mostly the blade tips, lighter and lit, and little of the dark roots and ground between clumps,
+    // so grass seen near edge-on is lifted and its root darkening eased. Looking down, unchanged.
+    // Every distance: it is what makes a far field read as a lighter sheet. pow 4 keeps it to low
+    // angles. The view direction is the camera-relative position over its length.
+    float3 viewDir = IN.shadowWorldPos.xyz / max(pixelDistance, 1e-4f);
+    float grazing = grassData ? pow(saturate(1.0f - abs(viewDir.z)), 4.0f) * saturate(TESR_GrassVariation.w) : 0.0f;
+
     // Root darkening: lets the roots sit in their own shade.
     float ao = grassData ? lerp(1.0f - rootDarkening, 1.0f, tip) : 1.0f;
+    ao = lerp(ao, 1.0f, grazing);
 
     // Normal-based ambient (AmbientNormal): the sky light is taken from the flat card normal, blended
     // toward the lit normal -- rounded and normal-mapped -- so the side of a clump facing away from
@@ -342,7 +351,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         variationTint *= 1.0f + clamp(n.y * 1.6f, -1.0f, 1.0f) * variationStrength * TESR_GrassVariation.z;
     }
 
-    float3 litColor = lighting * albedo.rgb * (grassData ? brightness * variationTint : 1.0f);
+    float3 litColor = lighting * albedo.rgb * (grassData ? brightness * variationTint * (1.0f + grazing) : 1.0f);
 
     // Sheen, in the light's colour rather than the texture's.
     litColor += grassData ? PBRLight(sunColor * shadow) * sheen + PBRLight(pointSheen) : 0.0f;
@@ -360,6 +369,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     //     yellow is full lighting, green shadows only, black neither
     //  10 normal maps: the normal-mapped normal as colour where this grass has a map, dark grey where not
     //  11 colour variation: the tint it applies, at half brightness (mid grey = unchanged)
+    //  12 grazing-angle brightening: how much it lifts this pixel, black none to white full
     // In every view, magenta = drawn by this shader but WITHOUT grass data (not one of the four grass
     // vertex shaders -- e.g. hair), so none of the grass lighting applies to it.
     float debugView = TESR_GrassLighting2.z;
@@ -379,6 +389,7 @@ PS_OUTPUT main(PS_INPUT IN) {
         view = debugView > 8.5f ? float3(detail, shadowReach, 0.0f) : view;
         view = debugView > 9.5f ? mapView : view;
         view = debugView > 10.5f ? variationTint * 0.5f : view;
+        view = debugView > 11.5f ? grazing : view;
         OUT.color.rgb = grassData ? view : float3(1.0f, 0.0f, 1.0f);
     }
 

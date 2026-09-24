@@ -34,7 +34,7 @@ void GrassShaders::UpdateSettings() {
 	float gloss = TheSettingManager->GetSettingF(Section, "SpecularGlossiness");
 	Constants.Lighting2.x = focus > 0.0f ? std::clamp(focus, 1.0f, 32.0f) : 4.0f;
 	Constants.Lighting2.y = gloss > 0.0f ? std::clamp(gloss, 1.0f, 128.0f) : 16.0f;
-	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 11);
+	Constants.Lighting2.z = (float)std::clamp(TheSettingManager->GetSettingI(Section, "DebugView"), 0, 12);
 	// 0 is plain Lambert, a real setting, so a missing key is taken at its word.
 	Constants.Lighting2.w = std::clamp(TheSettingManager->GetSettingF(Section, "DiffuseWrap"), 0.0f, 1.0f);
 	float rootHeight = TheSettingManager->GetSettingF(Section, "RootDarkeningHeight");
@@ -66,6 +66,8 @@ void GrassShaders::UpdateSettings() {
 	float patchSize = TheSettingManager->GetSettingF(Section, "ColorVariationScale");
 	Constants.Variation.y = patchSize > 0.0f ? std::clamp(patchSize, 100.0f, 20000.0f) : 1500.0f;
 	Constants.Variation.z = std::clamp(TheSettingManager->GetSettingF(Section, "ColorVariationBrightness"), 0.0f, 1.0f);
+	// Grazing-angle brightening. Off at 0, also a missing key.
+	Constants.Variation.w = std::clamp(TheSettingManager->GetSettingF(Section, "GrazingBrightening"), 0.0f, 1.0f);
 
 	// Normal maps: <grass texture>_n.dds beside each grass texture, loose under Data\Textures. Off at 0.
 	NormalMapStrength = std::clamp(TheSettingManager->GetSettingF(Section, "NormalMaps"), 0.0f, 2.0f);
