@@ -226,6 +226,9 @@
     <ClInclude Include="..\src\NewVegas\Hooks\Hooks.h">
       <Filter>NewVegas\Hooks</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\NewVegas\Hooks\GrassNormals.h">
+      <Filter>NewVegas\Hooks</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\NewVegas\Hooks\MaterialPass.h">
       <Filter>NewVegas\Hooks</Filter>
     </ClInclude>
@@ -320,6 +323,12 @@
       <Filter>NewVegas\Hooks</Filter>
     </ClInclude>
     <ClInclude Include="..\src\effects\SMAA.h">
+      <Filter>Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\effects\TAA.h">
+      <Filter>Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\effects\CinematicDOF.h">
       <Filter>Effects</Filter>
     </ClInclude>
   </ItemGroup>
@@ -468,6 +477,9 @@
     <ClCompile Include="..\src\NewVegas\Hooks\Hooks.cpp">
       <Filter>NewVegas\Hooks</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\NewVegas\Hooks\GrassNormals.cpp">
+      <Filter>NewVegas\Hooks</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\NewVegas\Hooks\MaterialPass.cpp">
       <Filter>NewVegas\Hooks</Filter>
     </ClCompile>
@@ -559,6 +571,12 @@
       <Filter>NewVegas\Hooks</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\SMAA.cpp">
+      <Filter>Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\effects\TAA.cpp">
+      <Filter>Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\effects\CinematicDOF.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
     <ClCompile Include="..\src\effects\SunShadows.cpp">

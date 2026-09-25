@@ -38,6 +38,11 @@ struct VS_OUTPUT {
     float4 ambient        : TEXCOORD4;
     float4 sun            : TEXCOORD5;   // .w = distance fade
     float4 fog            : COLOR0;      // .w = fog amount
+    // Grass lighting (GRASS23x000TMS.pso), raw so the PS can shade per pixel with its own settings.
+    float4 blade          : TEXCOORD2;   // xyz: this variant's sun normal, w: height above the clump's base (units)
+    float4 bladeOffset    : TEXCOORD3;   // xyz: horizontal offset from the clump's centre (model units), w: VS variant 0-3
+    float4 sunColor       : TEXCOORD6;   // xyz: the sun term before N.L, w: 2 = grass data present
+    float4 sunDir         : TEXCOORD7;   // xyz: DiffuseDir, w: cosine between the view ray and the ground's up (grazing brightening)
 };
 
 VS_OUTPUT main(VS_INPUT IN) {
@@ -56,7 +61,8 @@ VS_OUTPUT main(VS_INPUT IN) {
     float sway = sin(phase) * WindData.z * (IN.color.w * IN.color.w);
 
     float3 scale = (0.01f * inst.w) * ScaleMask.xyz + 1.0f;
-    float3 pos = IN.position.xyz * scale + float3(sway * WindData.xy, 0.0f);
+    float3 placed = IN.position.xyz * scale;
+    float3 pos = placed + float3(sway * WindData.xy, 0.0f);
 
     float4 worldPos = float4(pos + inst.xyz, 1.0f);
     OUT.position = mul(ModelViewProj, worldPos);
@@ -76,6 +82,13 @@ VS_OUTPUT main(VS_INPUT IN) {
 
     OUT.uv = IN.uv;
     OUT.shadowWorldPos = float4(GetShadowWorldPos(OUT.position), SHADOW_VS_SENTINEL);
+
+    OUT.blade = float4(orient, placed.z);   // card on world axes: height is z
+    OUT.bladeOffset = float4(placed - orient * dot(placed, orient), 0.0f);   // w: which grass VS this is, for DebugView 7
+    OUT.sunColor = float4((lightScale * IN.color.rgb) * DiffuseColor * AddlParams.x, 2.0f);   // w: GRASS_VS_SENTINEL, see GRASS23x000TMS.pso
+    // w: view ray against the ground's up: the instance orientation the engine aligns grass to the slope with.
+    float3 groundUp = normalize(orient);
+    OUT.sunDir = float4(DiffuseDir, dot(groundUp, OUT.shadowWorldPos.xyz) / max(length(OUT.shadowWorldPos.xyz), 1e-4f));
 
     return OUT;
 };

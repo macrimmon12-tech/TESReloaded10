@@ -162,6 +162,8 @@
     <ClCompile Include="..\src\effects\POM.cpp" />
     <ClCompile Include="..\src\effects\Rain.cpp" />
     <ClCompile Include="..\src\effects\SMAA.cpp" />
+    <ClCompile Include="..\src\effects\TAA.cpp" />
+    <ClCompile Include="..\src\effects\CinematicDOF.cpp" />
     <ClCompile Include="..\src\effects\ShadowsExterior.cpp" />
     <ClCompile Include="..\src\effects\ShadowsInteriors.cpp" />
     <ClCompile Include="..\src\effects\Sharpening.cpp" />
@@ -204,6 +206,7 @@
     </ClCompile>
     <ClCompile Include="..\src\NewVegas\Hooks\FlyCam.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\Game.cpp" />
+    <ClCompile Include="..\src\NewVegas\Hooks\GrassNormals.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\Hooks.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\MaterialPass.cpp" />
     <ClCompile Include="..\src\NewVegas\Hooks\Render.cpp" />
@@ -269,6 +272,8 @@
     <ClInclude Include="..\src\effects\POM.h" />
     <ClInclude Include="..\src\effects\Rain.h" />
     <ClInclude Include="..\src\effects\SMAA.h" />
+    <ClInclude Include="..\src\effects\TAA.h" />
+    <ClInclude Include="..\src\effects\CinematicDOF.h" />
     <ClInclude Include="..\src\effects\ShadowsExterior.h" />
     <ClInclude Include="..\src\effects\ShadowsInteriors.h" />
     <ClInclude Include="..\src\effects\Sharpening.h" />
@@ -302,6 +307,7 @@
     <ClInclude Include="..\src\NewVegas\nvse\GameNi.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\FlyCam.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\Game.h" />
+    <ClInclude Include="..\src\NewVegas\Hooks\GrassNormals.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\Hooks.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\MaterialPass.h" />
     <ClInclude Include="..\src\NewVegas\Hooks\Render.h" />

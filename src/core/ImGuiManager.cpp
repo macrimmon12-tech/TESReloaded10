@@ -1913,7 +1913,8 @@ void ImGuiManager::Render() {
 // ---- Menu UI -----------------------------------------------------------------
 
 static bool ShouldHideSection(const std::string& name) {
-	return name == "WeatherMode" || name == "Status";
+	// DepthOfField is the old DoF, superseded by CinematicDOF; still driven by its TOML section.
+	return name == "WeatherMode" || name == "Status" || name == "DepthOfField";
 }
 
 static bool ShouldHideKey(const char* key) {
@@ -2190,6 +2191,29 @@ static const char* kShadowOrthoResolutionNames[] = {
 static const char* kEdgeDetectionNames[] = {
 	"0 - Luma", "1 - Color", "2 - Depth", "3 - Luma + Depth",
 };
+static const char* kCinematicDofModeNames[] = {
+	"0 - Always", "1 - Dialogue only",
+};
+static const char* kTAADebugNames[] = {
+	"0 - Off", "1 - Motion", "2 - Reprojection error", "3 - History use", "4 - Weapon mask", "5 - Depth",
+};
+static const char* kCinematicDofDebugNames[] = {
+	"0 - Off", "1 - Blur map (red far, blue near)", "2 - Weapon blur", "3 - Focus & autofocus taps",
+};
+static const char* kGrassDebugNames[] = {
+	"0 - Off", "1 - Rounded normals", "2 - Sun diffuse", "3 - Sun shadow", "4 - Translucency",
+	"5 - Sheen", "6 - Root to tip", "7 - Vertex shader variant", "8 - Point lights",
+	"9 - Distance falloffs", "10 - Normal maps", "11 - Colour variation", "12 - Grazing angle", "13 - Dry tips",
+};
+static const char* kWeaponDofNames[] = {
+	"0 - Off", "1 - Hip-fire only", "2 - Always",
+};
+static const char* kBokehQualityNames[] = {
+	"0 - Low (48 samples)", "1 - Medium (96 samples)", "2 - High (160 samples)",
+};
+static const char* kBokehShapeNames[] = {
+	"0 - Aperture (round/blades)", "1 - Star", "2 - Donut (mirror lens)", "3 - Heart", "4 - Cross",
+};
 
 #define ENUM_OPT(names) EnumOptions{ names, (int)(sizeof(names) / sizeof(names[0])) }
 
@@ -2207,6 +2231,13 @@ static const std::unordered_map<std::string, EnumOptions> kEnumSettings = {
 	{ "Shaders.ShadowsExteriors.ShadowMaps.CascadeResolution", ENUM_OPT(kShadowCascadeResolutionNames) },
 	{ "Shaders.ShadowsExteriors.Ortho.Resolution",             ENUM_OPT(kShadowOrthoResolutionNames) },
 	{ "Shaders.SMAA.Main.EdgeDetection",                       ENUM_OPT(kEdgeDetectionNames) },
+	{ "Shaders.CinematicDOF.Main.BokehShape",                  ENUM_OPT(kBokehShapeNames) },
+	{ "Shaders.CinematicDOF.Main.BokehQuality",                ENUM_OPT(kBokehQualityNames) },
+	{ "Shaders.CinematicDOF.Main.WeaponDOF",                   ENUM_OPT(kWeaponDofNames) },
+	{ "Shaders.CinematicDOF.Main.DebugView",                   ENUM_OPT(kCinematicDofDebugNames) },
+	{ "Shaders.CinematicDOF.Main.Mode",                        ENUM_OPT(kCinematicDofModeNames) },
+	{ "Shaders.TAA.Main.DebugView",                            ENUM_OPT(kTAADebugNames) },
+	{ "Shaders.Grass.Main.DebugView",                          ENUM_OPT(kGrassDebugNames) },
 };
 
 #undef ENUM_OPT
@@ -2503,6 +2534,9 @@ static void RenderContent() {
 		std::string key(s.Key);
 		if (handled.count(key)) continue;
 		if (ShouldHideKey(s.Key)) continue;
+		// Grass ScaleX/Y/Z feed TESR_GrassScale, which only the Oblivion grass shaders read: in FNV they
+		// do nothing, so they stay in the TOML but not in the menu.
+		if (SelectedSection == "Shaders.Grass.Main" && (!strcmp(s.Key, "ScaleX") || !strcmp(s.Key, "ScaleY") || !strcmp(s.Key, "ScaleZ"))) continue;
 
 		// Hide HDRCompat when PreTonemapping is off — it's meaningless in post-tonemapping mode
 		if (strcmp(s.Key, "HDRCompat") == 0 && SelectedSection == "Shaders.LUT.Main") {
