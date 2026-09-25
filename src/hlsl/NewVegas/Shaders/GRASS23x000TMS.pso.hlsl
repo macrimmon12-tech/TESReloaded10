@@ -131,18 +131,28 @@ float4 AlphaTestRef : register(c3);
 float3 GrassPointLight(float4 light, float4 colour, float3 pixelFromCamera, float3 N, float3 V, float wrap, float gloss, float focus, inout float3 specularOut, inout float3 transmitOut) {
     float3 toLight = (light.xyz - TESR_CameraPosition.xyz) - pixelFromCamera;
     float distSq = dot(toLight, toLight);
-    float att = 1.0f - saturate(distSq / max(light.w * light.w, 1.0f));
-    float3 L = toLight * rsqrt(max(distSq, 1e-4f));
-    float diffuse = saturate((dot(L, N) + wrap) / (1.0f + wrap));
-    float3 lit = light.w > 0.0f ? colour.rgb * colour.w * att : 0.0f;
+    float rangeSq = max(light.w * light.w, 1.0f);
+    float3 diffuseOut = 0.0f;
 
-    // Normalised by hand: L - V is zero looking exactly into the light, and normalize() would NaN.
-    float3 H = L - V;
-    H *= rsqrt(max(dot(H, H), 1e-8f));
-    specularOut += lit * pow(saturate(dot(N, H)), gloss);
-    transmitOut += lit * pow(saturate(dot(V, L)), focus);
+    // Only a light that reaches this pixel is worked out. Out of range its attenuation is exactly 0,
+    // so skipping it changes nothing, and in a town or camp at night most of the lights in the list
+    // are out of range of most of the grass: without this every grass pixel paid for all of them.
+    // A real branch: neighbouring pixels almost always agree on it. Empty slots (radius 0) skip too.
+    [branch]
+    if (light.w > 0.0f && distSq < rangeSq) {
+        float att = 1.0f - distSq / rangeSq;
+        float3 L = toLight * rsqrt(max(distSq, 1e-4f));
+        float diffuse = saturate((dot(L, N) + wrap) / (1.0f + wrap));
+        float3 lit = colour.rgb * colour.w * att;
 
-    return lit * diffuse;
+        // Normalised by hand: L - V is zero looking exactly into the light, and normalize() would NaN.
+        float3 H = L - V;
+        H *= rsqrt(max(dot(H, H), 1e-8f));
+        specularOut += lit * pow(saturate(dot(N, H)), gloss);
+        transmitOut += lit * pow(saturate(dot(V, L)), focus);
+        diffuseOut = lit * diffuse;
+    }
+    return diffuseOut;
 }
 
 struct PS_INPUT {
