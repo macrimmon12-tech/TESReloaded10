@@ -45,7 +45,7 @@ float4 TESR_VolumetricFogWind;       // x: WindDirX, y: WindDirY, z: WindSpeed, 
 float4 TESR_VolumetricFogScatter;    // x: PhaseAsymmetry, y: ShadowStrength, z: NoiseStrength, w: HeightInfluence
 float4 TESR_VolumetricFogWeather;    // x: WeatherFilterBlend (animated 0-1), y: isExterior, z: SkyAmbientAvailable, w: FogSaturation
 float4 TESR_VolumetricFogAerial;     // x: AerialStrength, y: AerialRangeStart, z: AerialTintBlend, w: AerialDayFadeStart
-float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override
+float4 TESR_VolumetricFogAerialTint; // xyz: manual aerial tint override, w: SunScatteringStrength
 float4 TESR_VolumetricFogDistant;    // x: DistantFogRange, y: DistantFogBlend, z: DistantFogHeight, w: EdgeAA
 float4 TESR_VolumetricFogGlobal;     // x: Amount, y: NightDisableSkyMask, z: MoonVisibility, w: MinDensityFloor
 // Own settings-UI section/tab (Shaders.VolumetricFog.Night), not Main/Interiors-switched, so these
@@ -133,6 +133,11 @@ static const float AerialTintBlend = saturate(TESR_VolumetricFogAerial.z);
 // more of the sunrise/sunset transition, not just full night -- that's specifically when direct
 // low-angle sun on distant terrain was reading as too bright/glowy.
 static const float AerialDayFadeStart = saturate(TESR_VolumetricFogAerial.w);
+// Gain on the sun-facing forward-scattering glow (see its use near `sun` below). Was a hardcoded
+// 100 -- exposed as a setting since that flat gain could make fog facing the sun read as much
+// brighter/thicker than the exact same density facing away from it, by pure contrast rather than
+// any actual difference in extinction (which has no sun-direction dependence anywhere).
+static const float SunScatteringStrength = max(0, TESR_VolumetricFogAerialTint.w);
 
 static const float DistantFogRange = exp(-4 * clamp(TESR_VolumetricFogDistant.x, 0.00000001, 1.0));
 static const float DistantFogBlend = TESR_VolumetricFogDistant.y;
@@ -495,7 +500,7 @@ float4 VolumetricFog(VSOUT IN) : COLOR0
 
 		float sunScattering = pows(compress(sunDir), lerp(8.0, 1.0, PhaseAsymmetry) + sunStrength);
 		sunScattering *= pow(1 - sunHeight, 2) * isDayTimeFog * TESR_FogData.z;
-		sun = sunColorV * sunScattering * shadowVisibility * TESR_PBRData.z * 100;
+		sun = sunColorV * sunScattering * shadowVisibility * TESR_PBRData.z * SunScatteringStrength;
 
 		distantFog = pows(smoothstep(DistantFogRange, 1.0, normalizedDepth), 0.5);
 		distantHeightFade = (DistantFogHeight == 0) ? (1.0 - isSky) : exp(-worldPos.z / (80000 * DistantFogHeight));
