@@ -132,7 +132,7 @@ float3 getPointLightLighting(float3 lightDir, float att, float3 lightColor, floa
     }
 }
 
-float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 normal, float3 AmbientColor, float3 albedo, float gloss = 0.0, float glossPower = 0.0, float metallicness = 1.0, float parallaxMultiplier = 1.0, float3 worldNormal = float3(0.0f, 0.0f, 1.0f), float3 worldShadingNormal = float3(0.0f, 0.0f, 1.0f)) {
+float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 normal, float3 AmbientColor, float3 albedo, float gloss = 0.0, float glossPower = 0.0, float metallicness = 1.0, float parallaxMultiplier = 1.0, float3 worldNormal = float3(0.0f, 0.0f, 1.0f), float3 worldShadingNormal = float3(0.0f, 0.0f, 1.0f), float3 worldView = float3(0.0f, 0.0f, 1.0f)) {
     float3 lightColor = sunColor * TESR_TerrainData.z * parallaxMultiplier;
     // Hemisphere skylight, matching getAmbientLighting in Object.hlsl: the weather ambient,
     // redistributed by orientation, evaluated at the shading normal so the ground's blended normal
@@ -148,8 +148,17 @@ float3 getSunLighting(float3 lightDir, float3 sunColor, float3 eyeDir, float3 no
     if (TESR_TerrainExtraData.x) {
         // PBR.
         float roughness = saturate((1 - gloss) * TESR_TerrainData.y);
-        float3 lighting = PBRSun(saturate(metallicness * TESR_TerrainData.x), roughness, color, normal, eyeDir, lightDir, lightColor);
-        return max(0, lighting + ambientColor * color);
+        float metal = saturate(metallicness * TESR_TerrainData.x);
+        float3 lighting = PBRSun(metal, roughness, color, normal, eyeDir, lightDir, lightColor);
+
+        // What the ground reflects of the sky and the ground around it (SkyAmbientSpecular), at
+        // its blended normal maps. Only this branch: the vanilla one below renders no specular
+        // lobe, so there is nothing for a reflection to belong to. worldView points at the camera.
+        float3 f0 = lerp(float(0.04f).xxx, color, metal);
+        float3 reflection = SkyAmbientSpecular(TESR_SunAmbient.rgb * TESR_TerrainData.w, worldShadingNormal,
+                                               worldView, roughness, f0, SKY_AMBIENT_STRENGTH, 1.0f);
+
+        return max(0, lighting + ambientColor * color + reflection);
     } else {
         // Vanilla, no specular.
         float3 lighting = getVanillaLightingAtt(lightDir, 1.0, sunColor, eyeDir, normal, albedo, gloss, glossPower);

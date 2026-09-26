@@ -171,7 +171,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 worldShadingNormal = ObjectToWorldNormal(mul(combinedNormal, tbn), IN.lPosition.xyz,
                                                     shadowWorldPos, shadowNormal);
 
-    float3 lighting = getSunLighting(lightTS, SunColor.rgb, eyeDir, combinedNormal, AmbientColor.rgb, baseColor, gloss, specExponent, 1.0, parallaxShadowMultiplier, shadowNormal, worldShadingNormal);
+    float3 lighting = getSunLighting(lightTS, SunColor.rgb, eyeDir, combinedNormal, AmbientColor.rgb, baseColor, gloss, specExponent, 1.0, parallaxShadowMultiplier, shadowNormal, worldShadingNormal, normalize(-shadowWorldPos));
 
     #if defined(NUM_PT_LIGHTS)
         [loop] for (int i = 0; i < PointLightCount; i++) {

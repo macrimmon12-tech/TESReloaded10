@@ -176,6 +176,12 @@ float3 SkyIrradianceMeanLinear() {
     return 0.5f * max(GetSkyRadiance(float3(0.0f, 0.0f, 1.0f)), 0.0f);
 }
 
+// LINEAR radiance looking along dir, with no form factor: a reflection samples what the sky looks
+// like that way, not how much of it a surface can see. SkyHorizonVisibility applies the horizon.
+float3 SkyRadianceLinear(float3 dir) {
+    return max(GetSkyRadiance(dir), 0.0f);
+}
+
 // This mode evaluates the sky from its colour constants directly, so it is always available.
 float SkyAmbientAvailable() {
     return 1.0f;
@@ -202,7 +208,10 @@ float SkyAmbientAvailable() {
 // The cosine form factor, the wall/floor split and the sun-side azimuthal bias are all inherent
 // to the convolution. There is no direction to lean, so `directionality` is ignored here.
 // ---------------------------------------------------------------------------
-float4 TESR_SkyIrradiance[9] : register(c137);
+float4 TESR_SkyIrradiance[9] : register(c137);   // c137-c145, cosine-convolved, upper hemisphere
+// c152-c160: past Shadow.hlsl's temporal constants at c146-c151. No convolution, full sphere
+// against the sky continued below the horizon (see Sky.h).
+float4 TESR_SkyRadiance[9]   : register(c152);
 
 // worldNormal must be the GEOMETRIC world normal, unit length. The reconstruction is LINEAR
 // irradiance.
@@ -224,6 +233,21 @@ float3 SkyIrradianceLinear(float3 worldNormal, float directionality) {
 // the sphere, (3z^2 - 1) included since z^2 averages 1/3, so the average is the constant term.
 float3 SkyIrradianceMeanLinear() {
     return TESR_SkyIrradiance[0].rgb;
+}
+
+// LINEAR radiance looking along dir, from the unconvolved set. Order 2 holds the sky's gradient,
+// not a mirror image of it, which suits a sky with one sharp feature - the sun, whose own lobe is
+// the PBR sun specular. The set holds no horizon edge; SkyHorizonVisibility applies it.
+float3 SkyRadianceLinear(float3 n) {
+    return TESR_SkyRadiance[0].rgb
+         + TESR_SkyRadiance[1].rgb * n.y
+         + TESR_SkyRadiance[2].rgb * n.z
+         + TESR_SkyRadiance[3].rgb * n.x
+         + TESR_SkyRadiance[4].rgb * (n.x * n.y)
+         + TESR_SkyRadiance[5].rgb * (n.y * n.z)
+         + TESR_SkyRadiance[6].rgb * (3.0f * n.z * n.z - 1.0f)
+         + TESR_SkyRadiance[7].rgb * (n.x * n.z)
+         + TESR_SkyRadiance[8].rgb * (n.x * n.x - n.y * n.y);
 }
 
 // Sky.cpp sets [0].w to 1 once it has computed the coefficients, which it only does while the
@@ -282,6 +306,81 @@ float3 SkyAmbientRedistribute(float3 flatAmbient, float3 worldNormal, float dire
 
     float rescale = dot(groundLin, lumaWeights) / max(dot(meanLin, lumaWeights), 1e-6f);
     return lerp(flatAmbient, sqrt(max(dirLin * rescale, 0.0f)), saturate(strength) * SkyAmbientAvailable());
+}
+
+// ---------------------------------------------------------------------------
+// The sky REFLECTION: the specular half of the same light, after TPA's pr43 work. The diffuse
+// term above is how much of its surroundings a surface collects; this is what it mirrors of them.
+// On a floor it is the ambient term that follows the surface's detail: the irradiance barely
+// changes across a floor's bumps, while the reflected direction and the Fresnel term do.
+//
+// Split-sum, minus the cubemap. The prefiltered radiance comes from evaluating the surroundings
+// along the reflection vector - the sky is a function here, so a direction is sampled outright
+// and no environment map is built. The BRDF half is Lazarov's analytic fit to the environment
+// BRDF integral, in place of the usual 2D table.
+//
+// The surroundings are the ones SkyAmbientRedistribute lights with, in its units: the sky above
+// the horizon and the ground below it, which sends back the flat ambient, both times the factor
+// that holds the diffuse ambient's average to the flat ambient's. So the reflection is of the same
+// light the diffuse term redistributes, at the same brightness. Nothing else is in it - no
+// geometry, no occluder - so a floor under a roof still mirrors the open sky.
+//
+// Unlike the diffuse term it adds light, as a reflection of that light has to. strength is the
+// same SkylightingScale, so at 0 the ambient is exactly what it was.
+// ---------------------------------------------------------------------------
+
+// Karis / Lazarov, "Physically Based Shading on Mobile": the split-sum environment BRDF as
+// F0 * A + B.
+float3 EnvBRDFApprox(float3 f0, float roughness, float NdotV) {
+    const float4 c0 = float4(-1.0f, -0.0275f, -0.572f,  0.022f);
+    const float4 c1 = float4( 1.0f,  0.0425f,  1.04f,  -0.04f);
+    float4 r = roughness * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28f * NdotV)) * r.x + r.y;
+    float2 ab = float2(-1.04f, 1.04f) * a004 + r.zw;
+    return f0 * ab.x + ab.y;
+}
+
+// How much of a lobe along a direction of height dirZ sees the sky rather than the ground. The
+// radiance set carries no horizon (see Sky.h), so it is applied here. The band widens with
+// roughness because a wide lobe straddling the horizon sees part of both; the floor keeps a near
+// mirror from aliasing along the edge, where the reflected direction moves fast across a
+// normal-mapped surface.
+float SkyHorizonVisibility(float dirZ, float roughness) {
+    float w = clamp(roughness * roughness, 0.02f, 0.5f);
+    return smoothstep(-w, w, dirZ);
+}
+
+// The weather's ambient (WorldSky sunAmbient), set every frame by NVR - unlike the engine's own
+// AmbientColor, which a split ONLY_SPECULAR pass never reads, so nothing says it is current there.
+// The reflection's ground and scale come from it in every pass, so the split and the combined
+// decompositions of one surface reflect the same light. c161: past TESR_SkyRadiance.
+float4 TESR_SunAmbient : register(c161);
+
+// flatAmbient: TESR_SunAmbient scaled by the caller's AmbientScale; encoded, as for
+// SkyAmbientRedistribute. worldNormal is the shading normal, so the normal map steers the reflection. worldView points
+// from the surface toward the camera. f0 is the reflectance at normal incidence, 0.04 for a
+// dielectric. valid is 0 where the carried world position, and so both vectors, are undefined.
+float3 SkyAmbientSpecular(float3 flatAmbient, float3 worldNormal, float3 worldView, float roughness,
+                          float3 f0, float strength, float valid) {
+    const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+
+    float3 groundLin = flatAmbient * flatAmbient;
+    float3 meanLin = SkyIrradianceMeanLinear() + 0.5f * groundLin;
+    float rescale = dot(groundLin, lumaWeights) / max(dot(meanLin, lumaWeights), 1e-6f);
+
+    // A rough lobe averages a wide cone rather than the mirror direction, and with only a smooth
+    // environment to sample, leaning toward the normal is what that averaging amounts to. The two
+    // can cancel where a normal map faces away from the camera, so fall back to the normal.
+    float3 lobe = lerp(reflect(-worldView, worldNormal), worldNormal, roughness * roughness);
+    float lobeLength = dot(lobe, lobe);
+    float3 dir = lobeLength > 1e-8f ? lobe * rsqrt(lobeLength) : worldNormal;
+
+    float3 envLin = lerp(groundLin, SkyRadianceLinear(dir), SkyHorizonVisibility(dir.z, roughness)) * rescale;
+    float NdotV = saturate(dot(worldNormal, worldView));
+    float3 reflection = sqrt(max(envLin, 0.0f)) * EnvBRDFApprox(f0, roughness, NdotV);
+
+    // A select, not a multiply: 0 * NaN is NaN.
+    return (valid > 0.5f) ? reflection * (saturate(strength) * SkyAmbientAvailable()) : 0.0f;
 }
 
 #endif

@@ -651,15 +651,24 @@ PS_OUTPUT main(PS_INPUT IN) {
         lighting += baseColor.rgb * glow.rgb * EmittanceColor.rgb;
     #endif
     
-    #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
-        // Reuses shadowGeometricNormal computed above -- see the comment there. Always in scope
-        // here: POINT implies ONLY_SPECULAR, so !ONLY_SPECULAR implies !POINT.
-        // Top level: CotangentFrame takes gradients.
+    #if !defined(DIFFUSE) && !defined(POINT)
+        // Reuses shadowGeometricNormal computed above -- see the comment there; same condition.
+        // Top level: CotangentFrame takes gradients. The ambient below and the split pass's sky
+        // reflection both read these. The carried world position is camera-relative, so the view
+        // vector is its negation.
         float3 mappedNormal = WorldNormalFromMap(normal.xyz, shadowGeometricNormal,
                                                  IN.shadowWorldPos.xyz, IN.uv.xy);
+        float3 ambView = normalize(-IN.shadowWorldPos.xyz);
+        float ambValid = SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f;
+    #endif
+
+    #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
         lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, shadowGeometricNormal,
-                                       SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f,
-                                       mappedNormal);
+                                       ambValid, mappedNormal, ambView, roughness);
+    #elif defined(ONLY_SPECULAR) && !defined(POINT)
+        // The split decomposition's share of the sky reflection: its ONLY_LIGHT pass cannot carry
+        // it (see getSkyReflection), so it is added here, past that pass's texture multiply.
+        lighting += getSkyReflection(mappedNormal, ambValid, ambView, roughness);
     #endif
 
     // Other light sources. Same object-space attenuation fix as light0 above.
@@ -863,7 +872,8 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 ambNormal = GetShadowGeometricNormal(SHADOW_WP_LOAD(IN));
     float3 mappedNormal = WorldNormalFromMap(normal.xyz, ambNormal, SHADOW_WP_LOAD(IN), IN.uv.xy);
     lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
-                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f, mappedNormal);
+                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f, mappedNormal,
+                                   normalize(-SHADOW_WP_LOAD(IN)), roughness);
 
     // TODO: Vanilla attenuates the full specular term by IN.lPosition.w for some reason. Is this a problem?
     float3 finalColor = lighting;

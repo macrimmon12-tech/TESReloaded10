@@ -132,7 +132,7 @@ PS_OUTPUT main(PS_INPUT IN) {
     float3 worldShadingNormal = ObjectToWorldNormal(normal.xyz, IN.lPosition.xyz,
                                                     IN.shadowWorldPos, shadowNormal);
 
-    float3 lighting = getSunLighting(IN.sunDirection.xyz, PSLightColor.rgb, eyeDir, normal.xyz, AmbientColor.rgb, baseColor, normal.a, LandLODSpec.x, 1.0, sunShadow, shadowNormal, worldShadingNormal);
+    float3 lighting = getSunLighting(IN.sunDirection.xyz, PSLightColor.rgb, eyeDir, normal.xyz, AmbientColor.rgb, baseColor, normal.a, LandLODSpec.x, 1.0, sunShadow, shadowNormal, worldShadingNormal, normalize(-IN.shadowWorldPos));
 
     float3 final = lighting;
     final = lerp(final, final * (noise * fNoiseScale + fNoiseOffset), saturate(TESR_TerrainExtraData.z)); // Apply noise.
