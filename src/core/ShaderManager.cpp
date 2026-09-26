@@ -776,10 +776,10 @@ bool ShaderManager::ShouldRenderShadowMaps() {
 /*
 * Renders a given effect to an arbitrary render target
 */
-void ShaderManager::RenderEffectToRT(IDirect3DSurface9* RenderTarget, EffectRecord* Effect, bool clearRenderTarget) {
+void ShaderManager::RenderEffectToRT(IDirect3DSurface9* RenderTarget, EffectRecord* Effect, bool clearRenderTarget, UINT technique) {
 	IDirect3DDevice9* Device = TheRenderManager->device;
 	Device->SetRenderTarget(0, RenderTarget);
-	Effect->Render(Device, RenderTarget, RenderTarget, 0, clearRenderTarget, RenderTarget);
+	Effect->Render(Device, RenderTarget, RenderTarget, technique, clearRenderTarget, RenderTarget);
 };
 
 
@@ -809,6 +809,9 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 		if (Effects.ShadowsExteriors->Settings.Interiors.LightPoints > 6) RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.PointShadows2, false);
 		if (GameState.isExterior) {
 			RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.SunShadows, false);
+			// The forward path's filtered cascade term, for next frame's object shaders.
+			if (Effects.ShadowsExteriors->ForwardTemporalActive())
+				RenderEffectToRT(Effects.ShadowsExteriors->Textures.ForwardBufferSurface, Effects.SunShadows, false, 1);
 			Effects.ShadowsExteriors->UpdateTemporalHistory();
 		}
 	}

@@ -194,6 +194,13 @@ public:
 		IDirect3DSurface9* DepthHistorySurface;
 		IDirect3DTexture9* NormalsHistoryTexture;
 		IDirect3DSurface9* NormalsHistorySurface;
+		// The forward path's filtered cascade term (x) and the view depth it was found at (y):
+		// rendered into the buffer after the scene, copied to the history for the next frame's
+		// object shaders to reproject into.
+		IDirect3DTexture9* ForwardBufferTexture;
+		IDirect3DSurface9* ForwardBufferSurface;
+		IDirect3DTexture9* ForwardHistoryTexture;
+		IDirect3DSurface9* ForwardHistorySurface;
 	};
 	ShadowTextures	Textures;
 
@@ -220,6 +227,7 @@ public:
 
 	void		clearShadowsBuffer();
 	bool		ForwardShadowsRunning();
+	bool		ForwardTemporalActive();
 	void		UpdateTemporalHistory();
 	void		UpdateConstants();
 	void		UpdateSettings();
@@ -236,6 +244,7 @@ private:
 	bool		texturesInitialized;
 	int			heldShadowMode = -1;	// last Mode refused at runtime, so the log says it once
 	bool		historyValid = false;
+	bool		historyForward = false;	// which path the history was produced for
 	D3DXVECTOR4	historyCameraPosition = D3DXVECTOR4(0.0f, 0.0f, 0.0f, 0.0f);
 
 	bool		UpdateSettingsFromQuality(int quality);

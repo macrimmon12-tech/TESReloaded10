@@ -56,12 +56,17 @@ void ShadowsExteriorEffect::UpdateConstants() {
 		// A jump too large to be walking is a load or a fast travel, and the history belongs to
 		// somewhere else entirely. Reprojection cannot detect that - the matrix is still valid,
 		// it just describes a different place - so it has to be caught here.
-		bool cut = !historyValid || D3DXVec3Length((D3DXVECTOR3*)&delta) > 500.0f;
+		bool forward = ForwardShadowsRunning();
+		bool cut = !historyValid || historyForward != forward || D3DXVec3Length((D3DXVECTOR3*)&delta) > 500.0f;
 
 		// Nothing to filter while the forward path owns the cascades: it applies them per object
 		// in the lighting shaders, so they never reach this buffer.
-		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut && !ForwardShadowsRunning();
+		// The history belongs to the path that produced it - the deferred filter keeps the resolved
+		// shadow, the forward one the cascade term alone - so switching path starts over. x runs the
+		// deferred filter; z lets the forward pass and the object shaders use the forward history.
+		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut && !forward;
 		Constants.TemporalData.y = Settings.ShadowMaps.TemporalWeight;
+		Constants.TemporalData.z = Settings.ShadowMaps.TemporalFilter && !cut && forward;
 	}
 	else {
 		// pass the enabled/disabled property of the shadow maps to the shadowfade constant
@@ -464,11 +469,23 @@ bool ShadowsExteriorEffect::ForwardShadowsRunning() {
 }
 
 
+// Whether the deferred pass has to build the forward path's filtered cascade term this frame.
+bool ShadowsExteriorEffect::ForwardTemporalActive() {
+	return Settings.ShadowMaps.TemporalFilter && ForwardShadowsRunning() && Textures.ForwardBufferSurface;
+}
+
+
 // Snapshot what the next frame will reproject from. Runs after the shadow pass has resolved,
 // so the shadow copy is the finished term - including the previous frame already blended into
 // it, which is what makes this an accumulation rather than a two frame average.
 void ShadowsExteriorEffect::UpdateTemporalHistory() {
-	if (!Settings.ShadowMaps.TemporalFilter || ForwardShadowsRunning()) {
+	if (!Settings.ShadowMaps.TemporalFilter) {
+		historyValid = false;
+		return;
+	}
+
+	bool forward = ForwardShadowsRunning();
+	if (forward && (!Textures.ForwardBufferSurface || !Textures.ForwardHistorySurface)) {
 		historyValid = false;
 		return;
 	}
@@ -483,7 +500,12 @@ void ShadowsExteriorEffect::UpdateTemporalHistory() {
 		return;
 	}
 
-	Device->StretchRect(Textures.ShadowPassSurface, NULL, Textures.ShadowHistorySurface, NULL, D3DTEXF_NONE);
+	// The deferred filter keeps the resolved shadow; the forward one keeps its cascade term, which
+	// the object shaders read next frame.
+	if (forward)
+		Device->StretchRect(Textures.ForwardBufferSurface, NULL, Textures.ForwardHistorySurface, NULL, D3DTEXF_NONE);
+	else
+		Device->StretchRect(Textures.ShadowPassSurface, NULL, Textures.ShadowHistorySurface, NULL, D3DTEXF_NONE);
 	Device->StretchRect(depthSurface, NULL, Textures.DepthHistorySurface, NULL, D3DTEXF_NONE);
 	// Normals are stored in VIEW space, so a raw copy rotates with the camera and would read as
 	// a different surface every time the player turns. Keep the view matrix that produced them
@@ -493,6 +515,7 @@ void ShadowsExteriorEffect::UpdateTemporalHistory() {
 	Constants.PreviousViewProj = TheRenderManager->ViewProjMatrix;
 	Constants.PreviousViewTransform = TheRenderManager->viewMatrix;
 	historyCameraPosition = TheRenderManager->CameraPosition;
+	historyForward = forward;
 	historyValid = true;
 }
 
@@ -607,6 +630,10 @@ void ShadowsExteriorEffect::RegisterTextures() {
 	TheTextureManager->InitTexture("TESR_ShadowHistoryBuffer", &Textures.ShadowHistoryTexture, &Textures.ShadowHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G16R16);
 	TheTextureManager->InitTexture("TESR_ShadowDepthHistoryBuffer", &Textures.DepthHistoryTexture, &Textures.DepthHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G32R32F);
 	TheTextureManager->InitTexture("TESR_ShadowNormalsHistoryBuffer", &Textures.NormalsHistoryTexture, &Textures.NormalsHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_A16B16G16R16F);
+	// 32 bit: y holds a view depth, which runs well past fp16's range. The buffer is rendered to;
+	// the history is filled from it with StretchRect, so the two formats match.
+	TheTextureManager->InitTexture("TESR_ShadowForwardBuffer", &Textures.ForwardBufferTexture, &Textures.ForwardBufferSurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G32R32F);
+	TheTextureManager->InitTexture("TESR_ShadowForwardHistory", &Textures.ForwardHistoryTexture, &Textures.ForwardHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G32R32F);
 
 	texturesInitialized = true;
 }

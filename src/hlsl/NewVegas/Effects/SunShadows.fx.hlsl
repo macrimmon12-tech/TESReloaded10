@@ -22,7 +22,7 @@ float4 TESR_ShadowFade; // x: sunset attenuation, y: shadows maps active, z: poi
 #endif
 float4 TESR_ShadowBlur; // x: 1 / atlas resolution, y: whether the lod cascade was updated
 float4 TESR_ShadowForwardData; // x: 1 when the forward path is SUPPRESSED
-float4 TESR_ShadowTemporalData; // x: enabled, y: history weight
+float4 TESR_ShadowTemporalData; // x: deferred filter enabled, y: history weight, z: forward filter has a history to use
 float4 TESR_ShadowCameraDelta; // xyz: current camera position minus the history's
 float4 TESR_ShadowMoverData; // x: number of moving shadow casters in the two arrays below
 float4 TESR_ShadowMoverAxes[3]; // the plane facing the sun (two axes), then the direction to the sun
@@ -43,6 +43,7 @@ sampler2D TESR_NoiseSampler : register(s4) < string ResourceName = "Effects\blue
 sampler2D TESR_ShadowHistoryBuffer : register(s5) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 sampler2D TESR_ShadowDepthHistoryBuffer : register(s6) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 sampler2D TESR_ShadowNormalsHistoryBuffer : register(s7) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
+sampler2D TESR_ShadowForwardHistory : register(s8) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 
 #define SSS_STEPNUM 5
 
@@ -384,50 +385,40 @@ float MoverHistoryWeight(float3 position, float weight) {
 }
 
 
-// Reuse the previous frame's shadow term where it still describes the same surface.
+// How much of the history kept at this pixel's previous position may be used: 0 where the
+// reprojection finds nothing to reuse or a different surface, otherwise the history weight,
+// lowered around moving casters. Shared by both temporal passes. previousUV receives where to read
+// the history, moverLowered whether a moving caster brought the weight down.
 //
-// The sun turns about 3e-5 radians per frame, which moves a shadow by a few hundredths of a texel
-// - far below anything visible. What that motion does do is drag the shadow map across its own
-// sampling lattice, and every silhouette texel it crosses flips between the caster's depth and
-// the background's. So virtually all of the frame to frame change in the shadow term is
-// re-quantisation noise sitting on top of a signal that is, over any single frame, static.
-//
-// Averaging over frames removes the first and leaves the second: real shadow motion is slower
-// than the filter's response, so it passes through, while noise that is uncorrelated between
-// frames is divided down. Spatial filtering cannot make that distinction, which is why widening
-// it only ever traded shimmer for mush.
-float4 TemporalShadow(VSOUT IN) : COLOR0
+// tex2Dlod throughout: the forward pass calls this from inside a branch, where a gradient taking
+// sample is illegal (X3528). None of these buffers has mipmaps, so LOD 0 is the same read.
+float TemporalHistoryWeight(float2 uv, float3 worldPos, out float2 previousUV, out bool moverLowered)
 {
-    float4 current = tex2D(TESR_PointShadowBuffer, IN.UVCoord);
-
-	[branch]
-    if (TESR_ShadowTemporalData.x < 0.5f) return current;
-
-    float viewDepth;
-    float4 worldPos = reconstructWorldPosition(IN.UVCoord, viewDepth);
+    previousUV = uv;
+    moverLowered = false;
 
 	// World space here is relative to the current camera, so shift the point back into the frame
 	// the history belongs to before projecting it with that frame's matrix.
-    float4 previousClip = mul(float4(worldPos.xyz + TESR_ShadowCameraDelta.xyz, 1.0f), TESR_ShadowPreviousViewProj);
+    float4 previousClip = mul(float4(worldPos + TESR_ShadowCameraDelta.xyz, 1.0f), TESR_ShadowPreviousViewProj);
 
 	[branch]
-    if (previousClip.w <= 0.0f) return current; // behind the previous camera
+    if (previousClip.w <= 0.0f) return 0.0f; // behind the previous camera
 
-    float2 previousUV = previousClip.xy / previousClip.w;
+    previousUV = previousClip.xy / previousClip.w;
     previousUV = float2(previousUV.x * 0.5f + 0.5f, previousUV.y * -0.5f + 0.5f);
 
 	[branch]
     if (previousUV.x < 0.0f || previousUV.x > 1.0f || previousUV.y < 0.0f || previousUV.y > 1.0f)
-        return current; // off screen last frame, nothing to reuse
+        return 0.0f; // off screen last frame, nothing to reuse
 
 	// The reprojection finds where this point WAS on screen, not whether it was visible there.
 	// Where something else was in front of it the history belongs to that occluder, and reusing
 	// it smears the occluder's shadow along every disocclusion edge as the camera moves.
-    float previousDepth = tex2D(TESR_ShadowDepthHistoryBuffer, previousUV).x * farZ;
+    float previousDepth = tex2Dlod(TESR_ShadowDepthHistoryBuffer, float4(previousUV, 0.0f, 0.0f)).x * farZ;
     float tolerance = max(0.02f * previousClip.w, 5.0f);
 
 	[branch]
-    if (abs(previousClip.w - previousDepth) > tolerance) return current;
+    if (abs(previousClip.w - previousDepth) > tolerance) return 0.0f;
 
 	// Depth says the reprojected pixel is the right DISTANCE away, not that it is the same
 	// surface. An object moving across the view while holding its distance passes that test with
@@ -437,8 +428,8 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
 	//
 	// Both normals are view space, so each has to be lifted into world space with the view matrix
 	// of the frame it came from, or simply turning the camera would look like the surface changing.
-    float3 currentNormalWS = mul(TESR_ViewTransform, float4(tex2D(TESR_NormalsBuffer, IN.UVCoord).xyz * 2.0f - 1.0f, 1.0f)).xyz;
-    float3 historyNormalWS = mul(TESR_ShadowPreviousViewTransform, float4(tex2D(TESR_ShadowNormalsHistoryBuffer, previousUV).xyz * 2.0f - 1.0f, 1.0f)).xyz;
+    float3 currentNormalWS = mul(TESR_ViewTransform, float4(tex2Dlod(TESR_NormalsBuffer, float4(uv, 0.0f, 0.0f)).xyz * 2.0f - 1.0f, 1.0f)).xyz;
+    float3 historyNormalWS = mul(TESR_ShadowPreviousViewTransform, float4(tex2Dlod(TESR_ShadowNormalsHistoryBuffer, float4(previousUV, 0.0f, 0.0f)).xyz * 2.0f - 1.0f, 1.0f)).xyz;
 
 	// Not a tunable, and not an arbitrary constant either. Both directions were measured, and it
 	// sits where it does for margin rather than for being optimal here.
@@ -466,9 +457,7 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
 
 	[branch]
     if (dot(normalize(currentNormalWS), normalize(historyNormalWS)) < kSameSurfaceDot)
-        return current; // a different surface was here, whatever its depth said
-
-    float history = tex2D(TESR_ShadowHistoryBuffer, previousUV).x;
+        return 0.0f; // a different surface was here, whatever its depth said
 
 	// Reprojection only accounts for the CAMERA moving, so anything that moves by itself is found
 	// at the wrong place, and the depth test above cannot catch it: the viewmodel bobs at a nearly
@@ -487,11 +476,73 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
 	// Shadow cast by something moving is the case neither test above can see - the surface it
 	// falls on did not change. See MoverHistoryWeight.
 	[branch]
-    if (TESR_ShadowMoverData.x > 0.0f)
-        historyWeight = MoverHistoryWeight(worldPos.xyz, historyWeight);
+    if (TESR_ShadowMoverData.x > 0.0f) {
+        float moverWeight = MoverHistoryWeight(worldPos, historyWeight);
+        moverLowered = moverWeight < historyWeight * 0.999f;
+        historyWeight = moverWeight;
+    }
 
-    current.r = lerp(current.r, history, historyWeight);
+    return historyWeight;
+}
+
+
+// Reuse the previous frame's shadow term where it still describes the same surface.
+//
+// The sun turns about 3e-5 radians per frame, which moves a shadow by a few hundredths of a texel
+// - far below anything visible. What that motion does do is drag the shadow map across its own
+// sampling lattice, and every silhouette texel it crosses flips between the caster's depth and
+// the background's. So virtually all of the frame to frame change in the shadow term is
+// re-quantisation noise sitting on top of a signal that is, over any single frame, static.
+//
+// Averaging over frames removes the first and leaves the second: real shadow motion is slower
+// than the filter's response, so it passes through, while noise that is uncorrelated between
+// frames is divided down. Spatial filtering cannot make that distinction, which is why widening
+// it only ever traded shimmer for mush.
+float4 TemporalShadow(VSOUT IN) : COLOR0
+{
+    float4 current = tex2D(TESR_PointShadowBuffer, IN.UVCoord);
+
+	[branch]
+    if (TESR_ShadowTemporalData.x < 0.5f) return current;
+
+    float viewDepth;
+    float4 worldPos = reconstructWorldPosition(IN.UVCoord, viewDepth);
+
+    float2 previousUV;
+    bool moverLowered;
+    float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, previousUV, moverLowered);
+
+    float history = tex2Dlod(TESR_ShadowHistoryBuffer, float4(previousUV, 0.0f, 0.0f)).x;
+    current.r = lerp(current.r, history, weight);
     return current;
+}
+
+
+// The same filter for the forward path, which applies the cascades inside the object shaders and
+// so never lets them reach the buffer TemporalShadow filters. This pass evaluates the cascades in
+// screen space after the scene, filters them over time exactly as above, and writes the result
+// with the view depth it was found at into TESR_ShadowForwardBuffer; ShadowsExteriorEffect then
+// copies it to TESR_ShadowForwardHistory. Next frame the forward lookup (GetSunShadow in
+// Shaders/Includes/Shadow.hlsl) reprojects into it and uses it wherever it is the same surface.
+//
+// The depth goes out negative where a moving caster lowered the weight: there the forward lookup
+// runs itself rather than take a value a frame behind the moving shadow.
+float4 ForwardTemporalShadow(VSOUT IN) : COLOR0
+{
+    float viewDepth;
+    float4 worldPos = reconstructWorldPosition(IN.UVCoord, viewDepth);
+    float3 normal = GetWorldNormal(IN.UVCoord);
+    float shadow = GetLightAmount(worldPos, normal);
+
+    bool moverLowered = false;
+	[branch]
+    if (TESR_ShadowTemporalData.z > 0.5f) {
+        float2 previousUV;
+        float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, previousUV, moverLowered);
+        shadow = lerp(shadow, tex2Dlod(TESR_ShadowForwardHistory, float4(previousUV, 0.0f, 0.0f)).x, weight);
+    }
+
+    return float4(shadow, moverLowered ? -viewDepth : viewDepth, 0.0f, 1.0f);
 }
 
 technique {
@@ -521,4 +572,13 @@ technique {
         PixelShader = compile ps_3_0 TemporalShadow();
     }
 
+}
+
+// Technique 1, rendered into TESR_ShadowForwardBuffer only while the forward path runs with the
+// temporal filter on.
+technique {
+    pass {
+        VertexShader = compile vs_3_0 FrameVS();
+        PixelShader = compile ps_3_0 ForwardTemporalShadow();
+    }
 }

@@ -804,8 +804,7 @@ void ShadowManager::RenderShadowMaps() {
 	D3DXVECTOR3 SunDir = Shadows->CalculateSmoothedSunDir();
 
 	Movers.clear();
-	bool trackMovers = Shadows->Settings.ShadowMaps.TemporalFilter && Shadows->Settings.ShadowMaps.TemporalMovers
-		&& !Shadows->ForwardShadowsRunning();
+	bool trackMovers = Shadows->Settings.ShadowMaps.TemporalFilter && Shadows->Settings.ShadowMaps.TemporalMovers;
 
 	if (isExterior && (ExteriorEnabled || TheShaderManager->orthoRequired)) {
 

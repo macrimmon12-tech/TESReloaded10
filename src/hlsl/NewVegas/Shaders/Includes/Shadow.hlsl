@@ -51,6 +51,12 @@ float4 TESR_SmoothedSunDir    : register(c131);
 float4 TESR_ShadowBlur        : register(c132); // x: 1 / atlas resolution, y: lod cascade updated
 float4 TESR_ShadowForwardData : register(c133); // x: 1 when the forward path is SUPPRESSED
 
+// Temporal reuse. c146-c151: past the sky harmonics' c137-c145, and no pixel shader in the tree
+// uses anything above c145.
+float4 TESR_ShadowTemporalData             : register(c146); // z: 1 when last frame's filtered forward term may be read
+float4 TESR_ShadowCameraDelta              : register(c147); // xyz: current camera position minus the history's
+row_major float4x4 TESR_ShadowPreviousViewProj : register(c148);
+
 // Object templates top out at s7. Override BEFORE including for wider sampler arrays --
 // TerrainTemplate's NormalMap[7] spans s7-s13.
 #ifndef SHADOW_ATLAS_SAMPLER_REG
@@ -61,6 +67,17 @@ float4 TESR_ShadowForwardData : register(c133); // x: 1 when the forward path is
 // finds "register ( sN )" and reads only to the end of that line. Split, it silently falls
 // back to TextureRecord's POINT/WRAP defaults. Game shaders only; Effects parse their own.
 sampler2D TESR_ShadowAtlas : register(SHADOW_ATLAS_SAMPLER_REG) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
+
+// Last frame's temporally filtered cascade term, from ForwardTemporalShadow in
+// Effects/SunShadows.fx.hlsl: x the visibility, y the view depth it was computed at (negative
+// where a moving caster had the filter's weight lowered). Linear, not POINT: the point-light
+// permutations define POINT as an empty macro, which turns the token into a syntax error. Where
+// filtering blends y across a depth edge the 2% depth test fails and the pixel does its own lookup.
+// Next to the atlas - s10, or s15 where TerrainTemplate moves the atlas to s14.
+#ifndef SHADOW_HISTORY_SAMPLER_REG
+    #define SHADOW_HISTORY_SAMPLER_REG s10
+#endif
+sampler2D TESR_ShadowForwardHistory : register(SHADOW_HISTORY_SAMPLER_REG) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 
 // Atlas encoding, compile-time: ps_3_0 would flatten a runtime branch across all three
 // variants. Must match [_Shaders.ShadowsExteriors.ShadowMaps] Mode.
@@ -229,6 +246,14 @@ float3 GetShadowGeometricNormal(float3 worldPos) {
     return n * sign(dot(n, -worldPos));
 }
 
+// The last steps of every sun shadow value, whichever way it was found.
+float FinishSunShadow(float shadow) {
+    shadow = saturate(shadow);
+
+    // Fade out as the sun approaches the horizon, matching SunShadows.fx.
+    return lerp(shadow, 1.0f, saturate(TESR_ShadowFade.x));
+}
+
 // ---------------------------------------------------------------------------
 // 1.0 in full light, towards 0 in shadow. Multiply the SUN term by it, before ambient.
 // ---------------------------------------------------------------------------
@@ -249,6 +274,26 @@ float GetSunShadow(float3 worldPos, float3 worldNormal) {
 
     // ShadowMap.pso's channel layout differs per Mode. Fail unshadowed on a mismatch.
     if (TESR_ShadowFormatData.x != (float)SHADOW_FIXED_MODE) return 1.0f;
+
+    // Temporal reuse. The lookup below re-quantises every shadow edge each frame as the sun drags
+    // the map across its own texels, and a per object shader can filter that over time only by
+    // reading a history - it cannot write one. So the deferred pass evaluates the same cascades in
+    // screen space after the scene, filters them the way the deferred path does, and keeps the
+    // result with the view depth it was found at. Here the point is reprojected into that frame:
+    // where the depth there is this point's depth it is the surface that was filtered, and its
+    // value is used. Anywhere else - disoccluded, off screen, a moving caster's shadow, a different
+    // surface in front - the lookup below runs as before.
+    [branch] if (TESR_ShadowTemporalData.z > 0.0f) {
+        float4 previousClip = mul(float4(worldPos + TESR_ShadowCameraDelta.xyz, 1.0f), TESR_ShadowPreviousViewProj);
+        float2 previousUV = previousClip.xy / max(previousClip.w, 1e-4f) * float2(0.5f, -0.5f) + 0.5f;
+        [branch] if (previousClip.w > 0.0f && all(previousUV == saturate(previousUV))) {
+            float2 history = tex2Dlod(TESR_ShadowForwardHistory, float4(previousUV, 0.0f, 0.0f)).rg;
+            // Negative y marks where a moving caster lowered the filter's weight: last frame's
+            // value there is a frame behind the shadow, and the lookup below is not.
+            [branch] if (history.y > 0.0f && abs(previousClip.w - history.y) <= max(0.02f * previousClip.w, 5.0f))
+                return FinishSunShadow(history.x);
+        }
+    }
 
     // Push the sample along the normal, scaled by how grazing the sun is.
     float NdotL = dot(worldNormal, TESR_SmoothedSunDir.xyz);
@@ -326,10 +371,5 @@ float GetSunShadow(float3 worldPos, float3 worldNormal) {
 #undef SHADOW_TAP_FAR
 #undef SHADOW_TAP_LOD
 
-    shadow = saturate(shadow);
-
-    // Fade out as the sun approaches the horizon, matching SunShadows.fx.
-    shadow = lerp(shadow, 1.0f, saturate(TESR_ShadowFade.x));
-
-    return shadow;
+    return FinishSunShadow(shadow);
 }

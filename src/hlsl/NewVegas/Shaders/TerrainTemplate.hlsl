@@ -24,6 +24,7 @@
 // BaseMap[7] holds s0-s6 and NormalMap[7] holds s7-s13, so the atlas cannot use the s9
 // default. s14/s15 are the only free sampler slots in ps_3_0 here.
 #define SHADOW_ATLAS_SAMPLER_REG s14
+#define SHADOW_HISTORY_SAMPLER_REG s15
 #include "includes/Shadow.hlsl"
 
 
