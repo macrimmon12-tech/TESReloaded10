@@ -453,6 +453,11 @@ PS_OUTPUT main(PS_INPUT IN)
         normal.xyz = normalize(expand(normal.xyz));
 
         float roughness = getRoughness(normal.a);
+
+        // offsetUV, not IN.uv: the frame has to match the parallax-shifted texel the normal came
+        // from. Top level, outside dynamic flow control -- CotangentFrame takes gradients.
+        float3 mappedNormal = WorldNormalFromMap(normal.xyz, sunShadowNormal,
+                                                 IN.shadowWorldPos.xyz, offsetUV.xy);
     
         #if !defined(DIFFUSE) && !defined(POINT)
             if (TESR_ParallaxData.y)
@@ -482,7 +487,8 @@ PS_OUTPUT main(PS_INPUT IN)
     
         #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
             if (TESR_ParallaxData.y)
-                lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, sunShadowNormal, shadowWorldPosValid);
+                lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, sunShadowNormal,
+                                               shadowWorldPosValid, mappedNormal);
             else
                 lighting += baseColor.rgb * AmbientColor.rgb;
         #endif
