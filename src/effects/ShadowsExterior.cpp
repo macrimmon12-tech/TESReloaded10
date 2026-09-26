@@ -320,11 +320,14 @@ void ShadowsExteriorEffect::UpdateSettings() {
 	// (nothing ever sets ShaderManager::EffectReloadQueued), so the macro is frozen at whatever
 	// it was when the shader was first compiled.
 	Constants.ForwardData.x = Settings.Exteriors.ForwardShadows ? 0.0f : 1.0f;
-	Constants.ForwardData.y = 0.0f;
 	Constants.ForwardData.z = 0.0f;
 	Constants.ForwardData.w = 0.0f;
 	Settings.Exteriors.Quality = std::clamp(TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Quality"), 0, 4);
 	Settings.Exteriors.Darkness = TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "Darkness");
+	// y: Darkness, for GetSunShadow. Not TESR_ShadowData.y, which holds it for the deferred pass:
+	// RenderPass rewrites Data.x and .y for every object it draws into the shadow maps (geometry
+	// type, alpha control), so while the world draws, Data.y is the last such object's alpha flag.
+	Constants.ForwardData.y = Settings.Exteriors.Darkness;
 	Settings.Exteriors.NightMinDarkness = TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "NightMinDarkness");
 	Settings.Exteriors.UsePointShadowsDay = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "UsePointShadowsDay");
 	Settings.Exteriors.UsePointShadowsNight = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "UsePointShadowsNight");

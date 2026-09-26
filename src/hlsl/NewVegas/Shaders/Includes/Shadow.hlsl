@@ -44,12 +44,14 @@ float4 TESR_ShadowMiddleCenter : register(c125);
 float4 TESR_ShadowFarCenter    : register(c126);
 float4 TESR_ShadowLodCenter    : register(c127);
 
-float4 TESR_ShadowData        : register(c128); // y: darkness (z is INTERIOR cube texel size only)
+// Not read by the game shaders. RenderPass rewrites its x and y for every object it draws into the
+// shadow maps, so while the world draws they describe the last one of those, not the settings.
+float4 TESR_ShadowData        : register(c128);
 float4 TESR_ShadowFormatData  : register(c129); // x: mode (0 VSM, 1 EVSM2, 2 EVSM4), y: format bits
 float4 TESR_ShadowFade        : register(c130); // x: sunrise/sunset fade, y: shadow maps active
 float4 TESR_SmoothedSunDir    : register(c131);
 float4 TESR_ShadowBlur        : register(c132); // x: 1 / atlas resolution, y: lod cascade updated
-float4 TESR_ShadowForwardData : register(c133); // x: 1 when the forward path is SUPPRESSED
+float4 TESR_ShadowForwardData : register(c133); // x: 1 when the forward path is SUPPRESSED, y: Darkness
 
 // Object templates top out at s7. Override BEFORE including for wider sampler arrays --
 // TerrainTemplate's NormalMap[7] spans s7-s13.
@@ -330,6 +332,12 @@ float GetSunShadow(float3 worldPos, float3 worldNormal) {
 
     // Fade out as the sun approaches the horizon, matching SunShadows.fx.
     shadow = lerp(shadow, 1.0f, saturate(TESR_ShadowFade.x));
+
+    // [ShadowsExteriors.Main] Darkness: how much of the sun a full shadow takes away. 1 takes all
+    // of it, which is the physical result; lower lets the rest back through. Only the deferred
+    // composite read it before, so it stopped doing anything once this path took the cascades.
+    // From TESR_ShadowForwardData.y, not TESR_ShadowData.y: see the note on c128 above.
+    shadow = lerp(1.0f - saturate(TESR_ShadowForwardData.y), 1.0f, shadow);
 
     return shadow;
 }
