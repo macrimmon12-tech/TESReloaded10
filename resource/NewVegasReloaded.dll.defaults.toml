@@ -557,7 +557,7 @@ Enabled = false                      # Blur in direction of the camera when turn
 [_Shaders.PBR.Main]
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
-AmbientScale = 0.5                   # Ambient lighting scale.
+AmbientScale = 1.0                   # Ambient lighting scale.
 SkylightingScale = 0.5               # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingMode = 0                  # 0 spherical harmonics, 1 directional sample. Recompiles shaders.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
@@ -567,7 +567,7 @@ Saturation = 1.0                     # Color saturation.
 [_Shaders.PBR.Rain]
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
-AmbientScale = 0.5                   # Ambient lighting scale.
+AmbientScale = 1.0                   # Ambient lighting scale.
 SkylightingScale = 0.5               # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                  # Directional and point light scale.
@@ -576,7 +576,7 @@ Saturation = 1.0                     # Color saturation.
 [_Shaders.PBR.Night]
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
-AmbientScale = 0.5                   # Ambient lighting scale.
+AmbientScale = 1.0                   # Ambient lighting scale.
 SkylightingScale = 0.5               # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                  # Directional and point light scale.
@@ -585,7 +585,7 @@ Saturation = 1.0                     # Color saturation.
 [_Shaders.PBR.NightRain]
 Roughness = 1.0                      # Roughness scale.
 Metallicness = 0.0                   # Metalicness scale - unused, no metalic maps yet.
-AmbientScale = 0.5                   # Ambient lighting scale.
+AmbientScale = 1.0                   # Ambient lighting scale.
 SkylightingScale = 0.5               # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                  # Directional and point light scale.
@@ -871,7 +871,7 @@ Enabled = false                      # Shader that boosts a few lighting effects
 UsePBR = true                       # Use PBR lighting, disable to use vanilla.
 Roughness = 1.0                     # Scale texture roughness, higher roughness decreases specular.
 Metallicness = 0.0                  # Add metallicness.
-AmbientScale = 0.5                  # Scale ambient lighting.
+AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 0.5              # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 0.725               # Scale non-ambient lighting (sun or spotlights).
@@ -880,7 +880,7 @@ TerrainSaturation = 1.0             # Control terrain saturation.
 [_Shaders.Terrain.Rain]
 Roughness = 0.7                     # Scale texture roughness, higher roughness decreases specular.
 Metallicness = 0.0                  # Add metallicness.
-AmbientScale = 0.5                  # Scale ambient lighting.
+AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 0.5              # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
@@ -889,7 +889,7 @@ TerrainSaturation = 1.0             # Control terrain saturation.
 [_Shaders.Terrain.Night]
 Roughness = 1.0                     # Scale texture roughness, higher roughness decreases specular.
 Metallicness = 0.0                  # Add metallicness.
-AmbientScale = 0.5                  # Scale ambient lighting.
+AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 0.5              # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
@@ -898,7 +898,7 @@ TerrainSaturation = 1.0             # Control terrain saturation.
 [_Shaders.Terrain.NightRain]
 Roughness = 0.6                     # Scale texture roughness, higher roughness decreases specular.
 Metallicness = 0.0                  # Add metallicness.
-AmbientScale = 0.5                  # Scale ambient lighting.
+AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 0.5              # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
