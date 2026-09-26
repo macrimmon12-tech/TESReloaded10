@@ -115,6 +115,11 @@ float3 SkyIrradianceMeanLinear() {
     return 0.5f * max(GetSkyRadiance(float3(0.0f, 0.0f, 1.0f)), 0.0f);
 }
 
+// This mode evaluates the sky from its colour constants directly, so it is always available.
+float SkyAmbientAvailable() {
+    return 1.0f;
+}
+
 #else
 
 // ---------------------------------------------------------------------------
@@ -160,6 +165,12 @@ float3 SkyIrradianceMeanLinear() {
     return TESR_SkyIrradiance[0].rgb;
 }
 
+// Sky.cpp sets [0].w to 1 once it has computed the coefficients, which it only does while the
+// Sky shader is enabled. Until then they hold nothing a surface should be lit by.
+float SkyAmbientAvailable() {
+    return saturate(TESR_SkyIrradiance[0].w);
+}
+
 // Encoded. max() first because an order-2 SH fit can ring slightly negative, and sqrt of a
 // negative is NaN.
 float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
@@ -195,7 +206,7 @@ float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
 // ambient would let two touching surfaces disagree about what colour the light is.
 //
 // strength: [Shaders.PBR.*] / [Shaders.Terrain.*] SkylightingScale, 0 to 1. 0 is the flat
-// weather ambient exactly.
+// weather ambient exactly, and so is any strength while the sky has not been computed.
 // ---------------------------------------------------------------------------
 float3 SkyAmbientRedistribute(float3 flatAmbient, float3 worldNormal, float directionality, float strength, float valid) {
     const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
@@ -209,7 +220,7 @@ float3 SkyAmbientRedistribute(float3 flatAmbient, float3 worldNormal, float dire
         : meanLin;
 
     float rescale = dot(groundLin, lumaWeights) / max(dot(meanLin, lumaWeights), 1e-6f);
-    return lerp(flatAmbient, sqrt(max(dirLin * rescale, 0.0f)), saturate(strength));
+    return lerp(flatAmbient, sqrt(max(dirLin * rescale, 0.0f)), saturate(strength) * SkyAmbientAvailable());
 }
 
 #endif
