@@ -3,7 +3,9 @@
 class SkyShaders : public ShaderCollection
 {
 public:
-	SkyShaders() : ShaderCollection("Sky") {};
+	// Zeroed, not left as whatever the allocation held: the coefficients are only computed while
+	// the Sky shader is enabled, and Irradiance[0].w is the flag the shaders read to know that.
+	SkyShaders() : ShaderCollection("Sky") { memset(&Constants, 0, sizeof(Constants)); };
 
 	struct SettingsStruct{
 		float SkyMultiplierDay;

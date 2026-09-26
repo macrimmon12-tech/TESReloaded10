@@ -129,6 +129,11 @@ void SkyShaders::UpdateConstants() {
 		D3DXVECTOR3 c = sh[i] * (band[i] * basis[i]);
 		Constants.Irradiance[i] = D3DXVECTOR4(c.x, c.y, c.z, 0.0f);
 	}
+
+	// The coefficients exist. The skylight redistributes the ambient, so zero coefficients would
+	// read as a black sky and hand every upward facing surface the ground's light alone; while
+	// this is 0 - the Sky shader disabled - the lighting shaders keep the flat ambient instead.
+	Constants.Irradiance[0].w = 1.0f;
 }
 
 void SkyShaders::UpdateSettings() {
