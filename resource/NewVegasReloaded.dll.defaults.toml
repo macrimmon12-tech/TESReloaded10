@@ -215,7 +215,7 @@ VignetteRadius = 0.6                    # Distance to the center for the start o
 LetterBoxDepth = 0.0                    # Depth of the letter box bars
 
 [_Shaders.Cinema.Status]
-Enabled = true                           # A collection of tweaks to give a more cinematic post processing feel.
+Enabled = false                          # A collection of tweaks to give a more cinematic post processing feel. Off by default: it changes the image (grain, vignette, chromatic aberration).
 
 [_Shaders.Coloring.Default]
 BaseGamma = 1.6
@@ -247,7 +247,7 @@ PreTonemapping  = false                # Apply LUT before game tonemapping (HDR 
 HDRCompat       = true                 # Normalize HDR input to LUT range using max-channel scale. Disable if using a converted float16 DDS HDR LUT.
 
 [_Shaders.LUT.Status]
-Enabled = true                         # Applies a color lookup table. Ships with a neutral LUT so the default is a no-op until you swap in your own.
+Enabled = false                        # Applies a color lookup table. Off by default: the shipped LUT is neutral, so enabling it without your own LUT only costs a full-screen pass.
 
 [_Shaders.Debug.Status]
 Enabled = false                        # Displays debug information: depth, normal and shadow buffers, colors of the weather/fog and lights positions.
