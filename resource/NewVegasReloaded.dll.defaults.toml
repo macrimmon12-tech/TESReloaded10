@@ -561,6 +561,7 @@ AmbientScale = 1.0                   # Ambient lighting scale.
 SkylightingScale = 0.5               # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingMode = 0                  # 0 spherical harmonics, 1 directional sample. Recompiles shaders.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 0.725                # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -570,6 +571,7 @@ Metallicness = 0.0                   # Metalicness scale - unused, no metalic ma
 AmbientScale = 1.0                   # Ambient lighting scale.
 SkylightingScale = 0.5               # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -579,6 +581,7 @@ Metallicness = 0.0                   # Metalicness scale - unused, no metalic ma
 AmbientScale = 1.0                   # Ambient lighting scale.
 SkylightingScale = 0.5               # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -588,6 +591,7 @@ Metallicness = 0.0                   # Metalicness scale - unused, no metalic ma
 AmbientScale = 1.0                   # Ambient lighting scale.
 SkylightingScale = 0.5               # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -597,6 +601,7 @@ Metallicness = 0.0                   # Metalicness scale - unused, no metalic ma
 AmbientScale = 0.5                   # Ambient lighting scale.
 SkylightingScale = 0.0               # [0-1] Off indoors: the coefficients describe the exterior sky.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 1.0                  # Directional and point light scale.
 Saturation = 1.0                     # Color saturation.
 
@@ -877,6 +882,7 @@ Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 0.5              # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 0.725               # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -886,6 +892,7 @@ Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 0.5              # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -895,6 +902,7 @@ Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 0.5              # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 
@@ -904,6 +912,7 @@ Metallicness = 0.0                  # Add metallicness.
 AmbientScale = 1.0                  # Scale ambient lighting.
 SkylightingScale = 0.5              # [0-1] How far the ambient takes the sky's direction and colour. Redistributes, never brightens: AmbientScale sets the brightness. 0 is the flat ambient.
 SkylightingDirectionality = 0.6      # Mode 1 only: 0 samples straight up, 1 along the normal.
+SkylightingNormalStrength = 1.0      # How far the sky's ambient follows the normal maps. 0 uses the flat geometric normal, which leaves surfaces in shade without their surface detail.
 LightingScale = 1.0                 # Scale non-ambient lighting (sun or spotlights).
 TerrainSaturation = 1.0             # Control terrain saturation.
 

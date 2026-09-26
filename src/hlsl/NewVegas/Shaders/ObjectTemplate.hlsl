@@ -654,8 +654,12 @@ PS_OUTPUT main(PS_INPUT IN) {
     #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
         // Reuses shadowGeometricNormal computed above -- see the comment there. Always in scope
         // here: POINT implies ONLY_SPECULAR, so !ONLY_SPECULAR implies !POINT.
+        // Top level: CotangentFrame takes gradients.
+        float3 mappedNormal = WorldNormalFromMap(normal.xyz, shadowGeometricNormal,
+                                                 IN.shadowWorldPos.xyz, IN.uv.xy);
         lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, shadowGeometricNormal,
-                                       SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
+                                       SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f,
+                                       mappedNormal);
     #endif
 
     // Other light sources. Same object-space attenuation fix as light0 above.
@@ -857,8 +861,9 @@ PS_OUTPUT main(PS_INPUT IN) {
     
     // ddx/ddy must stay at pixel-shader top level.
     float3 ambNormal = GetShadowGeometricNormal(SHADOW_WP_LOAD(IN));
+    float3 mappedNormal = WorldNormalFromMap(normal.xyz, ambNormal, SHADOW_WP_LOAD(IN), IN.uv.xy);
     lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, ambNormal,
-                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f);
+                                   SHADOW_WP_VALID(IN) ? 1.0f : 0.0f, mappedNormal);
 
     // TODO: Vanilla attenuates the full specular term by IN.lPosition.w for some reason. Is this a problem?
     float3 finalColor = lighting;

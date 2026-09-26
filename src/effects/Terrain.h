@@ -51,6 +51,7 @@ public:
 		float Saturation;
 		float SkylightingScale;
 		float SkylightingDirectionality;
+		float SkylightingNormalStrength;
 	};
 	struct ParallaxSettingsStruct {
 		bool Enabled;

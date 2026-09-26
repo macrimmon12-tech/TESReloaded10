@@ -128,13 +128,24 @@ float4 TESR_DebugVar : register(c135);
 // average over orientations, which stays AmbientScale's.
 #define SKY_AMBIENT_STRENGTH  (TESR_PBRExtraData.y)
 
+// [Shaders.PBR.*] SkylightingNormalStrength: how far the sky's irradiance follows the normal
+// map. 1 is the shading normal, 0 the flat geometric one.
+#define SKY_AMBIENT_NORMAL    (TESR_PBRExtraData.w)
+
 float3 getAmbientLighting(float3 ambient, float3 albedo) {
     return ambient * TESR_PBRData.w * albedo;
 }
 
-float3 getAmbientLighting(float3 ambient, float3 albedo, float3 worldNormal, float worldNormalValid) {
+float3 getAmbientLighting(float3 ambient, float3 albedo, float3 worldNormal, float worldNormalValid,
+                          float3 mappedNormal) {
     float3 flatAmbient = ambient * TESR_PBRData.w;
 
+    // The sky is an environment light, so its irradiance belongs at the shading normal -- which is
+    // what the direct sun and the point lights already use, through tangent-space N.L. At the
+    // geometric normal it left surfaces flat in shade, where the ambient is the whole of the
+    // lighting.
+    float3 diffuseNormal = BlendShadingNormal(worldNormal, mappedNormal, SKY_AMBIENT_NORMAL);
+
     // worldNormalValid is 0 under a vanilla VS, where the carried world position is undefined.
-    return SkyAmbientRedistribute(flatAmbient, worldNormal, TESR_PBRExtraData.z, SKY_AMBIENT_STRENGTH, worldNormalValid) * albedo;
+    return SkyAmbientRedistribute(flatAmbient, diffuseNormal, TESR_PBRExtraData.z, SKY_AMBIENT_STRENGTH, worldNormalValid) * albedo;
 }
