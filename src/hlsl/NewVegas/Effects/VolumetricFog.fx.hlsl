@@ -330,12 +330,15 @@ float4 ScreenCoordToTexCoord(float4 coord){
 	return coord;
 }
 
-float GetFogShadowValue(float4x4 lightTransform, float4 coord, float offsetX, float offsetY, float bias) {
+// A point's position in one cascade: light space, folded into that cascade's atlas quadrant.
+float4 GetFogCascadeCoord(float4x4 lightTransform, float4 coord, float2 quadrant) {
 	float4 LightSpaceCoord = ScreenCoordToTexCoord(mul(coord, lightTransform));
-	LightSpaceCoord.xy *= 0.5;
-	LightSpaceCoord.x += offsetX;
-	LightSpaceCoord.y += offsetY;
+	LightSpaceCoord.xy = LightSpaceCoord.xy * 0.5 + quadrant;
+	return LightSpaceCoord;
+}
 
+// The fetch and the moments resolve for a coordinate from GetFogCascadeCoord.
+float ResolveFogCascade(float4 LightSpaceCoord, float bias) {
 	float4 moments = tex2Dlod(TESR_ShadowAtlas, float4(LightSpaceCoord.xy, 0.0f, 0.0f));
 
 	float Mode = TESR_ShadowFormatData.x;
@@ -361,13 +364,6 @@ float GetFogShadowVisibility(float4 positionWS, float3 normal) {
 	float bias = (TESR_ShadowFormatData.x == 0.0f ? 0.00001f : 0.01f) * (1.0f + offsetScale);
 	const float blend = 0.9f;
 
-	float4 shadows = {
-		GetFogShadowValue(TESR_ShadowCameraToLightTransformNear,   float4(positionWS.xyz + offsetDistance.x * normal, 1.0f), 0.0, 0.0, bias),
-		GetFogShadowValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS.xyz + offsetDistance.y * normal, 1.0f), 0.5, 0.0, bias),
-		GetFogShadowValue(TESR_ShadowCameraToLightTransformFar,    float4(positionWS.xyz + offsetDistance.z * normal, 1.0f), 0.0, 0.5, bias),
-		GetFogShadowValue(TESR_ShadowCameraToLightTransformLod,    float4(positionWS.xyz + offsetDistance.w * normal, 1.0f), 0.5, 0.5, bias),
-	};
-
 	float4 distances = {
 		length(positionWS.xyz - TESR_ShadowNearCenter.xyz),
 		length(positionWS.xyz - TESR_ShadowMiddleCenter.xyz),
@@ -375,23 +371,37 @@ float GetFogShadowVisibility(float4 positionWS, float3 normal) {
 		length(positionWS.xyz - TESR_ShadowLodCenter.xyz),
 	};
 
-	if (distances.x < TESR_ShadowNearCenter.w) {
-		if (distances.x < TESR_ShadowNearCenter.w * blend) return shadows.x;
-		return lerp(shadows.x, shadows.y, smoothstep(TESR_ShadowNearCenter.w * blend, TESR_ShadowNearCenter.w, distances.x));
+	// The cascade the point lands in - the first whose radius contains it - and the next one out,
+	// which cross-fades in over the outer 10%. Past the Lod cascade that is full light.
+	float4 inside = (distances < radii);
+	float4 pick = inside * float4(1.0f, 1.0f - inside.x, (1.0f - inside.x) * (1.0f - inside.y),
+	                              (1.0f - inside.x) * (1.0f - inside.y) * (1.0f - inside.z));
+	float4 next = float4(0.0f, pick.x, pick.y, pick.z);
+	float radius = dot(radii, pick);
+	float fade = smoothstep(radius * blend, radius, dot(distances, pick));
+
+	// All four positions are transformed, but only the chosen cascade is fetched and resolved:
+	// once per pixel, twice across the blend band, where evaluating all four and keeping one cost
+	// four fetches and four resolves on every pixel. Legal under a branch because the fetch uses
+	// tex2Dlod.
+	float visibility = 1.0f;
+	[branch] if (dot(pick, 1.0f) > 0.0f) {
+		float4 coordNear   = GetFogCascadeCoord(TESR_ShadowCameraToLightTransformNear,   float4(positionWS.xyz + offsetDistance.x * normal, 1.0f), float2(0.0f, 0.0f));
+		float4 coordMiddle = GetFogCascadeCoord(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS.xyz + offsetDistance.y * normal, 1.0f), float2(0.5f, 0.0f));
+		float4 coordFar    = GetFogCascadeCoord(TESR_ShadowCameraToLightTransformFar,    float4(positionWS.xyz + offsetDistance.z * normal, 1.0f), float2(0.0f, 0.5f));
+		float4 coordLod    = GetFogCascadeCoord(TESR_ShadowCameraToLightTransformLod,    float4(positionWS.xyz + offsetDistance.w * normal, 1.0f), float2(0.5f, 0.5f));
+
+		visibility = ResolveFogCascade(coordNear * pick.x + coordMiddle * pick.y + coordFar * pick.z + coordLod * pick.w, bias);
+
+		[branch] if (fade > 0.0f) {
+			float nextVisibility = 1.0f;
+			[branch] if (pick.w == 0.0f)
+				nextVisibility = ResolveFogCascade(coordNear * next.x + coordMiddle * next.y + coordFar * next.z + coordLod * next.w, bias);
+			visibility = lerp(visibility, nextVisibility, fade);
+		}
 	}
-	else if (distances.y < TESR_ShadowMiddleCenter.w) {
-		if (distances.y < TESR_ShadowMiddleCenter.w * blend) return shadows.y;
-		return lerp(shadows.y, shadows.z, smoothstep(TESR_ShadowMiddleCenter.w * blend, TESR_ShadowMiddleCenter.w, distances.y));
-	}
-	else if (distances.z < TESR_ShadowFarCenter.w) {
-		if (distances.z < TESR_ShadowFarCenter.w * blend) return shadows.z;
-		return lerp(shadows.z, shadows.w, smoothstep(TESR_ShadowFarCenter.w * blend, TESR_ShadowFarCenter.w, distances.z));
-	}
-	else if (distances.w < TESR_ShadowLodCenter.w) {
-		if (distances.w < TESR_ShadowLodCenter.w * blend) return shadows.w;
-		return lerp(shadows.w, 1.0f, smoothstep(TESR_ShadowLodCenter.w * blend, TESR_ShadowLodCenter.w, distances.w));
-	}
-	return 1.0f;
+
+	return visibility;
 }
 
 

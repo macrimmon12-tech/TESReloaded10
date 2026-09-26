@@ -118,15 +118,16 @@ float4 SampleShadowMoments(float2 uv, float2 quadrantOffset) {
 #endif
 }
 
-float GetLightAmountValue(float4x4 lightTransform, float4 coord, float offsetX, float offsetY, float bias, float bleedReduction) {
+// A point's position in one cascade: light space, folded into that cascade's atlas quadrant.
+float4 GetCascadeCoord(float4x4 lightTransform, float4 coord, float2 quadrant) {
     float4 LightSpaceCoord = ScreenCoordToTexCoord(mul(coord, lightTransform));
+    LightSpaceCoord.xy = LightSpaceCoord.xy * 0.5 + quadrant;
+    return LightSpaceCoord;
+}
 
-	// Offset to the correct position in the atlas.
-    LightSpaceCoord.xy *= 0.5;
-    LightSpaceCoord.x += offsetX;
-    LightSpaceCoord.y += offsetY;
-
-    float4 shadowBufferValue = SampleShadowMoments(LightSpaceCoord.xy, float2(offsetX, offsetY));
+// The fetch and the moments resolve for a coordinate from GetCascadeCoord.
+float ResolveCascade(float4 LightSpaceCoord, float2 quadrant, float bias, float bleedReduction) {
+    float4 shadowBufferValue = SampleShadowMoments(LightSpaceCoord.xy, quadrant);
 
     float shadow;
 	
@@ -166,50 +167,55 @@ float GetLightAmount(float4 positionWS, float3 normal)
 
     const float blend = 0.9f;
 
-	// Each cascade is offset in its OWN texel scale -- one shared samplePos cannot suit all
-	// four when their texels differ by more than an order of magnitude.
-	float4 shadows = {
-        GetLightAmountValue(TESR_ShadowCameraToLightTransformNear,   float4(positionWS.xyz + offsetDistance.x * normal, 1.0f), 0.0, 0.0, bias, 0.1f),
-		GetLightAmountValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS.xyz + offsetDistance.y * normal, 1.0f), 0.5, 0.0, bias, 0.2f),
-		GetLightAmountValue(TESR_ShadowCameraToLightTransformFar,    float4(positionWS.xyz + offsetDistance.z * normal, 1.0f), 0.0, 0.5, bias, 0.6f),
-		GetLightAmountValue(TESR_ShadowCameraToLightTransformLod,    float4(positionWS.xyz + offsetDistance.w * normal, 1.0f), 0.5, 0.5, bias, 0.8f),
-    };
-
     float4 distances = {
         length(positionWS.xyz - TESR_ShadowNearCenter.xyz),
 		length(positionWS.xyz - TESR_ShadowMiddleCenter.xyz),
 		length(positionWS.xyz - TESR_ShadowFarCenter.xyz),
 		length(positionWS.xyz - TESR_ShadowLodCenter.xyz),
     };
-	
-    if (distances.x < TESR_ShadowNearCenter.w) {
-        if (distances.x < TESR_ShadowNearCenter.w * blend)
-            return shadows.x;
-		
-        return lerp(shadows.x, shadows.y, smoothstep(TESR_ShadowNearCenter.w * blend, TESR_ShadowNearCenter.w, distances.x));
+
+	// The cascade the point lands in - the first whose radius contains it - and the next one out,
+	// which cross-fades in over the outer 10%. Past the Lod cascade that is full light.
+    float4 inside = (distances < radii);
+    float4 pick = inside * float4(1.0f, 1.0f - inside.x, (1.0f - inside.x) * (1.0f - inside.y),
+                                  (1.0f - inside.x) * (1.0f - inside.y) * (1.0f - inside.z));
+    float4 next = float4(0.0f, pick.x, pick.y, pick.z);
+    float radius = dot(radii, pick);
+    float fade = smoothstep(radius * blend, radius, dot(distances, pick));
+
+    const float4 quadrantX = float4(0.0f, 0.5f, 0.0f, 0.5f);
+    const float4 quadrantY = float4(0.0f, 0.0f, 0.5f, 0.5f);
+    const float4 bleed = float4(0.1f, 0.2f, 0.6f, 0.8f);
+
+	// All four positions are transformed - arithmetic, cheap here - but only the chosen cascade is
+	// fetched and resolved: once per pixel, twice across the blend band. Evaluating all four and
+	// keeping one cost four atlas fetches and four resolves on every pixel. Each cascade is offset
+	// in its OWN texel scale: one shared position cannot suit all four when their texels differ by
+	// more than an order of magnitude. Fetching under these branches is legal only because
+	// SampleShadowMoments uses tex2Dlod (X3528).
+    float shadow = 1.0f;
+    [branch] if (dot(pick, 1.0f) > 0.0f) {
+        float4 coordNear   = GetCascadeCoord(TESR_ShadowCameraToLightTransformNear,   float4(positionWS.xyz + offsetDistance.x * normal, 1.0f), float2(0.0f, 0.0f));
+        float4 coordMiddle = GetCascadeCoord(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS.xyz + offsetDistance.y * normal, 1.0f), float2(0.5f, 0.0f));
+        float4 coordFar    = GetCascadeCoord(TESR_ShadowCameraToLightTransformFar,    float4(positionWS.xyz + offsetDistance.z * normal, 1.0f), float2(0.0f, 0.5f));
+        float4 coordLod    = GetCascadeCoord(TESR_ShadowCameraToLightTransformLod,    float4(positionWS.xyz + offsetDistance.w * normal, 1.0f), float2(0.5f, 0.5f));
+
+        float4 coord = coordNear * pick.x + coordMiddle * pick.y + coordFar * pick.z + coordLod * pick.w;
+        shadow = ResolveCascade(coord, float2(dot(quadrantX, pick), dot(quadrantY, pick)), bias, dot(bleed, pick));
+
+        [branch] if (fade > 0.0f) {
+            float nextShadow = 1.0f;
+            [branch] if (pick.w == 0.0f) {
+                float4 nextCoord = coordNear * next.x + coordMiddle * next.y + coordFar * next.z + coordLod * next.w;
+                nextShadow = ResolveCascade(nextCoord, float2(dot(quadrantX, next), dot(quadrantY, next)), bias, dot(bleed, next));
+            }
+            shadow = lerp(shadow, nextShadow, fade);
+        }
     }
-    else if (distances.y < TESR_ShadowMiddleCenter.w) {
-        if (distances.y < TESR_ShadowMiddleCenter.w * blend)
-            return shadows.y;
-		
-        return lerp(shadows.y, shadows.z, smoothstep(TESR_ShadowMiddleCenter.w * blend, TESR_ShadowMiddleCenter.w, distances.y));
-    }
-    else if (distances.z < TESR_ShadowFarCenter.w) {
-        if (distances.z < TESR_ShadowFarCenter.w * blend)
-            return shadows.z;
-		
-        return lerp(shadows.z, shadows.w, smoothstep(TESR_ShadowFarCenter.w * blend, TESR_ShadowFarCenter.w, distances.z));
-    }
-    else if (distances.w < TESR_ShadowLodCenter.w) {
-        if (distances.w < TESR_ShadowLodCenter.w * blend)
-            return shadows.w;
-		
-        return lerp(shadows.w, 1.0f, smoothstep(TESR_ShadowLodCenter.w * blend, TESR_ShadowLodCenter.w, distances.w));
-    }
-    else {
-        return 1.0f;
-    }
+
+    return shadow;
 }
+
 
 // returns a semi random float3 between 0 and 1 based on the given seed. (blue noise)
 // tailored to return a different value for each uv coord of the screen.
