@@ -133,6 +133,7 @@
     <ClCompile Include="..\src\core\ShaderManager.cpp" />
     <ClCompile Include="..\src\core\ShaderRecord.cpp" />
     <ClCompile Include="..\src\core\ShadowManager.cpp" />
+    <ClCompile Include="..\src\core\GpuTimer.cpp" />
     <ClCompile Include="..\src\core\TextureManager.cpp" />
     <ClCompile Include="..\src\core\TextureRecord.cpp" />
     <ClCompile Include="..\src\effects\AmbientOcclusion.cpp" />
@@ -237,6 +238,7 @@
     <ClInclude Include="..\src\core\ShaderManager.h" />
     <ClInclude Include="..\src\core\ShaderRecord.h" />
     <ClInclude Include="..\src\core\ShadowManager.h" />
+    <ClInclude Include="..\src\core\GpuTimer.h" />
     <ClInclude Include="..\src\core\TextureManager.h" />
     <ClInclude Include="..\src\core\TextureRecord.h" />
     <ClInclude Include="..\src\effects\AmbientOcclusion.h" />

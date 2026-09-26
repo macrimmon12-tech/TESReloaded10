@@ -1,7 +1,13 @@
 #pragma once
 
 void __fastcall RenderShadowMapHook(void* apThis) {
+	GpuTimer::Begin("Shadow maps");
 	TheShadowManager->RenderShadowMaps();
+	GpuTimer::End("Shadow maps");
+
+	// From here to the first effect is the world itself, which is where forward shadows are paid:
+	// they run inside the object shaders, so no effect timing can show them.
+	GpuTimer::Begin("World (shadow maps to effects)");
 	CdeclCall(0x871A50);
 }
 

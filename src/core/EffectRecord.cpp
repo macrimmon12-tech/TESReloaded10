@@ -353,6 +353,7 @@ void EffectRecord::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTar
 	}
 
 	auto timer = TimeLogger();
+	GpuTimer::Begin(Name);
 	if (SourceBuffer) Device->StretchRect(RenderTarget, NULL, SourceBuffer, NULL, D3DTEXF_LINEAR);
 
 	try {
@@ -374,6 +375,7 @@ void EffectRecord::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTar
 		Logger::Log("Error during rendering of effect %s: %s", Name, e.what());
 	}
 
+	GpuTimer::End(Name);
 	std::string name = "EffectRecord::Render " + std::string(Name);
 	renderTime = timer.LogTime(name.c_str());
 }

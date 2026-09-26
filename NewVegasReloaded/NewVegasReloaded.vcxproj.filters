@@ -286,6 +286,9 @@
     <ClInclude Include="..\src\core\ShadowManager.h">
       <Filter>Core</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\core\GpuTimer.h">
+      <Filter>Core</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\core\TextureManager.h">
       <Filter>Core</Filter>
     </ClInclude>
@@ -526,6 +529,9 @@
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="..\src\core\ShadowManager.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\core\GpuTimer.cpp">
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="..\src\core\TextureManager.cpp">

@@ -39,6 +39,7 @@ class ShadowSceneNode;		extern ShadowSceneNode*			SceneNode;
 #include "nvse/DIHookControl.h"
 #include "../Core/RenderPass.h"
 #include "../Core/ShadowManager.h"
+#include "../Core/GpuTimer.h"
 #include "../Core/CameraManager.h"
 #include "../Core/BinkManager.h"
 

@@ -767,11 +767,13 @@ void ShaderManager::RenderEffectToRT(IDirect3DSurface9* RenderTarget, EffectReco
 
 
 void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget) {
+	GpuTimer::End("World (shadow maps to effects)");
 	if (!TheSettingManager->SettingsMain.Main.RenderEffects) return; // Main toggle
 	if (!Player->parentCell) return;
 	if (GameState.OverlayIsOn && TESMain::IsMenuBackgroundReady()) return; // disable all effects during terminal/lockpicking sequences
 
 	auto timer = TimeLogger();
+	GpuTimer::Begin("Effects before tonemapping");
 
 	IDirect3DDevice9* Device = TheRenderManager->device;
 	IDirect3DSurface9* SourceSurface = TheTextureManager->SourceSurface;
@@ -843,6 +845,7 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	if (Effects.LUT->Settings.PreTonemapping)
 		Effects.LUT->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 
+	GpuTimer::End("Effects before tonemapping");
 	timer.LogTime("ShaderManager::RenderEffectsPreTonemapping");
 }
 
@@ -851,11 +854,14 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 * Renders the effect that have been set to enabled.
 */
 void ShaderManager::RenderEffects(IDirect3DSurface9* RenderTarget) {
+	// Before the early returns, so a frame that skips its effects still closes.
+	GpuTimer::FrameBoundary();
 	if (!TheSettingManager->SettingsMain.Main.RenderEffects) return; // Main toggle
 	if (!Player->parentCell) return;
 	if (GameState.OverlayIsOn) return; // disable all effects during terminal/lockpicking sequences because they bleed through the overlay
 
 	auto timer = TimeLogger();
+	GpuTimer::Begin("Effects after tonemapping");
 
 	TheRenderManager->UpdateSceneCameraData();
 	TheRenderManager->SetupSceneCamera();
@@ -907,6 +913,7 @@ void ShaderManager::RenderEffects(IDirect3DSurface9* RenderTarget) {
 	// debug shader allows to display some of the buffers
 	Effects.Debug->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 
+	GpuTimer::End("Effects after tonemapping");
 	timer.LogTime("ShaderManager::RenderEffects");
 }
 

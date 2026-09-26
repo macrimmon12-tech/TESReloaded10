@@ -126,6 +126,7 @@ static bool  s_presetManagerOpen = false;
 // ByEffect (PBR's 3 link together, Terrain's 3 link together, separately),
 // or AllLinked (all 6 move together) -- see RenderLightingConditionRow.
 static bool s_lightingPanelOpen = false;
+static bool s_gpuTimingsOpen = false;
 
 enum class LightLinkMode { Unlinked, ByEffect, AllLinked };
 
@@ -1094,6 +1095,60 @@ static void RenderLightingPanel() {
 		anyChanged |= RenderLightingConditionRow("Interiors", "Shaders.PBR.Interiors", nullptr, s_lightLinkInteriors);
 
 	if (anyChanged) TheSettingManager->LoadSettings();
+
+	ImGui::End();
+}
+
+// GPU time per stage, from GpuTimer. Measuring runs while this panel is toggled on, including
+// with the menu closed, so the numbers describe normal play rather than the menu.
+static void RenderGpuTimingsPanel() {
+	GpuTimer::SetEnabled(s_gpuTimingsOpen);
+	if (!s_gpuTimingsOpen) return;
+
+	ImGui::SetNextWindowSize(ImVec2(440.0f, 560.0f), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(ImVec2(1080.0f, 200.0f), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("NVR GPU Timings", &s_gpuTimingsOpen)) {
+		ImGui::End();
+		return;
+	}
+
+	ImGui::TextWrapped("GPU time per stage, averaged over recent frames. Measured on the GPU with "
+		"timestamp queries - unlike the times debug mode shows beside each shader, which are the "
+		"CPU's submission times. Measuring keeps running while this window is toggled on, with the "
+		"menu closed too.");
+	if (!GpuTimer::IsAvailable()) {
+		ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "This device cannot create timestamp queries.");
+		ImGui::End();
+		return;
+	}
+
+	if (ImGui::Button("Reset averages")) GpuTimer::Reset();
+	ImGui::SameLine();
+	ImGui::TextDisabled("after changing a setting");
+
+	float frameMs = GpuTimer::FrameAverageMs();
+	if (frameMs >= 0.0f) ImGui::Text("GPU frame: %.2f ms", frameMs);
+	else ImGui::TextDisabled("Collecting...");
+	ImGui::Separator();
+
+	if (ImGui::BeginTable("##gputimings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+		ImGui::TableSetupColumn("Stage", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+		ImGui::TableSetupColumn("avg ms", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+		ImGui::TableSetupColumn("last ms", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+		ImGui::TableHeadersRow();
+		for (const GpuTimer::Stat& stat : GpuTimer::Stats()) {
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			if (stat.Depth > 0) ImGui::Indent(12.0f * stat.Depth);
+			ImGui::TextUnformatted(stat.Label.c_str());
+			if (stat.Depth > 0) ImGui::Unindent(12.0f * stat.Depth);
+			ImGui::TableSetColumnIndex(1);
+			ImGui::Text("%.3f", stat.AverageMs);
+			ImGui::TableSetColumnIndex(2);
+			ImGui::Text("%.3f", stat.LastMs);
+		}
+		ImGui::EndTable();
+	}
 
 	ImGui::End();
 }
@@ -2882,6 +2937,8 @@ void ImGuiManager::BuildUI() {
 		if (ImGui::SmallButton("Presets")) s_presetManagerOpen = !s_presetManagerOpen;
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Lighting")) s_lightingPanelOpen = !s_lightingPanelOpen;
+		ImGui::SameLine();
+		if (ImGui::SmallButton("GPU Timings")) s_gpuTimingsOpen = !s_gpuTimingsOpen;
 		if (s_devFreecamOn) {
 			ImGui::SameLine();
 			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.1f, 1.0f), "[freecam]");
@@ -2909,5 +2966,6 @@ void ImGuiManager::BuildUI() {
 	RenderDevPanel();
 	RenderPresetManagerPanel();
 	RenderLightingPanel();
+	RenderGpuTimingsPanel();
 	RenderPresetConfirmPopup(); // unconditional -- stays functional even if the panel above gets closed mid-confirm
 }
