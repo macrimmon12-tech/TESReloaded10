@@ -805,7 +805,7 @@ void ShadowManager::RenderShadowMaps() {
 
 	Movers.clear();
 	bool trackMovers = Shadows->Settings.ShadowMaps.TemporalFilter && Shadows->Settings.ShadowMaps.TemporalMovers
-		&& !Shadows->Settings.Exteriors.ForwardShadows;
+		&& !Shadows->ForwardShadowsRunning();
 
 	if (isExterior && (ExteriorEnabled || TheShaderManager->orthoRequired)) {
 

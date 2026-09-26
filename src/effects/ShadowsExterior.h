@@ -219,6 +219,7 @@ public:
 	IDirect3DSurface9* ShadowMapOrthoDepthSurface;
 
 	void		clearShadowsBuffer();
+	bool		ForwardShadowsRunning();
 	void		UpdateTemporalHistory();
 	void		UpdateConstants();
 	void		UpdateSettings();

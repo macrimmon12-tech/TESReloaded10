@@ -60,7 +60,7 @@ void ShadowsExteriorEffect::UpdateConstants() {
 
 		// Nothing to filter while the forward path owns the cascades: it applies them per object
 		// in the lighting shaders, so they never reach this buffer.
-		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut && !Settings.Exteriors.ForwardShadows;
+		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut && !ForwardShadowsRunning();
 		Constants.TemporalData.y = Settings.ShadowMaps.TemporalWeight;
 	}
 	else {
@@ -455,11 +455,20 @@ void ShadowsExteriorEffect::clearShadowsBuffer() {
 }
 
 
+// Whether the forward path is actually applying the cascades. The setting alone does not say:
+// with it off at startup the forward code is compiled out of the game shaders, and the deferred
+// pass keeps the cascades however the setting is changed afterwards - so anything that stands
+// down for forward shadows has to ask this, not the setting.
+bool ShadowsExteriorEffect::ForwardShadowsRunning() {
+	return Settings.Exteriors.ForwardShadows && TheShaderManager->CompiledForwardShadows != 0;
+}
+
+
 // Snapshot what the next frame will reproject from. Runs after the shadow pass has resolved,
 // so the shadow copy is the finished term - including the previous frame already blended into
 // it, which is what makes this an accumulation rather than a two frame average.
 void ShadowsExteriorEffect::UpdateTemporalHistory() {
-	if (!Settings.ShadowMaps.TemporalFilter || Settings.Exteriors.ForwardShadows) {
+	if (!Settings.ShadowMaps.TemporalFilter || ForwardShadowsRunning()) {
 		historyValid = false;
 		return;
 	}
