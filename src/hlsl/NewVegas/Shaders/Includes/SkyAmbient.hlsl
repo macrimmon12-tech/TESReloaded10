@@ -1,5 +1,6 @@
 // Sky-colour ambient for the lighting shaders (objects, parallax, terrain, skin, hair, grass,
-// decals).
+// decals). The shaders reach it through SkyAmbientRedistribute at the bottom of this file, which
+// uses the sky to redistribute the weather ambient by orientation rather than adding light.
 //
 // Two models, selected at COMPILE time by [Shaders.PBR.Main] SkylightingMode. ps_3_0 flattens
 // runtime branches, so a switch here would make every lit pixel pay for both paths; the macro
@@ -80,20 +81,38 @@ float3 GetSkyRadiance(float3 dir) {
 }
 
 // directionality: [Shaders.PBR.*] / [Shaders.Terrain.*] SkylightingDirectionality.
-float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
+float3 SkyAmbientDirection(float3 worldNormal, float directionality) {
     float3 up = float3(0.0f, 0.0f, 1.0f);
 
     // lerp(up, N, d) is the ZERO vector when N points straight down and d is exactly 0.5, and
     // ceilings and undersides have precisely that normal. normalize() of it is NaN.
     float3 v = lerp(up, worldNormal, directionality);
     float len = length(v);
-    float3 dir = (len > 1e-4f) ? (v / len) : up;
+    return (len > 1e-4f) ? (v / len) : up;
+}
+
+float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
+    float3 dir = SkyAmbientDirection(worldNormal, directionality);
 
     // Cosine-weighted form factor for the visible hemisphere: 1 facing up, 0 facing down.
-    float wSky = 0.5f * dot(worldNormal, up) + 0.5f;
+    float wSky = 0.5f * worldNormal.z + 0.5f;
 
     // GetSkyColor returns linear; encode to match the space the callers work in.
     return sqrt(max(GetSkyRadiance(dir), 0.0f)) * wSky;
+}
+
+// The same sample, left linear for SkyAmbientRedistribute, with the form factor applied to the
+// radiance rather than to its encode.
+float3 SkyIrradianceLinear(float3 worldNormal, float directionality) {
+    float3 dir = SkyAmbientDirection(worldNormal, directionality);
+    return max(GetSkyRadiance(dir), 0.0f) * (0.5f * worldNormal.z + 0.5f);
+}
+
+// Average over every orientation. This model has no closed form for it, so it takes what a dome
+// of uniform radiance gives: half of what an upward facing surface receives. That costs this mode
+// a second sky evaluation per pixel; mode 0 reads its average off a coefficient.
+float3 SkyIrradianceMeanLinear() {
+    return 0.5f * max(GetSkyRadiance(float3(0.0f, 0.0f, 1.0f)), 0.0f);
 }
 
 #else
@@ -119,13 +138,12 @@ float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
 // ---------------------------------------------------------------------------
 float4 TESR_SkyIrradiance[9] : register(c137);
 
-// worldNormal must be the GEOMETRIC world normal, unit length.
-float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
+// worldNormal must be the GEOMETRIC world normal, unit length. The reconstruction is LINEAR
+// irradiance.
+float3 SkyIrradianceLinear(float3 worldNormal, float directionality) {
     float3 n = worldNormal;
 
-    // Reconstruction is LINEAR irradiance; encode it. max() first because an order-2 SH fit can
-    // ring slightly negative, and sqrt of a negative is NaN.
-    float3 irradiance = TESR_SkyIrradiance[0].rgb
+    return TESR_SkyIrradiance[0].rgb
          + TESR_SkyIrradiance[1].rgb * n.y
          + TESR_SkyIrradiance[2].rgb * n.z
          + TESR_SkyIrradiance[3].rgb * n.x
@@ -134,10 +152,64 @@ float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
          + TESR_SkyIrradiance[6].rgb * (3.0f * n.z * n.z - 1.0f)
          + TESR_SkyIrradiance[7].rgb * (n.x * n.z)
          + TESR_SkyIrradiance[8].rgb * (n.x * n.x - n.y * n.y);
+}
 
-    return sqrt(max(irradiance, 0.0f));
+// Average over every orientation. Every basis function past the first integrates to zero over
+// the sphere, (3z^2 - 1) included since z^2 averages 1/3, so the average is the constant term.
+float3 SkyIrradianceMeanLinear() {
+    return TESR_SkyIrradiance[0].rgb;
+}
+
+// Encoded. max() first because an order-2 SH fit can ring slightly negative, and sqrt of a
+// negative is NaN.
+float3 SkyAmbientRadiance(float3 worldNormal, float directionality) {
+    return sqrt(max(SkyIrradianceLinear(worldNormal, directionality), 0.0f));
 }
 
 #endif
+
+// ---------------------------------------------------------------------------
+// The sky REDISTRIBUTES the weather ambient. It does not add to it.
+//
+// The weather ambient is one colour arriving at every surface whichever way it faces. The sky is
+// not: a surface facing up sees the whole dome, one facing sideways half dome and half ground,
+// one facing down the ground. Both models above describe the upper half only, so the ground is
+// taken to send back the flat ambient itself - the light the weather says arrives from
+// everywhere, which for a downward facing surface is very nearly what the ground reflects. For a
+// uniform lower hemisphere the cosine integral of that is flatAmbient * (1 - N.z) / 2.
+//
+// The sum is then rescaled so that its average over every orientation carries the flat
+// ambient's luminance. Raising the strength therefore moves light between orientations - floors
+// toward the sky, undersides toward the ground, the sun's side of a wall toward the warmer part
+// of the dome - and cannot raise that average. So the setting needs no brightness control of its
+// own to undo one it introduced, and AmbientScale stays the one brightness control for all of the
+// ambient, sky included.
+//
+// flatAmbient arrives encoded and already scaled by AmbientScale. The sums run on linear values,
+// which is what they are defined on (see the header); the encode is sqrt, so the decode is the
+// square.
+//
+// valid is 0 where the carried world position is undefined, i.e. under a vanilla vertex shader.
+// The orientation is unknown there, so it takes the orientation-free average rather than the flat
+// ambient: that gives up the direction and keeps the sky's colour, where falling back to the flat
+// ambient would let two touching surfaces disagree about what colour the light is.
+//
+// strength: [Shaders.PBR.*] / [Shaders.Terrain.*] SkylightingScale, 0 to 1. 0 is the flat
+// weather ambient exactly.
+// ---------------------------------------------------------------------------
+float3 SkyAmbientRedistribute(float3 flatAmbient, float3 worldNormal, float directionality, float strength, float valid) {
+    const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+
+    float3 groundLin = flatAmbient * flatAmbient;
+    float3 meanLin = SkyIrradianceMeanLinear() + 0.5f * groundLin;
+
+    // A select, not a multiply: the normal is undefined where valid is 0, and 0 * NaN is NaN.
+    float3 dirLin = (valid > 0.5f)
+        ? SkyIrradianceLinear(worldNormal, directionality) + groundLin * (0.5f - 0.5f * worldNormal.z)
+        : meanLin;
+
+    float rescale = dot(groundLin, lumaWeights) / max(dot(meanLin, lumaWeights), 1e-6f);
+    return lerp(flatAmbient, sqrt(max(dirLin * rescale, 0.0f)), saturate(strength));
+}
 
 #endif

@@ -134,7 +134,7 @@ VS_OUTPUT main(VS_INPUT IN) {
     }
 
     // shadowNormal is the geometric WORLD normal; N above is tangent space.
-    float3 ambient = PBRAmbient(AmbientColor.rgb) + SkyAmbient(shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
+    float3 ambient = PBRAmbientSky(AmbientColor.rgb, shadowNormal, SHADOW_VS_PRESENT(IN.shadowWorldPos.w) ? 1.0f : 0.0f);
 
     // Vanilla: (diffuseSum + AmbientColor) * albedo + specSum * specScale
     float4 baseTex = tex2D(BaseMap, uv);

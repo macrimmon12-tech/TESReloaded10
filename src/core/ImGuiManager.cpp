@@ -1047,11 +1047,23 @@ static bool RenderLightingConditionRow(const char* RowLabel, const char* PbrSect
 		terrain[2] = TheSettingManager->GetSettingF(TerrainSection, "SkylightingScale");
 	}
 
-	static const char* kLabels[6] = { "PBR Light", "PBR Ambient", "PBR Sky", "Terrain Light", "Terrain Ambient", "Terrain Sky" };
-	float* values[6] = { &pbr[0], &pbr[1], &pbr[2], &terrain[0], &terrain[1], &terrain[2] };
-	int total = TerrainSection ? 6 : 3;
+	static const char* kLabels[4] = { "PBR Light", "PBR Ambient", "Terrain Light", "Terrain Ambient" };
+	float* values[4] = { &pbr[0], &pbr[1], &terrain[0], &terrain[1] };
+	int total = TerrainSection ? 4 : 2;
 
-	bool changed = RenderLightingCells(Mode, kLabels, values, 3, total);
+	bool changed = RenderLightingCells(Mode, kLabels, values, 2, total);
+
+	// Sky is not an intensity. It sets how much of the ambient follows the sky's direction and
+	// colour, 0 to 1, and cannot change the ambient's average brightness - so it stays out of the
+	// proportional link, which would otherwise shift the sky's colour whenever a brightness moved.
+	static const char* kSkyLabels[2] = { "PBR Sky", "Terrain Sky" };
+	float* sky[2] = { &pbr[2], &terrain[2] };
+	for (int i = 0; i < (TerrainSection ? 2 : 1); i++) {
+		ImGui::PushID(100 + i);
+		changed |= ImGui::DragFloat(kSkyLabels[i], sky[i], 0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+		ImGui::PopID();
+	}
+
 	if (changed) {
 		TheSettingManager->SetSettingF(PbrSection, "LightingScale", pbr[0]);
 		TheSettingManager->SetSettingF(PbrSection, "AmbientScale", pbr[1]);
@@ -1077,9 +1089,10 @@ static void RenderLightingPanel() {
 		return;
 	}
 
-	ImGui::TextWrapped("Intensity-only view over the same PBR/Terrain settings the "
+	ImGui::TextWrapped("Intensity view over the same PBR/Terrain settings the "
 		"main menu already edits, grouped by condition, with an optional "
-		"proportional link per group.");
+		"proportional link per group. Sky (0-1) redistributes the ambient by "
+		"direction and colour without brightening it, so it is never linked.");
 
 	bool anyChanged = false;
 	if (ImGui::CollapsingHeader("Day", ImGuiTreeNodeFlags_DefaultOpen))
