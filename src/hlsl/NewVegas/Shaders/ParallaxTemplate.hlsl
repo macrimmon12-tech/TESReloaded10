@@ -460,13 +460,15 @@ PS_OUTPUT main(PS_INPUT IN)
             else
                 lighting = getVanillaLightingAtt(IN.lightDir.xyz, 1.f, PSLightColor[0].rgb * shadowMultiplier, IN.viewDir.xyz, normal.xyz, baseColor.rgb, normal.a, glossPower);
         #elif defined(DIFFUSE)
-            // Pointlight vanilla att.
+            // Pointlight vanilla att, for both branches. IN.lightDir has been rotated into tangent
+            // space, which keeps its length only while the tangent basis is orthonormal, so the
+            // falloff is read from lightAtt, built from the object-space vector. Lights 2 and 3
+            // below already do the same.
+            finalAtt = saturate(1 - tex2D(AttenuationMap, IN.lightAtt.xy).x - tex2D(AttenuationMap, IN.lightAtt.zw).x);
             if (TESR_ParallaxData.y)
-                lighting = getPointLightLighting(IN.lightDir.xyz, IN.lightDir.w, PSLightColor[0].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
-            else {
-                finalAtt = saturate(1 - tex2D(AttenuationMap, IN.lightAtt.xy).x - tex2D(AttenuationMap, IN.lightAtt.zw).x);
+                lighting = getPointLightLightingAtt(IN.lightDir.xyz, finalAtt, PSLightColor[0].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
+            else
                 lighting = getVanillaLightingAtt(IN.lightDir.xyz, finalAtt, PSLightColor[0].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, normal.a, glossPower);
-            }
         #else
             if (TESR_ParallaxData.y)
                 lighting = getPointLightLighting(IN.lightDir.xyz, IN.lightDir.w, PSLightColor[0].rgb, IN.viewDir.xyz, normal.xyz, baseColor.rgb, roughness);
