@@ -166,6 +166,14 @@ public:
 	// loads. ShadowsExteriorEffect holds the Mode setting to this, because neither end of
 	// the shadow map can be recompiled mid-session. See ShaderRecord::LoadShader.
 	int						CompiledShadowMode = -1;
+	// The same for the other two settings compiled into the game shaders, -1 before the first
+	// one loads: FORWARD_SHADOWS (1 compiled in) and SKYLIGHTING_MODE (the model compiled in).
+	int						CompiledForwardShadows = -1;
+	int						CompiledSkylightingMode = -1;
+	// The storage mode the current settings compile to. ShaderRecord::LoadShader compiles this,
+	// and the menu compares it with CompiledShadowMode, so the two cannot disagree about which
+	// setting decides it.
+	static int				ShadowModeFromSettings();
 	D3DXVECTOR4				SpotLightPosition[SpotLightsMax];
 	D3DXVECTOR4				SpotLightColor[SpotLightsMax];
 	D3DXVECTOR4				SpotLightDirection[SpotLightsMax];

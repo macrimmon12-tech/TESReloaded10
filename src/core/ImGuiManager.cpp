@@ -1938,16 +1938,46 @@ static bool IsInertSetting(const char* section, const char* key) {
 // encoding is compiled into both ShadowMap.pso and the forward path, and neither can be
 // rebuilt mid-session, so ShadowsExteriorEffect holds the running value until then.
 static bool IsRestartSetting(const char* section, const char* key) {
-	return strcmp(section, "Shaders.ShadowsExteriors.ShadowMaps") == 0 && strcmp(key, "Mode") == 0;
+	return (strcmp(section, "Shaders.ShadowsExteriors.ShadowMaps") == 0 && strcmp(key, "Mode") == 0)
+		|| (strcmp(section, "Shaders.ShadowsExteriors.Main") == 0 && (strcmp(key, "Quality") == 0 || strcmp(key, "ForwardShadows") == 0))
+		|| (strcmp(section, "Shaders.PBR.Main") == 0 && strcmp(key, "SkylightingMode") == 0);
 }
 
 
 // What to show beside such a setting, or nullptr when the saved value is the one running.
-static const char* RestartPendingNote(const char* section, const char* key) {
+// why receives the tooltip.
+static const char* RestartPendingNote(const char* section, const char* key, const char** why) {
 	if (!IsRestartSetting(section, key)) return nullptr;
+	static const char* kNote = "Save + restart to apply";
+
+	if (strcmp(key, "ForwardShadows") == 0) {
+		// Compiled in, it switches live: SunShadows.fx takes the cascades back in the same frame.
+		// Compiled out, the game shaders hold no forward code to switch on.
+		if (TheShaderManager->CompiledForwardShadows != 0 || !TheSettingManager->GetSettingI(section, key)) return nullptr;
+		*why = "Press Save at the bottom of this panel, then restart the game. This session started "
+			"with forward shadows off, so the game shaders were compiled without them and the "
+			"deferred pass keeps drawing the sun's shadows until then.";
+		return kNote;
+	}
+
+	if (strcmp(key, "SkylightingMode") == 0) {
+		if (TheShaderManager->CompiledSkylightingMode < 0) return nullptr;
+		if ((TheSettingManager->GetSettingI(section, key) ? 1 : 0) == TheShaderManager->CompiledSkylightingMode) return nullptr;
+		*why = "Press Save at the bottom of this panel, then restart the game. The skylighting model "
+			"is compiled into the game shaders when they load, so this session keeps the one it "
+			"started with.";
+		return kNote;
+	}
+
+	// Quality and Mode both decide the storage mode, and Mode only counts at Quality 4, so
+	// compare what the pair compiles to rather than either value on its own.
 	if (TheShaderManager->CompiledShadowMode < 0) return nullptr;
-	if (TheSettingManager->GetSettingI(section, key) == TheShaderManager->CompiledShadowMode) return nullptr;
-	return "Save + restart to apply";
+	if (ShaderManager::ShadowModeFromSettings() == TheShaderManager->CompiledShadowMode) return nullptr;
+	*why = "Press Save at the bottom of this panel, then restart the game. Until then this session "
+		"keeps the shadow map storage mode it started with: shaders compile its channel layout in "
+		"and cannot be rebuilt while the game is running. Anything else the setting changes "
+		"applies now.";
+	return kNote;
 }
 
 static const struct { int dik; const char* name; } kDIKTable[] = {
@@ -2389,13 +2419,12 @@ static void RenderSetting(SettingManager::Configuration::ConfigNode& node, bool 
 	// A setting that cannot take effect until the next launch. The change is accepted and
 	// saved like any other, so the row has to say what is still missing - otherwise the value
 	// moves, nothing happens, and only the log explains why.
-	if (const char* pending = RestartPendingNote(node.Section, node.Key)) {
+	const char* pendingWhy = nullptr;
+	if (const char* pending = RestartPendingNote(node.Section, node.Key, &pendingWhy)) {
 		ImGui::SameLine();
 		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "%s", pending);
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Press Save at the bottom of this panel, then restart the game. Until "
-				"then this session keeps the mode it started with: shaders compile the shadow map's "
-				"channel layout in and cannot be rebuilt while the game is running.");
+			ImGui::SetTooltip("%s", pendingWhy);
 	}
 
 	if (mainHovered && !node.Description.empty()) {

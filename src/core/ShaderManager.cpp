@@ -747,6 +747,23 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 }
 
 
+// Quality 0/1 -> VSM, 2 -> EVSM2, 3 -> EVSM4, mirroring ShadowsExteriorEffect::
+// UpdateSettingsFromQuality. Quality 4 (Custom), or an out-of-range value, reads Mode directly.
+int ShaderManager::ShadowModeFromSettings() {
+	switch (TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Quality")) {
+	case 0:
+	case 1:
+		return 0; // VSM
+	case 2:
+		return 1; // EVSM2
+	case 3:
+		return 2; // EVSM4
+	default:
+		return std::clamp(TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.ShadowMaps", "Mode"), 0, 2);
+	}
+}
+
+
 bool ShaderManager::ShouldRenderShadowMaps() {
 	if (GameState.isExterior)
 		return orthoRequired || (
