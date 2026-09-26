@@ -488,9 +488,15 @@ PS_OUTPUT main(PS_INPUT IN)
         #if !defined(DIFFUSE) && !defined(ONLY_SPECULAR)
             if (TESR_ParallaxData.y)
                 lighting += getAmbientLighting(AmbientColor.rgb, baseColor.rgb, sunShadowNormal,
-                                               shadowWorldPosValid, mappedNormal);
+                                               shadowWorldPosValid, mappedNormal,
+                                               normalize(-IN.shadowWorldPos.xyz), roughness);
             else
                 lighting += baseColor.rgb * AmbientColor.rgb;
+        #elif defined(ONLY_SPECULAR) && !defined(POINT)
+            // See ObjectTemplate: the split decomposition's share of the sky reflection.
+            if (TESR_ParallaxData.y)
+                lighting += getSkyReflection(mappedNormal, shadowWorldPosValid,
+                                             normalize(-IN.shadowWorldPos.xyz), roughness);
         #endif
     
         // Other light sources.
