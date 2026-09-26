@@ -22,7 +22,7 @@ float4 TESR_ShadowFade; // x: sunset attenuation, y: shadows maps active, z: poi
 #endif
 float4 TESR_ShadowBlur; // x: 1 / atlas resolution, y: whether the lod cascade was updated
 float4 TESR_ShadowForwardData; // x: 1 when the forward path is SUPPRESSED
-float4 TESR_ShadowTemporalData; // x: deferred filter enabled, y: history weight, z: forward filter has a history to use
+float4 TESR_ShadowTemporalData; // x: TemporalShadow filters this buffer, y: history weight, z: forward filter has a history to use
 float4 TESR_ShadowCameraDelta; // xyz: current camera position minus the history's
 float4 TESR_ShadowMoverData; // x: number of moving shadow casters in the two arrays below
 float4 TESR_ShadowMoverAxes[3]; // the plane facing the sun (two axes), then the direction to the sun
@@ -385,16 +385,21 @@ float MoverHistoryWeight(float3 position, float weight) {
 }
 
 
-// How much of the history kept at this pixel's previous position may be used: 0 where the
-// reprojection finds nothing to reuse or a different surface, otherwise the history weight,
-// lowered around moving casters. Shared by both temporal passes. previousUV receives where to read
-// the history, moverLowered whether a moving caster brought the weight down.
+// The four texels around a point, in the order the bilinear weights below are built.
+static const float2 kHistoryTaps[4] = { float2(0.0f, 0.0f), float2(1.0f, 0.0f), float2(0.0f, 1.0f), float2(1.0f, 1.0f) };
+
+// How much of the history kept at this pixel's previous position may be used, and what it holds
+// there: 0 where the reprojection finds nothing to reuse or a different surface, otherwise the
+// history weight, lowered around moving casters. Shared by both temporal passes: historyValues is
+// the buffer each keeps its term in (x), history receives that term at the reprojected point, and
+// moverLowered whether a moving caster brought the weight down.
 //
 // tex2Dlod throughout: the forward pass calls this from inside a branch, where a gradient taking
 // sample is illegal (X3528). None of these buffers has mipmaps, so LOD 0 is the same read.
-float TemporalHistoryWeight(float2 uv, float3 worldPos, out float2 previousUV, out bool moverLowered)
+float TemporalHistoryWeight(float2 uv, float3 worldPos, sampler2D historyValues, out float history, out bool moverLowered)
 {
-    previousUV = uv;
+    float2 previousUV = uv;
+    history = 1.0f;
     moverLowered = false;
 
 	// World space here is relative to the current camera, so shift the point back into the frame
@@ -414,11 +419,34 @@ float TemporalHistoryWeight(float2 uv, float3 worldPos, out float2 previousUV, o
 	// The reprojection finds where this point WAS on screen, not whether it was visible there.
 	// Where something else was in front of it the history belongs to that occluder, and reusing
 	// it smears the occluder's shadow along every disocclusion edge as the camera moves.
-    float previousDepth = tex2Dlod(TESR_ShadowDepthHistoryBuffer, float4(previousUV, 0.0f, 0.0f)).x * farZ;
+	//
+	// So the history is rebuilt from the four texels around the point one at a time: each read at
+	// its centre, where the linear filter returns that texel alone, bilinearly weighted, and kept
+	// only if its depth is this point's. Testing one texel's depth and then sampling all four
+	// blended the occluder's value into the texels beside its silhouette - a line along the edge,
+	// bright beside the weapon, that built up frame after frame while the view turned. Where the
+	// four texels are one surface this is the same bilinear read as before.
+    float2 texel = TESR_ReciprocalResolution.xy;
+    float2 gridPos = previousUV / texel - 0.5f;
+    float2 gridBase = floor(gridPos);
+    float2 f = gridPos - gridBase;
+    float4 bilinear = float4((1.0f - f.x) * (1.0f - f.y), f.x * (1.0f - f.y), (1.0f - f.x) * f.y, f.x * f.y);
     float tolerance = max(0.02f * previousClip.w, 5.0f);
 
+    float coverage = 0.0f;
+    float sum = 0.0f;
+	[unroll]
+    for (int i = 0; i < 4; i++) {
+        float4 tapUV = float4((gridBase + kHistoryTaps[i] + 0.5f) * texel, 0.0f, 0.0f);
+        float tapDepth = tex2Dlod(TESR_ShadowDepthHistoryBuffer, tapUV).x * farZ;
+        float w = abs(previousClip.w - tapDepth) <= tolerance ? bilinear[i] : 0.0f;
+        coverage += w;
+        sum += w * tex2Dlod(historyValues, tapUV).x;
+    }
+
 	[branch]
-    if (abs(previousClip.w - previousDepth) > tolerance) return 0.0f;
+    if (coverage <= 0.0f) return 0.0f; // none of the four is this surface
+    history = sum / coverage;
 
 	// Depth says the reprojected pixel is the right DISTANCE away, not that it is the same
 	// surface. An object moving across the view while holding its distance passes that test with
@@ -498,6 +526,10 @@ float TemporalHistoryWeight(float2 uv, float3 worldPos, out float2 previousUV, o
 // than the filter's response, so it passes through, while noise that is uncorrelated between
 // frames is divided down. Spatial filtering cannot make that distinction, which is why widening
 // it only ever traded shimmer for mush.
+//
+// On the deferred path this buffer holds the cascades and the contact shadows together. While the
+// forward path runs it holds the contact shadows alone, which are found again from the current
+// view every frame and would reach the composite unfiltered otherwise.
 float4 TemporalShadow(VSOUT IN) : COLOR0
 {
     float4 current = tex2D(TESR_PointShadowBuffer, IN.UVCoord);
@@ -508,11 +540,9 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
     float viewDepth;
     float4 worldPos = reconstructWorldPosition(IN.UVCoord, viewDepth);
 
-    float2 previousUV;
+    float history;
     bool moverLowered;
-    float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, previousUV, moverLowered);
-
-    float history = tex2Dlod(TESR_ShadowHistoryBuffer, float4(previousUV, 0.0f, 0.0f)).x;
+    float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, TESR_ShadowHistoryBuffer, history, moverLowered);
     current.r = lerp(current.r, history, weight);
     return current;
 }
@@ -537,9 +567,9 @@ float4 ForwardTemporalShadow(VSOUT IN) : COLOR0
     bool moverLowered = false;
 	[branch]
     if (TESR_ShadowTemporalData.z > 0.5f) {
-        float2 previousUV;
-        float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, previousUV, moverLowered);
-        shadow = lerp(shadow, tex2Dlod(TESR_ShadowForwardHistory, float4(previousUV, 0.0f, 0.0f)).x, weight);
+        float history;
+        float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, TESR_ShadowForwardHistory, history, moverLowered);
+        shadow = lerp(shadow, history, weight);
     }
 
     return float4(shadow, moverLowered ? -viewDepth : viewDepth, 0.0f, 1.0f);

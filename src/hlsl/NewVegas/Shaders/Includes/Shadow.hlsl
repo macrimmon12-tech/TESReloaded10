@@ -73,6 +73,8 @@ sampler2D TESR_ShadowAtlas : register(SHADOW_ATLAS_SAMPLER_REG) = sampler_state 
 // where a moving caster had the filter's weight lowered). Linear, not POINT: the point-light
 // permutations define POINT as an empty macro, which turns the token into a syntax error. Where
 // filtering blends y across a depth edge the 2% depth test fails and the pixel does its own lookup.
+// Linear matters for x as well: read one texel at a time - point sampled, or at texel centres -
+// the shadows shook while the view moved and took a moment to settle after it stopped.
 // Next to the atlas - s10, or s15 where TerrainTemplate moves the atlas to s14.
 #ifndef SHADOW_HISTORY_SAMPLER_REG
     #define SHADOW_HISTORY_SAMPLER_REG s10
