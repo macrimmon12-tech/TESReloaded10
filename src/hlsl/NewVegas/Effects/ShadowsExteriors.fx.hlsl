@@ -15,7 +15,7 @@ float4 TESR_SunAmbient;
 float4 TESR_SunColor;
 float4 TESR_SunDirection;
 float4 TESR_ShadowScreenSpaceData;
-float4 TESR_ShadowComposite; // x: composite mode, y: normal distrust, z: 1 while the PBR shaders are enabled
+float4 TESR_ShadowComposite; // x: composite mode, y: normal distrust, z: 1 while the PBR shaders are enabled, w: 1 while TESR_ShadowForwardBuffer holds this frame's cascade term
 float4 TESR_PBRData; // z: LightingScale, w: AmbientScale, as the PBR object shaders apply them
 float4 TESR_PBRExtraData; // y: SkylightingScale
 float4 TESR_SkyIrradiance[9]; // order-2 SH sky irradiance from Sky.cpp; [0].w is 1 once it has been computed
@@ -24,6 +24,9 @@ sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP;
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = ANISOTROPIC; MIPFILTER = LINEAR; };
 sampler2D TESR_PointShadowBuffer : register(s2)  = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_NormalsBuffer : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+// Last: EffectRecord binds the Nth declared sampler to slot N. x: the cascade term the forward
+// pass built this frame (ForwardTemporalShadow in SunShadows.fx.hlsl), read at this pixel.
+sampler2D TESR_ShadowForwardBuffer : register(s4) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 
 
 static const float DARKNESS = max(0.0,1-TESR_ShadowData.y);
@@ -58,7 +61,7 @@ VSOUT FrameVS(VSIN IN)
 /*
  * The previous composite, unchanged: darkens the pixel by the shadow amount whichever way the
  * surface faces, then blends towards the sky colour so that darkening does not read as grey.
- * Composite mode 1, and what the forward path uses (see Shadow below).
+ * Composite mode 1, on either path.
  */
 float4 LegacyComposite(float4 color, float2 Shadow)
 {
@@ -136,21 +139,41 @@ float4 Shadow(VSOUT IN) : COLOR0
 	float2 Shadow = tex2D(TESR_PointShadowBuffer, IN.UVCoord).rg;
 	Shadow.r = lerp(TESR_ShadowFade.x, 1.0f, Shadow.r); // fade shadows to light when sun is low
 
-	// While the forward path runs, the object shaders have already taken the cascades off the sun
-	// term, and only the screen-space contact shadows and the point lights arrive here. This pass
-	// cannot tell which pixels the cascades darkened, so the ratio below would take the sun away
-	// from them a second time; they keep the previous treatment. The ratio is for the deferred
-	// path, where this pass owns all of the sun's visibility. A constant that fails to arrive reads
-	// zero, which lands on the forward branch - the behaviour that was already there.
+	// Read at top level: a gradient taking sample is illegal under the branches below (X3528).
+	float forwardCascades = tex2D(TESR_ShadowForwardBuffer, IN.UVCoord).x;
+
+	[branch]
+	if (TESR_ShadowComposite.x == 1.0f) return LegacyComposite(color, Shadow);
+
+	// The sun visibility the frame already carries, and the one it should end with. On the deferred
+	// path this pass owns all of it: the frame carries none, and Shadow.r is the cascades and the
+	// contact shadows together. While the forward path runs, the object shaders have already taken
+	// the cascades off the sun term, and only the contact shadows and the point lights arrive here.
+	// Applied as the frame's whole visibility they would take the sun away from cascade-shadowed
+	// pixels a second time, so they are combined with the cascades the way the deferred path
+	// combines them - the darker of the two - and the ratio then removes only the difference. The
+	// forward pass leaves the cascade term it built this frame in TESR_ShadowForwardBuffer; while
+	// it does not run, no contact shadows are drawn either, and taking the cascades as full light
+	// leaves the ratio at 1.
+	//
+	// The previous forward treatment was the whole-pixel darkening of mode 1, which dims ambient
+	// and all, on faces turned away from the sun too. A constant that fails to arrive reads zero,
+	// which lands on the forward branch.
 	bool deferred = true;
 #if FORWARD_SHADOWS
 	deferred = TESR_ShadowForwardData.x > 0.0f;
 #endif
-
+	float carried = 1.0f;
+	float target = Shadow.r;
 	[branch]
-	if (TESR_ShadowComposite.x == 1.0f || !deferred) return LegacyComposite(color, Shadow);
+	if (!deferred) {
+		carried = lerp(TESR_ShadowFade.x, 1.0f, TESR_ShadowComposite.w > 0.0f ? forwardCascades : 1.0f);
+		target = min(Shadow.r, carried);
+	}
 
-	Shadow.r = saturate(Shadow.r + Shadow.g * TESR_ShadowFade.z); // point lights light a sun shadow back up
+	// Point lights light a sun shadow back up.
+	carried = saturate(carried + Shadow.g * TESR_ShadowFade.z);
+	target = saturate(target + Shadow.g * TESR_ShadowFade.z);
 
 	// What the surface would be lit by with the sun taken away, over what it is lit by now.
 	//
@@ -206,8 +229,10 @@ float4 Shadow(VSOUT IN) : COLOR0
 	// DARKNESS is 1 minus the Darkness setting. At Darkness 1 the sun is fully removed where the
 	// shadow says it should be, which is the physical result, and anything lower lets some of it
 	// back through. There is deliberately no way to go darker: the sun is already entirely gone.
-	float vis = lerp(Shadow.r, 1.0f, DARKNESS);
-	float3 shading = (sunLight * vis + ambient) / max(sunLight + ambient, 0.0001f);
+	// Deferred path only. The object shaders take the whole sun off the cascades they carry, so on
+	// the forward path the contact shadows combined with those here take all of it too.
+	float vis = lerp(target, 1.0f, deferred ? DARKNESS : 0.0f);
+	float3 shading = (sunLight * vis + ambient) / max(sunLight * carried + ambient, 0.0001f);
 
 	// Views, so an artefact can be attributed to this pass or ruled out of it without guessing
 	// from the composited result.

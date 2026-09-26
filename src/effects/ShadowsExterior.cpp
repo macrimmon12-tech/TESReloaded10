@@ -39,6 +39,8 @@ void ShadowsExteriorEffect::UpdateConstants() {
 		// The composite's estimate of what a pixel was lit with has to follow the object shaders:
 		// with PBR on they scale the sun and the ambient and add the sky's redistribution.
 		Constants.CompositeData.z = TheShaderManager->Shaders.PBR->Enabled ? 1.0f : 0.0f;
+		// w: TESR_ShadowForwardBuffer holds this frame's cascade term.
+		Constants.CompositeData.w = ForwardPassActive() ? 1.0f : 0.0f;
 
 		// Mode and format data. x=mode, y=bits per pixel
 		Constants.FormatData.x = Settings.ShadowMaps.Mode;
@@ -475,9 +477,12 @@ bool ShadowsExteriorEffect::ForwardShadowsRunning() {
 }
 
 
-// Whether the deferred pass has to build the forward path's filtered cascade term this frame.
-bool ShadowsExteriorEffect::ForwardTemporalActive() {
-	return Settings.ShadowMaps.TemporalFilter && ForwardShadowsRunning() && Textures.ForwardBufferSurface;
+// Whether the deferred pass has to build the forward path's cascade term in screen space this
+// frame: the temporal filter keeps it as the object shaders' next history, and the composite
+// needs it to take the contact shadows off the sun on top of what the cascades already took.
+bool ShadowsExteriorEffect::ForwardPassActive() {
+	return (Settings.ShadowMaps.TemporalFilter || Constants.ScreenSpaceData.x) && ForwardShadowsRunning() &&
+		Textures.ForwardBufferSurface;
 }
 
 

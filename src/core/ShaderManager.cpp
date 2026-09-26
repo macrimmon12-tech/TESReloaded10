@@ -813,8 +813,8 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 			// buffer holds just the contact shadows.
 			if (Effects.ShadowsExteriors->Settings.ShadowMaps.TemporalFilter && !Effects.ShadowsExteriors->ForwardShadowsRunning())
 				RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.SunShadows, false, 2);
-			// The forward path's filtered cascade term, for next frame's object shaders.
-			if (Effects.ShadowsExteriors->ForwardTemporalActive())
+			// The forward path's cascade term, for next frame's object shaders and for the composite.
+			if (Effects.ShadowsExteriors->ForwardPassActive())
 				RenderEffectToRT(Effects.ShadowsExteriors->Textures.ForwardBufferSurface, Effects.SunShadows, false, 1);
 			Effects.ShadowsExteriors->UpdateTemporalHistory();
 		}
