@@ -42,6 +42,7 @@ public:
 		D3DXVECTOR4		Data;
 		D3DXVECTOR4		FormatData;
 		D3DXVECTOR4		ScreenSpaceData;
+		D3DXVECTOR4		CompositeData;	// x: composite mode, y: normal distrust, z: 1 while the PBR shaders are enabled
 		D3DXVECTOR4		OrthoData;
 		D3DXVECTOR4		ShadowFade;
 		D3DXMATRIXA16	ShadowWorld;

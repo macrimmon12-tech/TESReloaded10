@@ -36,6 +36,10 @@ void ShadowsExteriorEffect::UpdateConstants() {
 		//if (Enabled) Constants.ShadowData->x = -1; // Disable the forward shadowing
 		Constants.Data.y = Settings.Exteriors.Darkness;
 
+		// The composite's estimate of what a pixel was lit with has to follow the object shaders:
+		// with PBR on they scale the sun and the ambient and add the sky's redistribution.
+		Constants.CompositeData.z = TheShaderManager->Shaders.PBR->Enabled ? 1.0f : 0.0f;
+
 		// Mode and format data. x=mode, y=bits per pixel
 		Constants.FormatData.x = Settings.ShadowMaps.Mode;
 		Constants.FormatData.y = Settings.ShadowMaps.FormatBits;
@@ -345,6 +349,9 @@ void ShadowsExteriorEffect::UpdateSettings() {
 	Constants.ScreenSpaceData.z = TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ScreenSpace", "RenderDistance");
 	Constants.ScreenSpaceData.w = max(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ScreenSpace", "Intensity"), 0.0f);
 
+	Constants.CompositeData.x = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "CompositeMode");
+	Constants.CompositeData.y = max(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.Main", "NormalRejection"), 0.0f);
+
 	// Sun smoothing settings.
 	Settings.SunSmoothing.SmoothSun = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.SunSmoothing", "SmoothSun");
 	Settings.SunSmoothing.QuantizeSun = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.SunSmoothing", "QuantizeSun");
@@ -527,6 +534,7 @@ void ShadowsExteriorEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_ShadowData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_ShadowFormatData", &Constants.FormatData);
 	TheShaderManager->RegisterConstant("TESR_ShadowForwardData", &Constants.ForwardData);
+	TheShaderManager->RegisterConstant("TESR_ShadowComposite", &Constants.CompositeData);
 	TheShaderManager->RegisterConstant("TESR_ShadowBlur", &Constants.ShadowBlur);
 	TheShaderManager->RegisterConstant("TESR_ShadowTemporalData", &Constants.TemporalData);
 	TheShaderManager->RegisterConstant("TESR_ShadowCameraDelta", &Constants.CameraDelta);
