@@ -59,11 +59,11 @@ void ShadowsExteriorEffect::UpdateConstants() {
 		bool forward = ForwardShadowsRunning();
 		bool cut = !historyValid || historyForward != forward || D3DXVec3Length((D3DXVECTOR3*)&delta) > 500.0f;
 
-		// The history belongs to the path that produced it - the screen-space buffer holds the
-		// cascades and contact shadows together on the deferred path and the contact shadows alone on
-		// the forward one - so switching path starts over. x filters that buffer on either path; z
-		// lets the forward pass and the object shaders use the forward history.
-		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut;
+		// The history belongs to the path that produced it, so switching path starts over. x filters
+		// the screen-space buffer, on the deferred path only - on the forward one it holds just the
+		// contact shadows, which stay unfiltered; z lets the forward pass and the object shaders use
+		// the forward history.
+		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut && !forward;
 		Constants.TemporalData.y = Settings.ShadowMaps.TemporalWeight;
 		Constants.TemporalData.z = Settings.ShadowMaps.TemporalFilter && !cut && forward;
 	}
@@ -499,13 +499,16 @@ void ShadowsExteriorEffect::UpdateTemporalHistory() {
 		return;
 	}
 
-	// The screen-space buffer's filtered term on either path, and on the forward one the cascade
-	// term as well, which the object shaders read next frame. Both passes test their history's
-	// depth texel by texel against the depth copy.
-	Device->StretchRect(Textures.ShadowPassSurface, NULL, Textures.ShadowHistorySurface, NULL, D3DTEXF_NONE);
-	if (forward)
+	// The deferred path filters the screen-space buffer and tests its history's depth texel by texel
+	// against a copy of the depth buffer. The forward path filters the cascade term, which the object
+	// shaders read next frame, and which carries the depth it was found at itself.
+	if (forward) {
 		Device->StretchRect(Textures.ForwardBufferSurface, NULL, Textures.ForwardHistorySurface, NULL, D3DTEXF_NONE);
-	Device->StretchRect(depthSurface, NULL, Textures.DepthHistorySurface, NULL, D3DTEXF_NONE);
+	}
+	else {
+		Device->StretchRect(Textures.ShadowPassSurface, NULL, Textures.ShadowHistorySurface, NULL, D3DTEXF_NONE);
+		Device->StretchRect(depthSurface, NULL, Textures.DepthHistorySurface, NULL, D3DTEXF_NONE);
+	}
 	// Normals are stored in VIEW space, so a raw copy rotates with the camera and would read as
 	// a different surface every time the player turns. Keep the view matrix that produced them
 	// so the shader can put them back into world space before comparing.

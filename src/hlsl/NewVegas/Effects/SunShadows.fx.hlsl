@@ -22,7 +22,7 @@ float4 TESR_ShadowFade; // x: sunset attenuation, y: shadows maps active, z: poi
 #endif
 float4 TESR_ShadowBlur; // x: 1 / atlas resolution, y: whether the lod cascade was updated
 float4 TESR_ShadowForwardData; // x: 1 when the forward path is SUPPRESSED
-float4 TESR_ShadowTemporalData; // x: TemporalShadow filters this buffer, y: history weight, z: forward filter has a history to use
+float4 TESR_ShadowTemporalData; // x: TemporalShadow filters this buffer (deferred path), y: history weight, z: forward filter has a history to use
 float4 TESR_ShadowCameraDelta; // xyz: current camera position minus the history's
 float4 TESR_ShadowMoverData; // x: number of moving shadow casters in the two arrays below
 float4 TESR_ShadowMoverAxes[3]; // the plane facing the sun (two axes), then the direction to the sun
@@ -392,11 +392,13 @@ static const float2 kHistoryTaps[4] = { float2(0.0f, 0.0f), float2(1.0f, 0.0f), 
 // there: 0 where the reprojection finds nothing to reuse or a different surface, otherwise the
 // history weight, lowered around moving casters. Shared by both temporal passes: historyValues is
 // the buffer each keeps its term in (x), history receives that term at the reprojected point, and
-// moverLowered whether a moving caster brought the weight down.
+// moverLowered whether a moving caster brought the weight down. depthInValues: the forward history
+// keeps the view depth each term was found at in y (negative where a mover lowered the weight), so
+// it needs no copy of the depth buffer; the screen-space history is tested against that copy.
 //
 // tex2Dlod throughout: the forward pass calls this from inside a branch, where a gradient taking
 // sample is illegal (X3528). None of these buffers has mipmaps, so LOD 0 is the same read.
-float TemporalHistoryWeight(float2 uv, float3 worldPos, sampler2D historyValues, out float history, out bool moverLowered)
+float TemporalHistoryWeight(float2 uv, float3 worldPos, sampler2D historyValues, bool depthInValues, out float history, out bool moverLowered)
 {
     float2 previousUV = uv;
     history = 1.0f;
@@ -438,10 +440,13 @@ float TemporalHistoryWeight(float2 uv, float3 worldPos, sampler2D historyValues,
 	[unroll]
     for (int i = 0; i < 4; i++) {
         float4 tapUV = float4((gridBase + kHistoryTaps[i] + 0.5f) * texel, 0.0f, 0.0f);
-        float tapDepth = tex2Dlod(TESR_ShadowDepthHistoryBuffer, tapUV).x * farZ;
+        float2 tapValue = tex2Dlod(historyValues, tapUV).xy;
+        float tapDepth = abs(tapValue.y);
+        [branch] if (!depthInValues)
+            tapDepth = tex2Dlod(TESR_ShadowDepthHistoryBuffer, tapUV).x * farZ;
         float w = abs(previousClip.w - tapDepth) <= tolerance ? bilinear[i] : 0.0f;
         coverage += w;
-        sum += w * tex2Dlod(historyValues, tapUV).x;
+        sum += w * tapValue.x;
     }
 
 	[branch]
@@ -527,9 +532,10 @@ float TemporalHistoryWeight(float2 uv, float3 worldPos, sampler2D historyValues,
 // frames is divided down. Spatial filtering cannot make that distinction, which is why widening
 // it only ever traded shimmer for mush.
 //
-// On the deferred path this buffer holds the cascades and the contact shadows together. While the
-// forward path runs it holds the contact shadows alone, which are found again from the current
-// view every frame and would reach the composite unfiltered otherwise.
+// This buffer holds the cascades and the contact shadows together on the deferred path, which is the
+// only one this pass runs on. While the forward path runs the buffer holds the contact shadows alone.
+// Filtering those too - this pass, the buffer copy and the depth copy - cost 0.16 ms at 2560x1440
+// and made no difference anyone could see, and vanilla leaves them unfiltered.
 float4 TemporalShadow(VSOUT IN) : COLOR0
 {
     float4 current = tex2D(TESR_PointShadowBuffer, IN.UVCoord);
@@ -542,7 +548,7 @@ float4 TemporalShadow(VSOUT IN) : COLOR0
 
     float history;
     bool moverLowered;
-    float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, TESR_ShadowHistoryBuffer, history, moverLowered);
+    float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, TESR_ShadowHistoryBuffer, false, history, moverLowered);
     current.r = lerp(current.r, history, weight);
     return current;
 }
@@ -568,7 +574,7 @@ float4 ForwardTemporalShadow(VSOUT IN) : COLOR0
 	[branch]
     if (TESR_ShadowTemporalData.z > 0.5f) {
         float history;
-        float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, TESR_ShadowForwardHistory, history, moverLowered);
+        float weight = TemporalHistoryWeight(IN.UVCoord, worldPos.xyz, TESR_ShadowForwardHistory, true, history, moverLowered);
         shadow = lerp(shadow, history, weight);
     }
 
@@ -597,11 +603,6 @@ technique {
         PixelShader = compile ps_3_0 Shadow();
     }
 
-    pass {
-        VertexShader = compile vs_3_0 FrameVS();
-        PixelShader = compile ps_3_0 TemporalShadow();
-    }
-
 }
 
 // Technique 1, rendered into TESR_ShadowForwardBuffer only while the forward path runs with the
@@ -610,5 +611,13 @@ technique {
     pass {
         VertexShader = compile vs_3_0 FrameVS();
         PixelShader = compile ps_3_0 ForwardTemporalShadow();
+    }
+}
+
+// Technique 2, the screen-space buffer's temporal filter. Deferred path only, with the filter on.
+technique {
+    pass {
+        VertexShader = compile vs_3_0 FrameVS();
+        PixelShader = compile ps_3_0 TemporalShadow();
     }
 }
