@@ -45,6 +45,7 @@ void ShaderManager::Initialize() {
 	// initializing the list of effect names
 	TheShaderManager->RegisterEffect<AvgLumaEffect>(&TheShaderManager->Effects.AvgLuma);
 	TheShaderManager->RegisterEffect<AmbientOcclusionEffect>(&TheShaderManager->Effects.AmbientOcclusion);
+	TheShaderManager->RegisterEffect<IndirectLightingEffect>(&TheShaderManager->Effects.IndirectLighting);
 	TheShaderManager->RegisterEffect<BloodLensEffect>(&TheShaderManager->Effects.BloodLens);
 	TheShaderManager->RegisterEffect<BloomEffect>(&TheShaderManager->Effects.Bloom);
 	TheShaderManager->RegisterEffect<BloomLegacyEffect>(&TheShaderManager->Effects.BloomLegacy);
@@ -836,12 +837,17 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	Device->StretchRect(RenderTarget, NULL, RenderedSurface, NULL, D3DTEXF_NONE);
 	Device->StretchRect(RenderTarget, NULL, SourceSurface, NULL, D3DTEXF_NONE);
 
-	// Ambient occlusion into its own buffer, ahead of the composite. Outdoors the exterior shadow
-	// composite then applies it, unless the snow pass has to run in between, which the frame path
-	// puts before the occlusion. Otherwise it is multiplied into the frame further down.
+	// Occlusion into buffers of its own, ahead of the composite: IndirectLighting's occlusion and
+	// bounce, or where it does not render the ambient occlusion. Outdoors the exterior shadow
+	// composite then applies it - IndirectLighting to the ambient alone, which is the one pass that
+	// can tell the ambient from the sun - unless the snow pass has to run in between, which the frame
+	// path puts before the occlusion. Otherwise it is multiplied into the frame further down.
+	// IndirectLighting reads the frame through TESR_RenderedBuffer, so this follows the copies above.
 	auto willRender = [](EffectRecord* effect) { return effect->Enabled && effect->Effect && effect->ShouldRender(); };
-	bool composited = GameState.isExterior && willRender(Effects.ShadowsExteriors) && !willRender(Effects.SnowAccumulation);
-	bool aoBuffered = Effects.AmbientOcclusion->RenderBuffers(Device);
+	bool sunShadowBuffered = GameState.isExterior && willRender(Effects.ShadowsExteriors);
+	bool composited = sunShadowBuffered && !willRender(Effects.SnowAccumulation);
+	bool indirectRendered = Effects.IndirectLighting->RenderBuffers(Device, composited, sunShadowBuffered);
+	bool aoBuffered = !indirectRendered && Effects.AmbientOcclusion->RenderBuffers(Device);
 	bool aoFolded = aoBuffered && composited;
 	Effects.AmbientOcclusion->Constants.Fold.x = aoFolded ? 1.0f : 0.0f;
 	Device->SetRenderTarget(0, RenderTarget);
@@ -852,7 +858,11 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 		Effects.ShadowsInteriors->Render(Device, RenderTarget, RenderedSurface, 0, true, SourceSurface);
 
 	Effects.SnowAccumulation->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
-	if (!aoBuffered)
+	if (indirectRendered) {
+		if (!composited)
+			Effects.IndirectLighting->Render(Device, RenderTarget, RenderedSurface, 1, false, SourceSurface);
+	}
+	else if (!aoBuffered)
 		Effects.AmbientOcclusion->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	else if (!aoFolded)
 		Effects.AmbientOcclusion->Render(Device, RenderTarget, RenderedSurface, 2, false, SourceSurface);

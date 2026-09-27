@@ -22,6 +22,7 @@ float4 TESR_SkyIrradiance[9]; // order-2 SH sky irradiance from Sky.cpp; [0].w i
 float4 TESR_AmbientOcclusionAOData; // z: ClampStrength
 float4 TESR_AmbientOcclusionData; // y: LumThreshold
 float4 TESR_AmbientOcclusionFold; // x: 1 when this pass applies the ambient occlusion in TESR_AmbientOcclusionBuffer
+float4 TESR_IndirectLightingControl; // x: 1 when this pass applies IndirectLighting's buffer
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = ANISOTROPIC; MIPFILTER = LINEAR; };
@@ -32,6 +33,8 @@ sampler2D TESR_NormalsBuffer : register(s3) = sampler_state { ADDRESSU = CLAMP; 
 sampler2D TESR_ShadowForwardBuffer : register(s4) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 // The occlusion AmbientOcclusion.fx rendered ahead of this pass (its Compute technique), read at this pixel.
 sampler2D TESR_AmbientOcclusionBuffer : register(s5) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
+// IndirectLighting's occlusion and bounce, an RGB multiplier for linear colour, rendered ahead of this pass.
+sampler2D TESR_IndirectLightingBuffer : register(s6) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 
 
 static const float DARKNESS = max(0.0,1-TESR_ShadowData.y);
@@ -128,8 +131,9 @@ float3 RedistributedAmbient(float3 flatAmbient, float3 n, float trust, float str
  * Load Shadows Buffer and filter water surfaces
  * returns a shadow value from darkness setting value (full shadow) to 1 (full light)
 */
-float4 ShadowComposite(VSOUT IN)
+float4 ShadowComposite(VSOUT IN, out bool ambientTaken)
 {
+	ambientTaken = false;
 	float4 color = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 	float2 uv = IN.UVCoord;
 
@@ -237,7 +241,24 @@ float4 ShadowComposite(VSOUT IN)
 	// Deferred path only. The object shaders take the whole sun off the cascades they carry, so on
 	// the forward path the contact shadows combined with those here take all of it too.
 	float vis = lerp(target, 1.0f, deferred ? DARKNESS : 0.0f);
-	float3 shading = (sunLight * vis + ambient) / max(sunLight * carried + ambient, 0.0001f);
+
+	// Occlusion and bounce from IndirectLighting, rendered into a buffer of their own before this
+	// pass for this purpose: they are properties of the ambient light, and this is the pass that can
+	// tell the ambient from the sun. Applied here, a crease in full sun keeps its sunlight, where a
+	// multiply of the frame darkens it along with everything else.
+	//
+	// The buffer holds a multiplier for linear colour, and this pass works on the encoded frame, so
+	// it is brought across before use. Light from lamps is spared, the way it relights a sun shadow.
+	float3 occlusion = 1.0f;
+	[branch]
+	if (TESR_IndirectLightingControl.x > 0.0f) {
+		occlusion = tex2Dlod(TESR_IndirectLightingBuffer, float4(uv, 0.0f, 0.0f)).rgb;
+		occlusion = pows(max(occlusion, 0.0f), 1.0f / 2.2f);
+		occlusion = lerp(occlusion, 1.0f, saturate(Shadow.g * TESR_ShadowFade.z));
+		ambientTaken = true;
+	}
+
+	float3 shading = (sunLight * vis + ambient * occlusion) / max(sunLight * carried + ambient, 0.0001f);
 
 	// Views, so an artefact can be attributed to this pass or ruled out of it without guessing
 	// from the composited result.
@@ -251,6 +272,8 @@ float4 ShadowComposite(VSOUT IN)
 	if (TESR_ShadowComposite.x == 6.0f) return float4(trust.xxx, 1.0f);
 	[branch]
 	if (TESR_ShadowComposite.x == 7.0f) return float4(ambient, 1.0f);
+	[branch]
+	if (TESR_ShadowComposite.x == 8.0f) return float4(occlusion, 1.0f);
 
 #if viewshadows == 1
 	return float4(shading, 1.0f);
@@ -262,10 +285,23 @@ float4 ShadowComposite(VSOUT IN)
  * The shadow composite, then the ambient occlusion AmbientOcclusion.fx would otherwise multiply the
  * frame by in a pass of its own right after this one - its Combine, step for step, applied to
  * every result the composite returns.
+ *
+ * IndirectLighting goes on the ambient inside the composite. Where the composite returns before it
+ * gets that far - the underwater surface, the previous composite of mode 1 - it gets the frame
+ * multiply of IndirectLighting's own Apply technique (MultiplyFrame) instead.
  */
 float4 Shadow(VSOUT IN) : COLOR0
 {
-	float4 color = ShadowComposite(IN);
+	bool ambientTaken;
+	float4 color = ShadowComposite(IN, ambientTaken);
+
+	[branch]
+	if (TESR_IndirectLightingControl.x > 0.0f && !ambientTaken) {
+		float3 lin = pows(color.rgb, 2.2);
+		float3 multiplier = tex2Dlod(TESR_IndirectLightingBuffer, float4(IN.UVCoord, 0.0f, 0.0f)).rgb;
+		lin *= lerp(multiplier, 1.0f, saturate((luma(lin) - 0.95f) * 3.0f)); // BLEND_THRESHOLD there
+		color = float4(pows(lin, 1.0f / 2.2f), 1.0f);
+	}
 
 	[branch]
 	if (TESR_AmbientOcclusionFold.x > 0.0f) {

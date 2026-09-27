@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AmbientOcclusion.h"
+#include "IndirectLighting.h"
 #include "ShadowsExterior.h"
 #include "AvgLuma.h"
 #include "BloodLens.h"

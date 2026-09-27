@@ -79,6 +79,7 @@ public:
 		
 	struct	EffectsStruct {
 		AmbientOcclusionEffect*	AmbientOcclusion;
+		IndirectLightingEffect*	IndirectLighting;
 		AvgLumaEffect*			AvgLuma;
 		BloodLensEffect*		BloodLens;
 		BloomEffect*			Bloom;

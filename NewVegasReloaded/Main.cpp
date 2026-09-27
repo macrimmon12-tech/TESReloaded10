@@ -46,6 +46,7 @@ extern "C" {
 
 			if (GetModuleHandle(L"VanillaPlusAO.dll")) {
 				TheShaderManager->Effects.AmbientOcclusion->bNVAOLoaded = true;
+				TheShaderManager->Effects.IndirectLighting->bNVAOLoaded = true;
 			}
 
 			// Vanilla Plus Skin detection lives in src/core/Hooks/GameCommon.cpp's
