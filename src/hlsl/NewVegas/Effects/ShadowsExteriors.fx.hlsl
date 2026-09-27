@@ -9,11 +9,17 @@ float4 TESR_SkyColor;
 float4 TESR_SunAmbient;
 float4 TESR_SunColor;
 float4 TESR_ShadowScreenSpaceData;
+float4 TESR_AmbientOcclusionAOData; // z: ClampStrength
+float4 TESR_AmbientOcclusionData; // y: LumThreshold
+float4 TESR_AmbientOcclusionFold; // x: 1 when this pass applies the ambient occlusion in TESR_AmbientOcclusionBuffer
 
 sampler2D TESR_RenderedBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = ANISOTROPIC; MIPFILTER = LINEAR; };
 sampler2D TESR_PointShadowBuffer : register(s2)  = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_NormalsBuffer : register(s3) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
+// Last: EffectRecord binds the Nth declared sampler to slot N. The occlusion AmbientOcclusion.fx
+// rendered ahead of this pass (its Compute technique), read at this pixel.
+sampler2D TESR_AmbientOcclusionBuffer : register(s4) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = POINT; MINFILTER = POINT; MIPFILTER = NONE; };
 
 
 static const float DARKNESS = max(0.0,1-TESR_ShadowData.y);
@@ -49,7 +55,7 @@ VSOUT FrameVS(VSIN IN)
  * Load Shadows Buffer and filter water surfaces 
  * returns a shadow value from darkness setting value (full shadow) to 1 (full light)
 */
-float4 Shadow(VSOUT IN) : COLOR0
+float4 ShadowComposite(VSOUT IN)
 {
 	float4 color = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 	float2 uv = IN.UVCoord;
@@ -85,6 +91,25 @@ float4 Shadow(VSOUT IN) : COLOR0
 	colorShadow.rgb = lerp(colorShadow, color * Shadow.r, saturate(Shadow.r + 0.5)).rgb;// bias the transition between the 2 colors to make it less noticeable
     colorShadow.rgb = pows(max(0.0,colorShadow.rgb), 1.0/2.2); // delinearise
 	return float4(colorShadow.rgb, 1.0); 
+}
+
+/*
+ * The shadow composite, then the ambient occlusion AmbientOcclusion.fx would otherwise multiply the
+ * frame by in a pass of its own right after this one - its Combine, step for step, applied to
+ * every result the composite returns.
+ */
+float4 Shadow(VSOUT IN) : COLOR0
+{
+	float4 color = ShadowComposite(IN);
+
+	[branch]
+	if (TESR_AmbientOcclusionFold.x > 0.0f) {
+		float3 lin = pows(color.rgb, 2.2);
+		float ao = lerp(TESR_AmbientOcclusionAOData.z, 1.0, tex2Dlod(TESR_AmbientOcclusionBuffer, float4(IN.UVCoord, 0.0f, 0.0f)).r);
+		ao = lerp(ao, 1.0, saturate((luma(lin) - TESR_AmbientOcclusionData.y) * 3.0));
+		color = float4(pows(lin * ao, 1.0 / 2.2), 1.0f);
+	}
+	return color;
 }
 
 

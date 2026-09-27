@@ -1,4 +1,13 @@
 // Ambient Occlusion fullscreen shader for Oblivion/Skyrim Reloaded
+//
+// Three techniques over the same passes. The first writes the occlusion into the frame, one pass
+// after another, and multiplies the frame by it at the end. Compute and Apply do the same work in
+// TESR_AmbientOcclusionBuffer, a single sixteen bit channel, with TESR_AmbientOcclusionScratch as
+// the copy each pass reads: the occlusion is one number per pixel, and the frame is four channels
+// of sixteen bits, copied whole after every pass. Outdoors the exterior shadow composite then
+// multiplies by it; Apply is that multiply on its own, for when the composite does not run first.
+// The buffer Compute renders into is deliberately not declared here: every declared sampler is
+// bound for every pass, and that would bind the render target as a texture.
 
 #define viewao 0
 #define halfres 0
@@ -15,6 +24,7 @@ sampler2D TESR_DepthBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; AD
 sampler2D TESR_SourceBuffer : register(s2) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = LINEAR; };
 sampler2D TESR_BlueNoiseSampler : register(s3) < string ResourceName = "Effects\bluenoise256.dds"; > = sampler_state { ADDRESSU = WRAP; ADDRESSV = WRAP; MAGFILTER = NONE; MINFILTER = NONE; MIPFILTER = NONE; };
 sampler2D TESR_NormalsBuffer : register(s4) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = NONE; MINFILTER = NONE; MIPFILTER = NONE; };
+sampler2D TESR_AmbientOcclusionScratch : register(s5) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = LINEAR; MINFILTER = LINEAR; MIPFILTER = NONE; };
 
 static const float AOsamples = TESR_AmbientOcclusionAOData.x;
 static const float AOstrength = TESR_AmbientOcclusionAOData.y;
@@ -65,10 +75,10 @@ float fogCoeff(float depth){
 	return saturate(invlerp(TESR_FogData.x, TESR_FogData.y, depth));
 }
 
-float4 SSAO(VSOUT IN, uniform float2 OffsetMask) : COLOR0
+float4 SSAO(VSOUT IN, uniform float2 OffsetMask, uniform sampler2D previous) : COLOR0
 {
 	float2 uv = IN.UVCoord.xy;
-	float4 color = tex2D(TESR_RenderedBuffer, uv);
+	float4 color = tex2D(previous, uv);
 	color = OffsetMask.y?color:float(1).xxxx; // use previous rendered buffer if not first pass
 
 #if halfres
@@ -143,11 +153,11 @@ float4 Expand(VSOUT IN) : COLOR0
 	return tex2D(TESR_RenderedBuffer, coord);
 }
 
-float4 Combine(VSOUT IN) : COLOR0
+float4 Combine(VSOUT IN, uniform sampler2D occlusion) : COLOR0
 {
 	float3 color = tex2D(TESR_SourceBuffer, IN.UVCoord).rgb;
 	color = pows(color,2.2); // linearise
-	float ao = lerp(AOclamp, 1.0, tex2D(TESR_RenderedBuffer, IN.UVCoord).r);
+	float ao = lerp(AOclamp, 1.0, tex2D(occlusion, IN.UVCoord).r);
 
 	float luminance = luma(color);
 	float lt = luminance - AOlumThreshold;
@@ -165,10 +175,10 @@ float4 Combine(VSOUT IN) : COLOR0
  
 
 // perform depth aware 12 taps blur along the direction of the offsetmask
-float4 NormalBlurRChannel(VSOUT IN, uniform float2 OffsetMask, uniform float blurRadius,uniform float depthDrop,uniform float endFade) : COLOR0
+float4 NormalBlurRChannel(VSOUT IN, uniform sampler2D buffer, uniform float2 OffsetMask, uniform float blurRadius,uniform float depthDrop,uniform float endFade) : COLOR0
 {
 	float WeightSum = 0.114725602f;
-	float4 color1 = tex2D(TESR_RenderedBuffer, IN.UVCoord) * WeightSum;
+	float4 color1 = tex2D(buffer, IN.UVCoord) * WeightSum;
 	float3 normal = GetNormal(IN.UVCoord);
 	float depth = tex2D(TESR_DepthBuffer, IN.UVCoord).y;
 	
@@ -185,7 +195,7 @@ float4 NormalBlurRChannel(VSOUT IN, uniform float2 OffsetMask, uniform float blu
     for (int i = 0; i < cKernelSize; i++)
     {
 		float2 uvOff = (BlurOffsets[i] * OffsetMask) * blurRadius/depth;
-		float4 color2 = tex2D(TESR_RenderedBuffer, IN.UVCoord + uvOff).r;
+		float4 color2 = tex2D(buffer, IN.UVCoord + uvOff).r;
 		float depth2 = readDepth(IN.UVCoord + uvOff);
 		float3 normal2 = GetNormal(IN.UVCoord + uvOff);
 
@@ -206,13 +216,13 @@ technique
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 SSAO(io.xy);
+		PixelShader = compile ps_3_0 SSAO(io.xy, TESR_RenderedBuffer);
 	}
 
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 SSAO(io.yx);
+		PixelShader = compile ps_3_0 SSAO(io.yx, TESR_RenderedBuffer);
 	}
 
 #if halfres
@@ -226,18 +236,56 @@ technique
 	pass
 	{ 
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 NormalBlurRChannel(io.xy, blurRadius, blurDrop, endFade);
+		PixelShader = compile ps_3_0 NormalBlurRChannel(TESR_RenderedBuffer, io.xy, blurRadius, blurDrop, endFade);
 	}
 	
 	pass
 	{ 
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 NormalBlurRChannel(io.yx, blurRadius, blurDrop, endFade);
+		PixelShader = compile ps_3_0 NormalBlurRChannel(TESR_RenderedBuffer, io.yx, blurRadius, blurDrop, endFade);
 	}
 	
 	pass
 	{
 		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 Combine();
+		PixelShader = compile ps_3_0 Combine(TESR_RenderedBuffer);
+	}
+}
+
+// Technique 1: the occlusion alone, into TESR_AmbientOcclusionBuffer.
+technique Compute
+{
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 SSAO(io.xy, TESR_AmbientOcclusionScratch);
+	}
+
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 SSAO(io.yx, TESR_AmbientOcclusionScratch);
+	}
+
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 NormalBlurRChannel(TESR_AmbientOcclusionScratch, io.xy, blurRadius, blurDrop, endFade);
+	}
+
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 NormalBlurRChannel(TESR_AmbientOcclusionScratch, io.yx, blurRadius, blurDrop, endFade);
+	}
+}
+
+// Technique 2: the frame multiplied by that buffer, where the exterior composite did not do it.
+technique Apply
+{
+	pass
+	{
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 Combine(TESR_AmbientOcclusionScratch);
 	}
 }

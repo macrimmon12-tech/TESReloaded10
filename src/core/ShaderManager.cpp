@@ -809,13 +809,26 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 	Device->StretchRect(RenderTarget, NULL, RenderedSurface, NULL, D3DTEXF_NONE);
 	Device->StretchRect(RenderTarget, NULL, SourceSurface, NULL, D3DTEXF_NONE);
 
+	// Ambient occlusion into its own buffer, ahead of the composite. Outdoors the exterior shadow
+	// composite then applies it, unless the snow pass has to run in between, which the frame path
+	// puts before the occlusion. Otherwise it is multiplied into the frame further down.
+	auto willRender = [](EffectRecord* effect) { return effect->Enabled && effect->Effect && effect->ShouldRender(); };
+	bool composited = GameState.isExterior && willRender(Effects.ShadowsExteriors) && !willRender(Effects.SnowAccumulation);
+	bool aoBuffered = Effects.AmbientOcclusion->RenderBuffers(Device);
+	bool aoFolded = aoBuffered && composited;
+	Effects.AmbientOcclusion->Constants.Fold.x = aoFolded ? 1.0f : 0.0f;
+	Device->SetRenderTarget(0, RenderTarget);
+
 	if (GameState.isExterior) 
 		Effects.ShadowsExteriors->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	else 
 		Effects.ShadowsInteriors->Render(Device, RenderTarget, RenderedSurface, 0, true, SourceSurface);
 
 	Effects.SnowAccumulation->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
-	Effects.AmbientOcclusion->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
+	if (!aoBuffered)
+		Effects.AmbientOcclusion->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
+	else if (!aoFolded)
+		Effects.AmbientOcclusion->Render(Device, RenderTarget, RenderedSurface, 2, false, SourceSurface);
 	Effects.WetWorld->Render(Device, RenderTarget, RenderedSurface, 0, false, SourceSurface);
 	// Beam march first, into its own half res buffer, so the Flashlight Combine pass can
 	// read it. Control.x already folds the effect toggle, the per view toggle and the
