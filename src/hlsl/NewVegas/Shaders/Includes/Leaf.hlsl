@@ -30,11 +30,13 @@ struct PS_OUTPUT {
 
 float3 LeafLighting(PS_INPUT IN) {
 #if FORWARD_SHADOWS
-    // The sun stands in for the normal, which leaves the lookup without a slope bias - a card
-    // turned to the camera says nothing about the surface the sun sees.
+    // Without the temporal history: that is found per screen pixel from the depth buffer, and on
+    // leaves it looked as wrong as the plain lookup. The sun stands in for the normal, which leaves
+    // the lookup without a slope bias - a card turned to the camera says nothing about the surface
+    // the sun sees.
     float3 sunDir = TESR_SmoothedSunDir.xyz;
     float s = SHADOW_VS_PRESENT(IN.shadowWorldPos.w)
-            ? GetSunShadow(IN.shadowWorldPos.xyz + sunDir * LEAF_SHADOW_REACH, sunDir)
+            ? GetSunShadowNoHistory(IN.shadowWorldPos.xyz + sunDir * LEAF_SHADOW_REACH, sunDir)
             : 1.0f;
     return IN.lighting.rgb - IN.sun * (1.0f - s);
 #else

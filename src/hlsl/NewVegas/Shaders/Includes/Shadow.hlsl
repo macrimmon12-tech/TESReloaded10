@@ -257,46 +257,33 @@ float FinishSunShadow(float shadow) {
 }
 
 // ---------------------------------------------------------------------------
-// 1.0 in full light, towards 0 in shadow. Multiply the SUN term by it, before ambient.
+// Whether there is no forward sun shadow to look up at all. Both entry points below start here.
 // ---------------------------------------------------------------------------
-float GetSunShadow(float3 worldPos, float3 worldNormal) {
+bool SunShadowSkipped() {
     // Nonzero SUPPRESSES the forward path; SunShadows.fx reads the same constant and takes
     // over deferred. A missing constant reads zero and leaves forward running.
-    if (TESR_ShadowForwardData.x) return 1.0f;
+    if (TESR_ShadowForwardData.x) return true;
 
     // Sun shadows never apply indoors. Dedicated flag, not ShadowFade.y below -- that one is
     // shared with ShadowsInteriors.fx's own darkness calc and means something else indoors
     // (interior point-shadows enabled), so it can't double as this gate. Without this check,
     // an interior object shader would fall through to stale exterior cascade data left over
     // from the last time the player was outside.
-    if (!TESR_ShadowFormatData.z) return 1.0f;
+    if (!TESR_ShadowFormatData.z) return true;
 
     // Shadow maps switched off entirely (setting), or sun below horizon.
-    if (!TESR_ShadowFade.y) return 1.0f;
+    if (!TESR_ShadowFade.y) return true;
 
     // ShadowMap.pso's channel layout differs per Mode. Fail unshadowed on a mismatch.
-    if (TESR_ShadowFormatData.x != (float)SHADOW_FIXED_MODE) return 1.0f;
+    if (TESR_ShadowFormatData.x != (float)SHADOW_FIXED_MODE) return true;
 
-    // Temporal reuse. The lookup below re-quantises every shadow edge each frame as the sun drags
-    // the map across its own texels, and a per object shader can filter that over time only by
-    // reading a history - it cannot write one. So the deferred pass evaluates the same cascades in
-    // screen space after the scene, filters them the way the deferred path does, and keeps the
-    // result with the view depth it was found at. Here the point is reprojected into that frame:
-    // where the depth there is this point's depth it is the surface that was filtered, and its
-    // value is used. Anywhere else - disoccluded, off screen, a moving caster's shadow, a different
-    // surface in front - the lookup below runs as before.
-    [branch] if (TESR_ShadowTemporalData.z > 0.0f) {
-        float4 previousClip = mul(float4(worldPos + TESR_ShadowCameraDelta.xyz, 1.0f), TESR_ShadowPreviousViewProj);
-        float2 previousUV = previousClip.xy / max(previousClip.w, 1e-4f) * float2(0.5f, -0.5f) + 0.5f;
-        [branch] if (previousClip.w > 0.0f && all(previousUV == saturate(previousUV))) {
-            float2 history = tex2Dlod(TESR_ShadowForwardHistory, float4(previousUV, 0.0f, 0.0f)).rg;
-            // Negative y marks where a moving caster lowered the filter's weight: last frame's
-            // value there is a frame behind the shadow, and the lookup below is not.
-            [branch] if (history.y > 0.0f && abs(previousClip.w - history.y) <= max(0.02f * previousClip.w, 5.0f))
-                return FinishSunShadow(history.x);
-        }
-    }
+    return false;
+}
 
+// ---------------------------------------------------------------------------
+// The cascade lookup itself.
+// ---------------------------------------------------------------------------
+float SunShadowLookup(float3 worldPos, float3 worldNormal) {
     // Push the sample along the normal, scaled by how grazing the sun is.
     float NdotL = dot(worldNormal, TESR_SmoothedSunDir.xyz);
     float offsetScale = saturate(1.0f - NdotL);
@@ -374,4 +361,40 @@ float GetSunShadow(float3 worldPos, float3 worldNormal) {
 #undef SHADOW_TAP_LOD
 
     return FinishSunShadow(shadow);
+}
+
+// ---------------------------------------------------------------------------
+// 1.0 in full light, towards 0 in shadow. Multiply the SUN term by it, before ambient.
+// ---------------------------------------------------------------------------
+float GetSunShadow(float3 worldPos, float3 worldNormal) {
+    if (SunShadowSkipped()) return 1.0f;
+
+    // Temporal reuse. The lookup below re-quantises every shadow edge each frame as the sun drags
+    // the map across its own texels, and a per object shader can filter that over time only by
+    // reading a history - it cannot write one. So the deferred pass evaluates the same cascades in
+    // screen space after the scene, filters them the way the deferred path does, and keeps the
+    // result with the view depth it was found at. Here the point is reprojected into that frame:
+    // where the depth there is this point's depth it is the surface that was filtered, and its
+    // value is used. Anywhere else - disoccluded, off screen, a moving caster's shadow, a different
+    // surface in front - the lookup below runs as before.
+    [branch] if (TESR_ShadowTemporalData.z > 0.0f) {
+        float4 previousClip = mul(float4(worldPos + TESR_ShadowCameraDelta.xyz, 1.0f), TESR_ShadowPreviousViewProj);
+        float2 previousUV = previousClip.xy / max(previousClip.w, 1e-4f) * float2(0.5f, -0.5f) + 0.5f;
+        [branch] if (previousClip.w > 0.0f && all(previousUV == saturate(previousUV))) {
+            float2 history = tex2Dlod(TESR_ShadowForwardHistory, float4(previousUV, 0.0f, 0.0f)).rg;
+            // Negative y marks where a moving caster lowered the filter's weight: last frame's
+            // value there is a frame behind the shadow, and the lookup below is not.
+            [branch] if (history.y > 0.0f && abs(previousClip.w - history.y) <= max(0.02f * previousClip.w, 5.0f))
+                return FinishSunShadow(history.x);
+        }
+    }
+
+    return SunShadowLookup(worldPos, worldNormal);
+}
+
+// GetSunShadow without the temporal history, for surfaces the screen-space pass that keeps it
+// cannot describe.
+float GetSunShadowNoHistory(float3 worldPos, float3 worldNormal) {
+    if (SunShadowSkipped()) return 1.0f;
+    return SunShadowLookup(worldPos, worldNormal);
 }
