@@ -180,7 +180,18 @@ dedicated sessions per task. Check items off as they land.
     tuned against NMS's output, not the other way around.
 - [ ] **Skin shader** — new shader for skin rendering (subsurface-style
   response, etc.).
+  - **PBR-parity controls.** Skin needs the same set of controls PBR has.
+    Skin scales differently from generic PBR surfaces and is set up
+    differently in weathers, so it must not just inherit PBR's values — give
+    it its own settings/weather entries mirroring PBR's control set.
 - [ ] **Grass shader (maybe)** — exploratory; may not be pursued.
+  - **PBR-parity controls.** If pursued, grass needs the same controls as
+    PBR, with its own scaling and per-weather values (grass scales
+    differently and is set differently in weathers). Same requirement as
+    skin above.
+- [ ] **Sky saturation control** — add a saturation control for the sky,
+  placed under the sky shader settings if possible (otherwise the nearest
+  sky-related settings section).
 - [ ] **Curvature/cavity shading from normals buffer** — derive
   curvature/cavity term from the normals buffer for edge/crevice shading.
   - **Concept.** Derive concave/convex shading purely from spatial
