@@ -7,7 +7,7 @@ void DepthOfFieldEffect::UpdateConstants() {
 	if (TheCameraManager->IsVanity())
 		category = &Settings.VanityView;
 	else if (!TheCameraManager->IsFirstPerson())
-		category = &Settings.FirstPerson;
+		category = &Settings.ThirdPerson;
 
 	int Mode = category->Mode;
 	int dofActive = category->Enabled;

@@ -56,3 +56,12 @@ void ImageAdjustEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_LightAdjustColor", &Constants.LightColor);
 
 }
+
+bool ImageAdjustEffect::ShouldRender() {
+	// Saturation is independent of Strength. Everything else is blended by Strength.
+	if (Constants.Data.z != 1.0f) return true;
+	if (Constants.Data.w == 0.0f) return false;
+	return Constants.Data.x != 1.0f || Constants.Data.y != 1.0f ||
+		Constants.DarkColor.x != 1.0f || Constants.DarkColor.y != 1.0f || Constants.DarkColor.z != 1.0f ||
+		Constants.LightColor.x != 1.0f || Constants.LightColor.y != 1.0f || Constants.LightColor.z != 1.0f;
+}

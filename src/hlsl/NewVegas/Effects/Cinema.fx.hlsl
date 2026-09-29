@@ -72,12 +72,14 @@ float4 Cinema(VSOUT IN) : COLOR0
 	//--------------------------------------------------
     // Height as a ratio between wanted letterbox aspect ratio and actual aspect ratio
 	// cancel out if aspect ratio is set to 0 for some reason, to avoid division by 0
-	float letterboxHeight = lerp(TESR_ReciprocalResolution.z, (1 - TESR_ReciprocalResolution.z / aspectRatio) / 2, aspectRatio != 0);
-	float depth = readDepth(IN.UVCoord);
-
-    // Check if the current pixel is within the letterbox region
-    if ((uv.y < letterboxHeight || uv.y > 1 - letterboxHeight) && (depth > TESR_CinemaSettings.w))
-        return float4(0, 0, 0, 1); // Early out to return black if in letterbox area;
+	// UpdateConstants uses 1 as the native/full-frame sentinel. Most gameplay is not in the
+	// configured cinematic context, so do not read and linearize depth for every pixel then.
+	[branch] if (aspectRatio != 1.0f) {
+		float letterboxHeight = (1 - TESR_ReciprocalResolution.z / aspectRatio) / 2;
+		float depth = readDepth(IN.UVCoord);
+		if ((uv.y < letterboxHeight || uv.y > 1 - letterboxHeight) && depth > TESR_CinemaSettings.w)
+			return float4(0, 0, 0, 1);
+	}
 
 	// Chromatic aberration
 	//--------------------------------------------------

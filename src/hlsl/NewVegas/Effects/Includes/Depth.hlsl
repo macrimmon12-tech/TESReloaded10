@@ -14,16 +14,32 @@ static const float nearZ = TESR_CameraData.x;
 static const float farZ = TESR_CameraData.y;
 static const float Q = farZ/(farZ - nearZ);
 
+// CombineDepth stores linear depth (viewZ / farZ) in the first channel. The post-projection depth
+// it used to store as a second channel is an exact function of it (CombineDepth's ToPS), so it is
+// recomputed here and the buffer can be a single R32F channel -- half the bytes per depth read.
+float projectedDepthFromLinear(float linear01)
+{
+	float viewZ = max(linear01 * farZ, 1.0e-6);
+	return nearZ * (farZ - viewZ) / (viewZ * (farZ - nearZ));
+}
+
 float readDepth(float2 coord)
 {
 	return tex2D(TESR_DepthBuffer, coord).x * farZ;
+}
+
+// Explicit LOD variants are safe behind ps_3_0 dynamic branches. Full-screen effects use
+// level zero, so this is equivalent to tex2D for buffers without mipmaps.
+float readDepthLod(float2 coord)
+{
+	return tex2Dlod(TESR_DepthBuffer, float4(coord, 0.0f, 0.0f)).x * farZ;
 }
 
 float3 reconstructPosition(float2 uv)
 {
     float x = uv.x * 2 - 1;
     float y = (1 - uv.y) * 2 - 1;
-    float z = tex2D(TESR_DepthBuffer, uv).y;
+    float z = projectedDepthFromLinear(tex2D(TESR_DepthBuffer, uv).x);
     float4 clipSpace = float4(x, y, z, 1.0f);
 
     float4 viewSpace = mul(clipSpace, TESR_InvProjectionTransform);
@@ -61,7 +77,7 @@ float getHomogenousDepth(float2 uv){
 float4 reconstructWorldPosition(float2 uv, out float viewDepth){
     float x = uv.x * 2 - 1;
     float y = (1 - uv.y) * 2 - 1;
-    float z = tex2D(TESR_DepthBuffer, uv).y;
+    float z = projectedDepthFromLinear(tex2D(TESR_DepthBuffer, uv).x);
     float4 clipSpace = float4(x, y, z, 1.0f);
 
     float4 viewSpace = mul(clipSpace, TESR_InvProjectionTransform);
@@ -72,5 +88,18 @@ float4 reconstructWorldPosition(float2 uv, out float viewDepth){
 	
     float4 worldSpace = mul(viewSpace, TESR_InvViewTransform);
 
+    return float4(worldSpace.xyz, 1.0f);
+}
+
+float4 reconstructWorldPositionLod(float2 uv, out float viewDepth){
+    float x = uv.x * 2 - 1;
+    float y = (1 - uv.y) * 2 - 1;
+    float z = projectedDepthFromLinear(tex2Dlod(TESR_DepthBuffer, float4(uv, 0.0f, 0.0f)).x);
+    float4 viewSpace = mul(float4(x, y, z, 1.0f), TESR_InvProjectionTransform);
+
+    viewSpace /= viewSpace.w;
+    viewDepth = viewSpace.z;
+
+    float4 worldSpace = mul(viewSpace, TESR_InvViewTransform);
     return float4(worldSpace.xyz, 1.0f);
 }

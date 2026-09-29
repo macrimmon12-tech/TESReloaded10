@@ -72,6 +72,18 @@ IDirect3DBaseTexture9* TextureManager::GetCachedTexture(std::string& pathS) {
 
 
 /*
+* Gets the slot holding a game dynamic texture, so callers can follow a slot whose texture changes.
+*/
+IDirect3DBaseTexture9** TextureManager::GetTextureSlotByName(std::string& Name) {
+	TexturePointersList::iterator t = TextureNames.find(Name);
+	if (t == TextureNames.end()) {
+		Logger::Log("[ERROR] Texture %s not found.", Name.c_str());
+		return nullptr;
+	}
+	return t->second;
+}
+
+/*
 * Gets a game dynamic texture by the sampler name
 */
 IDirect3DBaseTexture9* TextureManager::GetTextureByName(std::string& Name) {

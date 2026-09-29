@@ -193,12 +193,32 @@ float4 DX9_SMAADepthEdgeDetectionPS(float4 position : SV_POSITION,
 float4 DX9_SMAALumaDepthEdgeDetectionPS(float4 position : SV_POSITION,
                                         float2 texcoord : TEXCOORD0,
                                         float4 offset[3] : TEXCOORD1) : COLOR {
-    float2 edges = max(SMAALumaEdges(texcoord, offset), SMAADepthEdges(texcoord, offset));
+    float3 weights = float3(0.2126, 0.7152, 0.0722);
+    float L = dot(SMAASamplePoint(TESR_RenderedBuffer, texcoord).rgb, weights);
+    float Lleft = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[0].xy).rgb, weights);
+    float Ltop = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[0].zw).rgb, weights);
+    float2 delta = abs(L - float2(Lleft, Ltop));
+    float2 lumaEdges = step(float2(SMAA_THRESHOLD, SMAA_THRESHOLD), delta);
+    float2 depthEdges = SMAADepthEdges(texcoord, offset);
 
-    if (dot(edges, float2(1.0, 1.0)) == 0.0)
-        discard;
+    // Local contrast cannot turn a rejected luma edge back on. Most pixels
+    // stop here, avoiding the four distant color reads below while retaining
+    // depth-only edges exactly as before.
+    if (dot(lumaEdges, float2(1.0, 1.0)) == 0.0) {
+        if (dot(depthEdges, float2(1.0, 1.0)) == 0.0)
+            discard;
+        return float4(depthEdges, 0.0, 0.0);
+    }
 
-    return float4(edges, 0.0, 0.0);
+    float Lright = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[1].xy).rgb, weights);
+    float Lbottom = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[1].zw).rgb, weights);
+    float2 maxDelta = max(delta, abs(L - float2(Lright, Lbottom)));
+    float Lleftleft = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[2].xy).rgb, weights);
+    float Ltoptop = dot(SMAASamplePoint(TESR_RenderedBuffer, offset[2].zw).rgb, weights);
+    maxDelta = max(maxDelta, abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop)));
+    lumaEdges *= step(max(maxDelta.x, maxDelta.y), SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR * delta);
+
+    return float4(max(lumaEdges, depthEdges), 0.0, 0.0);
 }
 
 float4 DX9_SMAABlendingWeightCalculationPS(float4 position : SV_POSITION,
@@ -228,8 +248,10 @@ technique LumaEdgeDetection {
 
         // We will be creating the stencil buffer for later usage.
         StencilEnable = true;
+        StencilFunc = ALWAYS; // explicit: do not inherit whatever compare the game left bound
         StencilPass = REPLACE;
         StencilRef = 1;
+        StencilWriteMask = 0xFFFFFFFF;
     }
 }
 
@@ -244,8 +266,10 @@ technique ColorEdgeDetection {
 
         // We will be creating the stencil buffer for later usage.
         StencilEnable = true;
+        StencilFunc = ALWAYS; // explicit: do not inherit whatever compare the game left bound
         StencilPass = REPLACE;
         StencilRef = 1;
+        StencilWriteMask = 0xFFFFFFFF;
     }
 }
 
@@ -260,8 +284,10 @@ technique DepthEdgeDetection {
 
         // We will be creating the stencil buffer for later usage.
         StencilEnable = true;
+        StencilFunc = ALWAYS; // explicit: do not inherit whatever compare the game left bound
         StencilPass = REPLACE;
         StencilRef = 1;
+        StencilWriteMask = 0xFFFFFFFF;
     }
 }
 
@@ -276,8 +302,10 @@ technique LumaDepthEdgeDetection {
 
         // We will be creating the stencil buffer for later usage.
         StencilEnable = true;
+        StencilFunc = ALWAYS; // explicit: do not inherit whatever compare the game left bound
         StencilPass = REPLACE;
         StencilRef = 1;
+        StencilWriteMask = 0xFFFFFFFF;
     }
 }
 
@@ -295,6 +323,7 @@ technique BlendWeightCalculation {
         StencilPass = KEEP;
         StencilFunc = EQUAL;
         StencilRef = 1;
+        StencilMask = 0xFFFFFFFF;
     }
 }
 

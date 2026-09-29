@@ -118,7 +118,14 @@ half4 SubPixTest(VSOUT IN) : COLOR
 
 half4 AFAA(VSOUT IN) : COLOR0
 {
-    half3 color = tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb * (1.0f - TESR_DitherBusterData.x);
+    // These five samples feed edge detection and every early-out path. Keep
+    // them once instead of re-reading the same texels as many as three times.
+    half3 center = tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb;
+    half3 colorW = GetBufferOffset(TESR_RenderedBuffer, half2(-1.0f, 0.0f)).rgb;
+    half3 colorE = GetBufferOffset(TESR_RenderedBuffer, half2(1.0f, 0.0f)).rgb;
+    half3 colorN = GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, 1.0f)).rgb;
+    half3 colorS = GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, -1.0f)).rgb;
+    half3 color = center * (1.0f - TESR_DitherBusterData.x);
 
     // --- Luma FXAA Edge Detection ---
     // Super simple easy luma edge detection, better for exteriors
@@ -127,10 +134,10 @@ half4 AFAA(VSOUT IN) : COLOR0
     // fact the red channel alone - green carries about 71% of perceived luminance, so edges that
     // live mostly in green or blue were being under-weighted or missed. Rec.709 weights instead.
     static const half3 LumaWeights = half3(0.2126f, 0.7152f, 0.0722f);
-    half lumaW = dot(GetBufferOffset(TESR_RenderedBuffer, half2(-1.0f, 0.0f)).rgb, LumaWeights);
-    half lumaE = dot(GetBufferOffset(TESR_RenderedBuffer, half2(1.0f, 0.0f)).rgb, LumaWeights);
-    half lumaN = dot(GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, 1.0f)).rgb, LumaWeights);
-    half lumaS = dot(GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, -1.0f)).rgb, LumaWeights);
+    half lumaW = dot(colorW, LumaWeights);
+    half lumaE = dot(colorE, LumaWeights);
+    half lumaN = dot(colorN, LumaWeights);
+    half lumaS = dot(colorS, LumaWeights);
     half2 lumaEdge = half2(lumaS - lumaN, lumaE - lumaW) * 0.5f;
 
     // --- Isolated pixel (dither) detection ---
@@ -146,7 +153,7 @@ half4 AFAA(VSOUT IN) : COLOR0
     // gradient cancel to zero, while an isolated pixel disagrees with every neighbour at once and
     // survives. Worked through: a step of d gives spike = d and length(lumaEdge) = d/2, so
     // isolation = 0; a checkerboard of d gives spike = 4d and length(lumaEdge) = 0.
-    half lumaC = dot(tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb, LumaWeights);
+    half lumaC = dot(center, LumaWeights);
     half spike = abs(lumaC - lumaN) + abs(lumaC - lumaS) + abs(lumaC - lumaE) + abs(lumaC - lumaW);
     half isolation = max(0.0f, spike - 4.0f * length(lumaEdge));
 
@@ -194,20 +201,15 @@ half4 AFAA(VSOUT IN) : COLOR0
     // stays off ordinary edges and off flat texture.
     if (isolation > TESR_DitherBusterData.z && TESR_DitherBusterData.z > 0.0f)
     {
-        half3 centre = tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb;
-        half3 neighbourhood = centre;
-        neighbourhood += GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, 1.0f)).rgb;
-        neighbourhood += GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, -1.0f)).rgb;
-        neighbourhood += GetBufferOffset(TESR_RenderedBuffer, half2(1.0f, 0.0f)).rgb;
-        neighbourhood += GetBufferOffset(TESR_RenderedBuffer, half2(-1.0f, 0.0f)).rgb;
+        half3 neighbourhood = center + colorN + colorS + colorE + colorW;
         neighbourhood *= 0.2f;
 
-        return half4(lerp(centre, neighbourhood, saturate(TESR_DitherBusterData.x)), 1.0f);
+        return half4(lerp(center, neighbourhood, saturate(TESR_DitherBusterData.x)), 1.0f);
     }
 
     if (Mask)
     {
-        color = tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb;
+        color = center;
     }
     else
     {
@@ -249,20 +251,41 @@ half4 AFAA(VSOUT IN) : COLOR0
     return half4(color, 1.0f);
 }
 
+// SMAA runs immediately after this effect and already handles ordinary edges.
+// Keep only the part SMAA cannot solve: isolated/checkerboard alpha-test dither.
+// This replaces the old SubPix + directional AFAA pair with one five-tap pass.
+half4 DitherOnly(VSOUT IN) : COLOR0
+{
+    half3 center = tex2D(TESR_RenderedBuffer, IN.UVCoord).rgb;
+    half3 colorW = GetBufferOffset(TESR_RenderedBuffer, half2(-1.0f, 0.0f)).rgb;
+    half3 colorE = GetBufferOffset(TESR_RenderedBuffer, half2(1.0f, 0.0f)).rgb;
+    half3 colorN = GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, 1.0f)).rgb;
+    half3 colorS = GetBufferOffset(TESR_RenderedBuffer, half2(0.0f, -1.0f)).rgb;
+    static const half3 LumaWeights = half3(0.2126f, 0.7152f, 0.0722f);
+    half lumaC = dot(center, LumaWeights);
+    half lumaW = dot(colorW, LumaWeights);
+    half lumaE = dot(colorE, LumaWeights);
+    half lumaN = dot(colorN, LumaWeights);
+    half lumaS = dot(colorS, LumaWeights);
+    half2 gradient = half2(lumaS - lumaN, lumaE - lumaW) * 0.5f;
+    half spike = abs(lumaC - lumaN) + abs(lumaC - lumaS) +
+                 abs(lumaC - lumaE) + abs(lumaC - lumaW);
+    half isolation = max(0.0f, spike - 4.0f * length(gradient));
+
+    if (TESR_DitherBusterData.z > 0.0f && isolation > TESR_DitherBusterData.z) {
+        half3 neighbourhood = (center + colorN + colorS + colorE + colorW) * 0.2f;
+        center = lerp(center, neighbourhood, saturate(TESR_DitherBusterData.x));
+    }
+    return half4(center, 1.0f);
+}
+
 
 
 technique POST_PROCESS_ANTI_ALIASING
 {
-#if AFAA_SUBPIXEL_READJUSTMENT == 1
     pass
     {
         VertexShader = compile vs_3_0 FrameVS();
-        PixelShader = compile ps_3_0 SubPixTest();
-    }
-#endif
-    pass
-    {
-        VertexShader = compile vs_3_0 FrameVS();
-        PixelShader = compile ps_3_0 AFAA();
+        PixelShader = compile ps_3_0 DitherOnly();
     }
 }

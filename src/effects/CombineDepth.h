@@ -22,4 +22,8 @@ public:
 
 	void	UpdateConstants();
 	void	RegisterTextures();
+	// Depth combine and normal reconstruction in one draw (two render targets). Returns false,
+	// without rendering, when unavailable; the caller then runs the two passes separately.
+	bool	RenderWithNormals(IDirect3DDevice9* Device, IDirect3DSurface9* NormalsSurface);
+	bool	mergedNormalsFailed = false;
 };

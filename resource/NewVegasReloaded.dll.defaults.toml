@@ -60,6 +60,23 @@ ScreenshotKey = 87          # Keycode for custom screenshot hotkey (removes HUD 
 HDRScreenshot = false       # Save screenshots in fbx (use with DXVK HDR)
 PresetManagerEnabled = false # Master toggle for automatic per-location Preset Manager resolution. Off = your own settings are authoritative; Save/Load/Delete in the Preset Manager panel still work. Defaults off: it silently wins the location-based settings that third-party tools like Cartographer -- which this feature supersedes -- also try to control, so turn it on deliberately once you're not running one of those alongside it.
 
+[_Main.Main.Performance]
+FrameChain = true           # effects alternate between two buffers instead of copying the whole frame after every effect. Faster, identical image. Applies immediately.
+CompositeApply = true       # apply exterior sun shadows and ambient occlusion inside the fog pass instead of in their own full-screen passes. Faster, same result. Applies immediately.
+ChainUsesGameTexture = true # use the game's own frame as one of the effect chain's two buffers, avoiding whole-frame copies at the start and end of each chain. Needs FrameChain. Applies immediately.
+MergedDepthNormals = false  # EXPERIMENTAL, keep off: reconstruct normals in the depth pass instead of a separate full-screen pass. On a GTX 1070 (native D3D9) the driver silently skips this draw, so depth and normals stop updating (wrong AO, fog, god rays, SMAA). It checks itself the first time it runs: the log line 'Merged depth/normals check' says whether the driver really drew it, and if it did not, the switch turns itself off until the game is restarted (separate passes, correct image). Applies immediately.
+SlimDepthBuffer = true      # store the effects' depth buffer as one 32-bit channel instead of two (the second is recomputed exactly), halving depth reads in every effect. Requires a game restart.
+WorldSceneGuard = true      # if the game stops rendering the world scene for 10 frames in a row (seen once after loading a save directly into an interior, where the image comes out almost black), skip NVR's effects until it starts again instead of running them on a stale depth buffer. Applies immediately.
+
+[_Main.Main.ReducedQuality]
+GodRaysLowRes = false       # CHANGES THE IMAGE: compute god rays at quarter instead of half resolution (4x fewer pixels). Rays get softer; thin shafts through foliage may shimmer when moving. Applies immediately.
+AOLowRes = false            # CHANGES THE IMAGE: compute ambient occlusion at quarter instead of half resolution (4x fewer pixels). Corner shading gets softer and loses small creases; may look blotchier. Applies immediately.
+PointShadowInterval = 1     # CHANGES THE IMAGE (only when above 1): redraw each point-light shadow cubemap (interiors, and exteriors with point shadows on) every N frames instead of every frame, 1-4. 1 = every frame, the original behaviour. Each light's cubemap is redrawn at once when its light, position, radius or cell changes; in between, moving objects (people, doors) cast shadows that lag up to N-1 frames (about 11 ms at 90 fps for 2). 2 cuts the F10 'Point shadow cubemaps' timer by roughly 40% (about 1.2 ms GPU and 0.9 ms CPU measured in one interior). Applies immediately.
+CheapReflections = false    # CHANGES THE IMAGE: draw the water reflection map without NVR's per-object sun shadows and without terrain parallax, like the original game's reflections. Objects and ground seen IN the water lose their sun shadows and bumpy terrain detail; the game blurs the reflection, so the difference is usually small. Only matters where water is in view and the game reflects objects (bUseWaterReflections... in FalloutPrefs.ini). F10 timer: 'Water reflections (game)'. Applies immediately.
+NearCascadeInterval = 1     # CHANGES THE IMAGE (only when 2): redraw the nearest sun-shadow cascade every 2nd frame instead of every frame, 1-2. Between redraws the cached cascade follows the camera's movement, so still shadows stay put; shadows of moving things (people, creatures, doors) lag one frame, and right after a very fast camera turn the newly visible area may use the softer next cascade for one frame. F10 timers: 'Sun cascade geometry', 'Shadow atlas prefilter', 'Sun cascades (CPU)'. Applies immediately.
+StaggeredSunShadows = false # CHANGES THE IMAGE: redraw the middle sun-shadow cascade (with the default shadow settings roughly 3-9 m away) every 4th frame and the far and most distant ones every 8th, instead of every frame (the most distant one every 4th with ShadowsExteriors > ShadowMaps > LimitFrequency, the original). Still shadows stay put, because a cached cascade follows the camera's movement, but people and creatures moving more than a few metres away get shadows that stutter and can flicker on their bodies. Saves roughly 0.5 ms GPU per frame outdoors (GTX 1070, 1440p) plus some CPU. F10 timers: 'Sun cascade geometry', 'Shadow atlas prefilter', 'Sun cascades (CPU)'. Applies immediately.
+FXAA = false                # CHANGES THE IMAGE: lean FXAA edge smoothing (about 0.15 ms at 1440p vs about 1 ms for SMAA). Meant to replace SMAA: turn SMAA off (Shaders > SMAA) when using it. Slightly softer than SMAA, weaker on thin distant detail. The game's own MSAA (iMultiSample in FalloutPrefs.ini) is not touched. Applies immediately.
+
 [_Main.Main.Precipitations]
 RemovePrecipitations = false   # Disables vanilla rain and other precipitations.
 
@@ -239,7 +256,7 @@ Strength = 0.5
 Enabled = false                        #
 
 [_Shaders.LUT.Main]
-DayLUT          = 'neutral_lut.png'    # Filename of the day LUT (PNG/DDS in Data/Textures/NewVegasReloaded/LUTs/).
+DayLUT          = 'neutral_lut.png'    # Filename of the day LUT in Data/Textures/NewVegasReloaded/LUTs/: a .cube file, or a PNG/DDS/BMP horizontal strip N*N wide and N high (256x16, 1024x32, 1089x33, 4096x64...). Other image shapes are ignored and logged.
 NightLUT        = 'neutral_lut.png'    # Filename of the night LUT.
 InteriorLUT     = 'neutral_lut.png'    # Filename of the interior LUT.
 Strength        = 1.0                  # Overall LUT blend strength (0.0 = no effect, 1.0 = full).
@@ -292,20 +309,20 @@ NearBlurCutOff = 0                     # Close up range that doesn't get blurred
 Radius = 1.5                           # Radius for the bokeh blur.
 
 [_Shaders.Exposure.Main]
-DarkAdaptSpeed = 50.0                  # Speed for the exposure to adjust when the screen gets darker.
-LightAdaptSpeed = 50.0                 # Speed for the exposure to adjust when the screen gets brighter.
+DarkAdaptSpeed = 0.2                   # Speed for the exposure to adjust when the screen gets darker, in brightness units per second. 0.2 adjusts over a second or two; the old default 50 followed every blinking sign within a few frames and made the whole screen flicker (most visible on the Strip and at high frame rates).
+LightAdaptSpeed = 0.2                  # Speed for the exposure to adjust when the screen gets brighter, in brightness units per second. 0.2 adjusts over a second or two (the old default 50 flickered; see DarkAdaptSpeed).
 MaxBrightness = 0.5                    # Brightness treshold above which the screen will be darkened.
 MinBrightness = 0.2                    # Brightness treshold below which the screen will be brightened.
 
 [_Shaders.Exposure.Interiors]
-DarkAdaptSpeed = 50.0                  # Speed for the exposure to adjust when the screen gets darker.
-LightAdaptSpeed = 50.0                 # Speed for the exposure to adjust when the screen gets brighter.
+DarkAdaptSpeed = 0.2                   # Speed for the exposure to adjust when the screen gets darker, in brightness units per second. 0.2 adjusts over a second or two; the old default 50 followed every blinking sign within a few frames and made the whole screen flicker (most visible on the Strip and at high frame rates).
+LightAdaptSpeed = 0.2                  # Speed for the exposure to adjust when the screen gets brighter, in brightness units per second. 0.2 adjusts over a second or two (the old default 50 flickered; see DarkAdaptSpeed).
 MaxBrightness = 0.3                    # Brightness treshold above which the screen will be darkened.
 MinBrightness = 1.0                    # Brightness treshold below which the screen will be brightened.
 
 [_Shaders.Exposure.Night]
-DarkAdaptSpeed = 50.0                  # Speed for the exposure to adjust when the screen gets darker.
-LightAdaptSpeed = 50.0                 # Speed for the exposure to adjust when the screen gets brighter.
+DarkAdaptSpeed = 0.2                   # Speed for the exposure to adjust when the screen gets darker, in brightness units per second. 0.2 adjusts over a second or two; the old default 50 followed every blinking sign within a few frames and made the whole screen flicker (most visible on the Strip and at high frame rates).
+LightAdaptSpeed = 0.2                  # Speed for the exposure to adjust when the screen gets brighter, in brightness units per second. 0.2 adjusts over a second or two (the old default 50 flickered; see DarkAdaptSpeed).
 MaxBrightness = 0.0                    # Brightness treshold above which the screen will be darkened.
 MinBrightness = 0.3                    # Brightness treshold below which the screen will be brightened.
 

@@ -168,12 +168,12 @@ float GetLightAmount(float4 positionWS, float3 normal)
 
 	// Each cascade is offset in its OWN texel scale -- one shared samplePos cannot suit all
 	// four when their texels differ by more than an order of magnitude.
-	float4 shadows = {
-        GetLightAmountValue(TESR_ShadowCameraToLightTransformNear,   float4(positionWS.xyz + offsetDistance.x * normal, 1.0f), 0.0, 0.0, bias, 0.1f),
-		GetLightAmountValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS.xyz + offsetDistance.y * normal, 1.0f), 0.5, 0.0, bias, 0.2f),
-		GetLightAmountValue(TESR_ShadowCameraToLightTransformFar,    float4(positionWS.xyz + offsetDistance.z * normal, 1.0f), 0.0, 0.5, bias, 0.6f),
-		GetLightAmountValue(TESR_ShadowCameraToLightTransformLod,    float4(positionWS.xyz + offsetDistance.w * normal, 1.0f), 0.5, 0.5, bias, 0.8f),
-    };
+    // Evaluate only the selected cascade(s), as the forward path already does.
+    // Sampling uses explicit LOD, so it is legal inside ps_3_0 dynamic branches.
+#define TAP_NEAR GetLightAmountValue(TESR_ShadowCameraToLightTransformNear, float4(positionWS.xyz + offsetDistance.x * normal, 1), 0, 0, bias, 0.1f)
+#define TAP_MIDDLE GetLightAmountValue(TESR_ShadowCameraToLightTransformMiddle, float4(positionWS.xyz + offsetDistance.y * normal, 1), 0.5, 0, bias, 0.2f)
+#define TAP_FAR GetLightAmountValue(TESR_ShadowCameraToLightTransformFar, float4(positionWS.xyz + offsetDistance.z * normal, 1), 0, 0.5, bias, 0.6f)
+#define TAP_LOD GetLightAmountValue(TESR_ShadowCameraToLightTransformLod, float4(positionWS.xyz + offsetDistance.w * normal, 1), 0.5, 0.5, bias, 0.8f)
 
     float4 distances = {
         length(positionWS.xyz - TESR_ShadowNearCenter.xyz),
@@ -182,29 +182,29 @@ float GetLightAmount(float4 positionWS, float3 normal)
 		length(positionWS.xyz - TESR_ShadowLodCenter.xyz),
     };
 	
-    if (distances.x < TESR_ShadowNearCenter.w) {
-        if (distances.x < TESR_ShadowNearCenter.w * blend)
-            return shadows.x;
+    [branch] if (distances.x < TESR_ShadowNearCenter.w) {
+        [branch] if (distances.x < TESR_ShadowNearCenter.w * blend)
+            return TAP_NEAR;
 		
-        return lerp(shadows.x, shadows.y, smoothstep(TESR_ShadowNearCenter.w * blend, TESR_ShadowNearCenter.w, distances.x));
+        return lerp(TAP_NEAR, TAP_MIDDLE, smoothstep(TESR_ShadowNearCenter.w * blend, TESR_ShadowNearCenter.w, distances.x));
     }
     else if (distances.y < TESR_ShadowMiddleCenter.w) {
-        if (distances.y < TESR_ShadowMiddleCenter.w * blend)
-            return shadows.y;
+        [branch] if (distances.y < TESR_ShadowMiddleCenter.w * blend)
+            return TAP_MIDDLE;
 		
-        return lerp(shadows.y, shadows.z, smoothstep(TESR_ShadowMiddleCenter.w * blend, TESR_ShadowMiddleCenter.w, distances.y));
+        return lerp(TAP_MIDDLE, TAP_FAR, smoothstep(TESR_ShadowMiddleCenter.w * blend, TESR_ShadowMiddleCenter.w, distances.y));
     }
     else if (distances.z < TESR_ShadowFarCenter.w) {
-        if (distances.z < TESR_ShadowFarCenter.w * blend)
-            return shadows.z;
+        [branch] if (distances.z < TESR_ShadowFarCenter.w * blend)
+            return TAP_FAR;
 		
-        return lerp(shadows.z, shadows.w, smoothstep(TESR_ShadowFarCenter.w * blend, TESR_ShadowFarCenter.w, distances.z));
+        return lerp(TAP_FAR, TAP_LOD, smoothstep(TESR_ShadowFarCenter.w * blend, TESR_ShadowFarCenter.w, distances.z));
     }
     else if (distances.w < TESR_ShadowLodCenter.w) {
-        if (distances.w < TESR_ShadowLodCenter.w * blend)
-            return shadows.w;
+        [branch] if (distances.w < TESR_ShadowLodCenter.w * blend)
+            return TAP_LOD;
 		
-        return lerp(shadows.w, 1.0f, smoothstep(TESR_ShadowLodCenter.w * blend, TESR_ShadowLodCenter.w, distances.w));
+        return lerp(TAP_LOD, 1.0f, smoothstep(TESR_ShadowLodCenter.w * blend, TESR_ShadowLodCenter.w, distances.w));
     }
     else {
         return 1.0f;
@@ -213,6 +213,10 @@ float GetLightAmount(float4 positionWS, float3 normal)
 
 // returns a semi random float3 between 0 and 1 based on the given seed. (blue noise)
 // tailored to return a different value for each uv coord of the screen.
+#undef TAP_NEAR
+#undef TAP_MIDDLE
+#undef TAP_FAR
+#undef TAP_LOD
 float3 random(float2 seed)
 {
 	return tex2D(TESR_NoiseSampler, (seed/256 + 0.5) / TESR_ReciprocalResolution.xy).xyz;
@@ -228,11 +232,22 @@ float4 ScreenSpaceShadow(VSOUT IN) : COLOR0
     float4 color = tex2D(TESR_PointShadowBuffer, IN.UVCoord);
 	if (!TESR_ShadowScreenSpaceData.x) return float4(1.0, color.g, 0, 1); // skip is screenspace shadows are disabled
 
-	float3 pos = reconstructPosition(uv);// + expand(random3); 
+	float3 pos = reconstructPosition(uv);// + expand(random3);
 
-	float bias = 0.01;
 	if (pos.z > SSS_MAXDEPTH) return float4(1.0, color.g, 0, 1); // early out for pixels further away than the max render distance
-	
+
+	// Surfaces facing away from the sun receive no direct sun, so a contact shadow there can
+	// only darken ambient light -- and it is exactly where the march runs INTO the receiving
+	// surface. Bilinear linear-depth reads along that ray are slightly off the true plane, and
+	// the error cycles with the sub-pixel sample phase, so a fixed tiny bias flips the test on
+	// and off in bands perpendicular to the ray (horizontal lines under a high sun). Fade the
+	// term out as the surface turns away from the light, and scale the self-intersection bias
+	// with distance so grazing lit faces do not band either.
+	float NdotL = dot(GetNormal(uv), normalize(TESR_ViewSpaceLightDir.xyz));
+	float facing = saturate(NdotL * 8.0f);
+	if (facing <= 0.0f) return float4(1.0, color.g, 0, 1);
+	float bias = max(0.01f, pos.z * 0.002f);
+
     float3 random3 = random(uv);
     float rand = lerp(min(0.8f, pos.z / SSS_MAXDEPTH), 1.0f, random3.r); // some noise to vary the ray length
 
@@ -268,7 +283,7 @@ float4 ScreenSpaceShadow(VSOUT IN) : COLOR0
 		total += 1/step1 + 1/step2; // weight samples inversely with distance
 	}
 
-    occlusion = pows(occlusion / total, 0.3); // get an average shading based on total weights
+    occlusion = pows(occlusion / total, 0.3) * facing; // get an average shading based on total weights
 	
 
     // save result of SSS in red channel, and fade contribution with distance
@@ -280,9 +295,6 @@ float4 ScreenSpaceShadow(VSOUT IN) : COLOR0
 float4 Shadow(VSOUT IN) : COLOR0
 {
 	float2 uv = IN.UVCoord;
-
-    float viewDepth;
-    float4 worldPos = reconstructWorldPosition(uv, viewDepth);
 
 	// Sample Screen Space shadows
 	float4 Shadow = tex2D(TESR_PointShadowBuffer, IN.UVCoord);
@@ -305,18 +317,30 @@ float4 Shadow(VSOUT IN) : COLOR0
 	// mid-session hands the cascades back here in the same frame -- game shaders cannot be
 	// recompiled at runtime, so a macro alone would leave neither path drawing shadows.
 #if FORWARD_SHADOWS
-	// GetWorldNormal samples the normals buffer, so it has to stay outside the branch.
-	float3 normal = GetWorldNormal(uv);
-	[branch] if (TESR_ShadowForwardData.x) {
-		Shadow.r = min(Shadow.r, GetLightAmount(worldPos, normal));
-	}
+	// Forward mode already evaluated the cascades per object. This coherent early return avoids
+	// reconstructing world position and reading normals for the entire screen. Explicit-LOD
+	// helpers keep the deferred fallback legal inside ps_3_0 dynamic flow control.
+	[branch] if (!TESR_ShadowForwardData.x) return Shadow;
 #else
 	// Forward was compiled out entirely, so the cascades are always ours.
-	float3 normal = GetWorldNormal(uv);
-	Shadow.r = min(Shadow.r, GetLightAmount(worldPos, normal)); // darkest of screenspace & sun
 #endif
 
+	float viewDepth;
+	float4 worldPos = reconstructWorldPositionLod(uv, viewDepth);
+	float3 normal = GetWorldNormalLod(uv);
+	Shadow.r = min(Shadow.r, GetLightAmount(worldPos, normal)); // darkest of screenspace & sun
+
 	return Shadow;
+}
+
+float4 FinalContactBlur(VSOUT IN) : COLOR0
+{
+	float4 shadow = DepthBlurKeep(IN, TESR_PointShadowBuffer, OffsetMaskV,
+		TESR_ShadowScreenSpaceData.y, 3500, SSS_MAXDEPTH);
+	// Beyond the contact-shadow range DepthBlur passes its input through; the in-place path
+	// used to leave those texels untouched, so do not apply the intensity curve to them either.
+	if (readDepthLod(IN.UVCoord) > SSS_MAXDEPTH) return shadow;
+	return pow(shadow, TESR_ShadowScreenSpaceData.w);
 }
 
 
@@ -329,12 +353,12 @@ technique {
 
 	pass {
 		VertexShader = compile vs_3_0 FrameVS();
-	 	PixelShader = compile ps_3_0 DepthBlur(TESR_PointShadowBuffer, OffsetMaskH, TESR_ShadowScreenSpaceData.y, 3500, SSS_MAXDEPTH);
+	 	PixelShader = compile ps_3_0 DepthBlurKeep(TESR_PointShadowBuffer, OffsetMaskH, TESR_ShadowScreenSpaceData.y, 3500, SSS_MAXDEPTH);
 	}
 
 	pass {
 		VertexShader = compile vs_3_0 FrameVS();
-	 	PixelShader = compile ps_3_0 DepthBlur(TESR_PointShadowBuffer, OffsetMaskV, TESR_ShadowScreenSpaceData.y, 3500, SSS_MAXDEPTH);
+	 	PixelShader = compile ps_3_0 DepthBlurKeep(TESR_PointShadowBuffer, OffsetMaskV, TESR_ShadowScreenSpaceData.y, 3500, SSS_MAXDEPTH);
 	}
 
     pass {
@@ -342,4 +366,24 @@ technique {
         PixelShader = compile ps_3_0 Shadow();
     }
 
+}
+
+// With forward cascades enabled, Shadow() only samples the vertical blur result and raises it
+// to the configured intensity. Do that in the vertical pass and avoid a fourth full-screen draw
+// and copy. The DLL selects this technique only for the forward path.
+technique ForwardContactShadows {
+	pass {
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 ScreenSpaceShadow();
+	}
+
+	pass {
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 DepthBlurKeep(TESR_PointShadowBuffer, OffsetMaskH, TESR_ShadowScreenSpaceData.y, 3500, SSS_MAXDEPTH);
+	}
+
+	pass {
+		VertexShader = compile vs_3_0 FrameVS();
+		PixelShader = compile ps_3_0 FinalContactBlur();
+	}
 }
