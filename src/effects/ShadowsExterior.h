@@ -48,6 +48,7 @@ public:
 		D3DXMATRIX		ShadowSpotlightCameraToLight[SpotLightsMax];
 		D3DXVECTOR4		ShadowCubeMapLightPosition;
 		D3DXVECTOR4		ShadowLightPosition[ShadowCubeMapsMax];
+		D3DXVECTOR4		ShadowLightWeight[ShadowCubeMapsMax];	// x: how much of the slot's light is shadowed, y: how much of the light is counted
 		D3DXVECTOR4		ShadowMapRadius;
 		D3DXVECTOR4		ShadowBlur;
 		// Forward sun shadows, runtime side. x: 1 when the forward path is SUPPRESSED.
@@ -134,6 +135,9 @@ public:
 		int					DrawDistance;
 		float				Darkness;
 		float				LightRadiusMult;
+		float				LightFadeTime;
+		float				LightSlotMargin;
+		bool				LightsByView;
 		bool				UseCastShadowFlag;
 		bool				PlayerShadowThirdPerson;
 		bool				PlayerShadowFirstPerson;

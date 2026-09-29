@@ -1,6 +1,7 @@
 // Shader to compute the complete point-light shadow pass in one screen draw.
 
 float4 TESR_ShadowLightPosition[12];
+float4 TESR_ShadowLightWeight[12]; // x: how much of the slot's light is shadowed, y: how much of the light is counted
 float4 TESR_LightPosition[12];
 float4 TESR_LightColor[24];
 float4 TESR_ShadowFade;
@@ -69,6 +70,15 @@ float GetSpotLightAmount(float4 worldPos, float4 spotLightPosition, float4 spotL
 }
 
 
+// One shadow slot. While the slot passes from one light to another, the shadow weight blends the light with its cubemap
+// shadow towards the same light without it. At weight 1 this is exactly GetPointLightAmount.
+float SlotLight(samplerCUBE cubeMap, float4 worldPos, float4 lightPos, float4 normal, float4 color, float shadowWeight) {
+	float shadowed = GetPointLightAmount(cubeMap, worldPos, lightPos, normal);
+	float unshadowed = lightPos.w ? GetPointLightContribution(worldPos, lightPos, normal) : 0.0f;
+	return (shadowed + (unshadowed - shadowed) * (1.0f - shadowWeight)) * luma(color.rgb) * color.w;
+}
+
+
 float4 Shadow( VSOUT IN ) : COLOR0 {
 
 	float2 uv = IN.UVCoord;
@@ -78,19 +88,19 @@ float4 Shadow( VSOUT IN ) : COLOR0 {
 	float4 normal = float4(GetWorldNormal(uv), 1);
 	// float Shadow = 0.0;
 
-	float Shadow = GetPointLightAmount(TESR_ShadowCubeMapBuffer0, world_pos, TESR_ShadowLightPosition[0], normal) * luma(TESR_LightColor[0].rgb) * TESR_LightColor[0].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer1, world_pos, TESR_ShadowLightPosition[1], normal) * luma(TESR_LightColor[1].rgb) * TESR_LightColor[1].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer2, world_pos, TESR_ShadowLightPosition[2], normal) * luma(TESR_LightColor[2].rgb) * TESR_LightColor[2].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer3, world_pos, TESR_ShadowLightPosition[3], normal) * luma(TESR_LightColor[3].rgb) * TESR_LightColor[3].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer4, world_pos, TESR_ShadowLightPosition[4], normal) * luma(TESR_LightColor[4].rgb) * TESR_LightColor[4].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer5, world_pos, TESR_ShadowLightPosition[5], normal) * luma(TESR_LightColor[5].rgb) * TESR_LightColor[5].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer6, world_pos, TESR_ShadowLightPosition[6], normal) * luma(TESR_LightColor[6].rgb) * TESR_LightColor[6].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer7, world_pos, TESR_ShadowLightPosition[7], normal) * luma(TESR_LightColor[7].rgb) * TESR_LightColor[7].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer8, world_pos, TESR_ShadowLightPosition[8], normal) * luma(TESR_LightColor[8].rgb) * TESR_LightColor[8].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer9, world_pos, TESR_ShadowLightPosition[9], normal) * luma(TESR_LightColor[9].rgb) * TESR_LightColor[9].w;
-	Shadow += GetPointLightAmount(TESR_ShadowCubeMapBuffer10, world_pos, TESR_ShadowLightPosition[10], normal) * luma(TESR_LightColor[10].rgb) * TESR_LightColor[10].w;
+	float Shadow = SlotLight(TESR_ShadowCubeMapBuffer0, world_pos, TESR_ShadowLightPosition[0], normal, TESR_LightColor[0], TESR_ShadowLightWeight[0].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer1, world_pos, TESR_ShadowLightPosition[1], normal, TESR_LightColor[1], TESR_ShadowLightWeight[1].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer2, world_pos, TESR_ShadowLightPosition[2], normal, TESR_LightColor[2], TESR_ShadowLightWeight[2].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer3, world_pos, TESR_ShadowLightPosition[3], normal, TESR_LightColor[3], TESR_ShadowLightWeight[3].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer4, world_pos, TESR_ShadowLightPosition[4], normal, TESR_LightColor[4], TESR_ShadowLightWeight[4].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer5, world_pos, TESR_ShadowLightPosition[5], normal, TESR_LightColor[5], TESR_ShadowLightWeight[5].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer6, world_pos, TESR_ShadowLightPosition[6], normal, TESR_LightColor[6], TESR_ShadowLightWeight[6].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer7, world_pos, TESR_ShadowLightPosition[7], normal, TESR_LightColor[7], TESR_ShadowLightWeight[7].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer8, world_pos, TESR_ShadowLightPosition[8], normal, TESR_LightColor[8], TESR_ShadowLightWeight[8].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer9, world_pos, TESR_ShadowLightPosition[9], normal, TESR_LightColor[9], TESR_ShadowLightWeight[9].x);
+	Shadow += SlotLight(TESR_ShadowCubeMapBuffer10, world_pos, TESR_ShadowLightPosition[10], normal, TESR_LightColor[10], TESR_ShadowLightWeight[10].x);
 	[branch] if (TESR_ShadowLightPosition[11].w)
-		Shadow += GetPointLightContribution(world_pos, TESR_ShadowLightPosition[11], normal);
+		Shadow += GetPointLightContribution(world_pos, TESR_ShadowLightPosition[11], normal) * TESR_ShadowLightWeight[11].y;
 
 	[branch] if (TESR_SpotLightPosition.w)
 		Shadow += GetSpotLightAmount(world_pos, TESR_SpotLightPosition, TESR_SpotLightDirection, normal) * luma(TESR_SpotLightColor.rgb) * TESR_SpotLightColor.w;

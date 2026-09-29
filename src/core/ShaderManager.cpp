@@ -601,6 +601,250 @@ bool ShaderManager::LoadShader(NiD3DPixelShader* Shader) {
 }
 
 
+/*
+* Point light slots with fades (Shaders.ShadowsInteriors.Main LightFadeTime above 0). A shadow slot stays with its light
+* while that light is still a candidate; a closer light takes a slot only once it is LightSlotMargin times closer than
+* the farthest holder. The outgoing light's shadow then fades out and the incoming one's fades in, in the same slot, so no
+* cubemap is added. A light entering or leaving the counted lights fades in or out as well; one gone from the game's
+* light list fades from where it was last seen, and its slot keeps the cubemap it last drew until then. A new interior
+* cell, a change between interior and exterior, or a change of the setting starts over without fades.
+*/
+namespace LightSlots {
+
+	struct Candidate {
+		ShadowSceneLight*	Scene;
+		NiPointLight*		Light;
+		D3DXVECTOR4			Pos;		// w: radius
+		D3DXVECTOR4			Color;		// w: dimmer
+		float				Distance;
+		bool				CanShadow;
+		bool				InSlot;
+	};
+
+	struct Slot {
+		ShadowSceneLight*	Scene = nullptr;
+		NiPointLight*		Light = nullptr;	// identity only; the light is reached through Scene, and only while Present
+		D3DXVECTOR4			Pos = { 0, 0, 0, 0 };
+		D3DXVECTOR4			Color = { 0, 0, 0, 0 };
+		float				Distance = 0.0f;
+		float				ShadowWeight = 0.0f;
+		bool				Leaving = false;
+		bool				Present = false;
+	};
+
+	struct Record {
+		D3DXVECTOR4			Pos = { 0, 0, 0, 0 };
+		D3DXVECTOR4			Color = { 0, 0, 0, 0 };
+		float				Weight = 0.0f;
+		bool				Selected = false;
+	};
+
+	static Slot								Slots[ShadowCubeMapsMax];
+	static std::map<NiPointLight*, Record>	Records;	// keys are never dereferenced
+	static void*							Cell = nullptr;
+	static bool								LastExterior = false;
+	static bool								Active = false;
+	static double							LastTime = 0.0;
+	static bool								Fresh = true;
+
+	static void Reset() {
+		for (auto& slot : Slots) slot = Slot();
+		Records.clear();
+		Fresh = true;
+	}
+
+	// Full weights for the stock selection, so the shader gives exactly the stock result.
+	static void FullWeights() {
+		D3DXVECTOR4* weights = TheShaderManager->Effects.ShadowsExteriors->Constants.ShadowLightWeight;
+		for (int i = 0; i < ShadowCubeMapsMax; i++) weights[i] = D3DXVECTOR4(1.0f, 1.0f, 0.0f, 0.0f);
+		if (Active) Reset();
+		Active = false;
+	}
+
+	static void Select(std::map<int, ShadowSceneLight*>& SceneLights, ShadowSceneLight** ShadowLightsList, NiPointLight** LightsList,
+		int ShadowLightsMax, ShadowsExteriorEffect::InteriorsStruct* Settings) {
+
+		ShadowsExteriorEffect::ShadowStruct* Constants = &TheShaderManager->Effects.ShadowsExteriors->Constants;
+		const double now = TheFrameRateManager->Time;
+		const float dt = (float)std::clamp(now - LastTime, 0.0, 0.1);
+		LastTime = now;
+		const bool exterior = TheShaderManager->GameState.isExterior;
+		if (!Active || exterior != LastExterior || (!exterior && Player->parentCell != Cell)) {
+			Reset();
+			Active = true;
+			LastExterior = exterior;
+		}
+		Cell = Player->parentCell;
+
+		const float margin = Settings->LightSlotMargin;
+		const float step = Fresh ? 1.0f : dt / Settings->LightFadeTime;
+
+		// Candidates, nearest first (SceneLights is keyed by distance).
+		std::vector<Candidate> candidates;
+		for (auto& entry : SceneLights) {
+			NiPointLight* light = entry.second->sourceLight;
+			if (!light || light->EffectType != NiDynamicEffect::EffectTypes::POINT_LIGHT) continue;
+			Candidate c;
+			c.Scene = entry.second;
+			c.Light = light;
+			c.Pos = light->m_worldTransform.pos.toD3DXVEC4();
+			c.Pos.w = light->Spec.r * Settings->LightRadiusMult;
+			c.Color = D3DXVECTOR4(light->Diff.r, light->Diff.g, light->Diff.b, light->Dimmer);
+			c.Distance = entry.first / 10000.0f;
+			c.CanShadow = c.Pos.w > 10.0f;
+			c.InSlot = false;
+			candidates.push_back(c);
+		}
+		auto find = [&](NiPointLight* light) -> Candidate* {
+			for (auto& c : candidates) if (c.Light == light) return &c;
+			return nullptr;
+		};
+		auto assign = [&](Slot& slot, Candidate* c) {
+			slot = Slot();
+			slot.Scene = c->Scene;
+			slot.Light = c->Light;
+			slot.Pos = c->Pos;
+			slot.Color = c->Color;
+			slot.Distance = c->Distance;
+			slot.ShadowWeight = step >= 1.0f ? 1.0f : 0.0f;
+			slot.Present = true;
+			c->InSlot = true;
+		};
+
+		// Slots follow their light.
+		for (int i = 0; i < ShadowCubeMapsMax; i++) {
+			Slot& slot = Slots[i];
+			if (!slot.Light) continue;
+			if (Candidate* c = find(slot.Light)) {
+				slot.Scene = c->Scene;
+				slot.Pos = c->Pos;
+				slot.Color = c->Color;
+				slot.Distance = c->Distance;
+				slot.Present = true;
+				c->InSlot = true;
+				if (!c->CanShadow) slot.Leaving = true;
+			}
+			else
+				slot.Present = false;
+			if (i >= ShadowLightsMax) slot.Leaving = true;
+		}
+
+		// Free slots go to the nearest lights without one. After that a light takes a slot only when it is closer than the
+		// farthest holder by the margin; a slot already on its way out (leaving, or its light gone) is promised to the next
+		// light in line.
+		std::vector<Candidate*> challengers;
+		for (auto& c : candidates) if (c.CanShadow && !c.InSlot) challengers.push_back(&c);
+		size_t next = 0;
+		for (int i = 0; i < ShadowLightsMax && next < challengers.size(); i++)
+			if (!Slots[i].Light) assign(Slots[i], challengers[next++]);
+		for (int i = 0; i < ShadowLightsMax; i++)
+			if (Slots[i].Light && (Slots[i].Leaving || !Slots[i].Present)) next++;
+		for (; next < challengers.size(); next++) {
+			int farthest = -1;
+			for (int i = 0; i < ShadowLightsMax; i++) {
+				const Slot& slot = Slots[i];
+				if (!slot.Light || slot.Leaving || !slot.Present) continue;
+				if (farthest < 0 || slot.Distance > Slots[farthest].Distance) farthest = i;
+			}
+			if (farthest < 0 || !(challengers[next]->Distance * margin < Slots[farthest].Distance)) break;
+			Slots[farthest].Leaving = true;
+		}
+
+		// Shadow weights. A leaving slot fades its shadow out, then its light carries on without one.
+		for (int i = 0; i < ShadowCubeMapsMax; i++) {
+			Slot& slot = Slots[i];
+			if (!slot.Light || !slot.Present) continue;
+			if (slot.Leaving) {
+				slot.ShadowWeight -= step;
+				if (slot.ShadowWeight <= 0.0f) {
+					if (Candidate* c = find(slot.Light)) c->InSlot = false;
+					slot = Slot();
+				}
+			}
+			else
+				slot.ShadowWeight = min(1.0f, slot.ShadowWeight + step);
+		}
+
+		// Light weights: how much of each light is counted. Present slot lights and the nearest other lights are counted;
+		// the rest fade out from where they were last seen.
+		for (auto& record : Records) record.second.Selected = false;
+		for (auto& slot : Slots) {
+			if (!slot.Light || !slot.Present) continue;
+			Record& record = Records[slot.Light];
+			record.Pos = slot.Pos;
+			record.Color = slot.Color;
+			record.Selected = true;
+		}
+		std::vector<NiPointLight*> unshadowed;
+		for (auto& c : candidates) {
+			if (c.InSlot) continue;
+			if ((int)unshadowed.size() >= TrackedLightsMax) break;
+			Record& record = Records[c.Light];
+			record.Pos = c.Pos;
+			record.Color = c.Color;
+			record.Selected = true;
+			unshadowed.push_back(c.Light);
+		}
+		for (auto it = Records.begin(); it != Records.end();) {
+			Record& record = it->second;
+			record.Weight = record.Selected ? min(1.0f, record.Weight + step) : record.Weight - step;
+			if (!record.Selected && record.Weight <= 0.0f) {
+				for (auto& slot : Slots) if (slot.Light == it->first) slot = Slot();
+				it = Records.erase(it);
+			}
+			else
+				++it;
+		}
+		std::vector<NiPointLight*> fading;
+		for (auto& record : Records) {
+			if (record.second.Selected) continue;
+			bool inSlot = false;
+			for (auto& slot : Slots) if (slot.Light == record.first) inSlot = true;
+			if (!inSlot) fading.push_back(record.first);
+		}
+		for (NiPointLight* light : fading) {
+			if ((int)unshadowed.size() < TrackedLightsMax) unshadowed.push_back(light);
+			else Records.erase(light);
+		}
+
+		// Publish.
+		TheShadowManager->PointLightsNum = 0;
+		for (int i = 0; i < ShadowCubeMapsMax; i++) {
+			const Slot& slot = Slots[i];
+			if (slot.Light) {
+				auto record = Records.find(slot.Light);
+				const float w = record != Records.end() ? record->second.Weight : 1.0f;
+				ShadowLightsList[i] = slot.Present ? slot.Scene : NULL; // an absent light keeps the cubemap it last drew while it fades
+				Constants->ShadowLightPosition[i] = slot.Pos;
+				TheShaderManager->LightColor[i] = D3DXVECTOR4(slot.Color.x * w, slot.Color.y * w, slot.Color.z * w, slot.Color.w);
+				Constants->ShadowLightWeight[i] = D3DXVECTOR4(slot.ShadowWeight, w, 0.0f, 0.0f);
+				if (slot.Present) TheShadowManager->PointLightsNum++;
+			}
+			else {
+				ShadowLightsList[i] = NULL;
+				Constants->ShadowLightPosition[i] = D3DXVECTOR4(0, 0, 0, 0);
+				TheShaderManager->LightColor[i] = D3DXVECTOR4(0, 0, 0, 0);
+				Constants->ShadowLightWeight[i] = D3DXVECTOR4(1.0f, 1.0f, 0.0f, 0.0f);
+			}
+		}
+		for (int j = 0; j < TrackedLightsMax; j++) {
+			if (j < (int)unshadowed.size()) {
+				const Record& record = Records[unshadowed[j]];
+				LightsList[j] = record.Selected ? unshadowed[j] : NULL;
+				TheShaderManager->LightPosition[j] = record.Pos;
+				TheShaderManager->LightColor[ShadowCubeMapsMax + j] = D3DXVECTOR4(record.Color.x * record.Weight, record.Color.y * record.Weight, record.Color.z * record.Weight, record.Color.w);
+			}
+			else {
+				LightsList[j] = NULL;
+				TheShaderManager->LightPosition[j] = D3DXVECTOR4(0, 0, 0, 0);
+				TheShaderManager->LightColor[ShadowCubeMapsMax + j] = D3DXVECTOR4(0, 0, 0, 0);
+			}
+		}
+		Fresh = false;
+	}
+}
+
+
 void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPointLight* LightsList[], NiSpotLight* SpotLightList[]) {
 	D3DXVECTOR4 PlayerPosition = Player->pos.toD3DXVEC4();
 	//Logger::Log(" ==== Getting lights ====");
@@ -612,6 +856,30 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 
 	ShadowsExteriorEffect::InteriorsStruct* Settings = &Effects.ShadowsExteriors->Settings.Interiors;
 	ShadowsExteriorEffect::ShadowStruct* ShadowsConstants = &Effects.ShadowsExteriors->Constants;
+
+	// LightsByView: a light counts while its sphere reaches into the world camera's view frustum (the same basis and
+	// extents RenderManager builds the view and projection from). Otherwise: while it is in the half-space in front of the
+	// player along the camera's forward vector. Either way a light whose radius holds the player counts.
+	const bool byView = Settings->LightsByView;
+	NiCamera* ViewCamera = WorldSceneGraph->camera;
+	const D3DXVECTOR3 ViewPos = ViewCamera->m_worldTransform.pos.toD3DXVEC3();
+	const NiMatrix33& ViewRot = ViewCamera->m_worldTransform.rot;
+	const D3DXVECTOR3 ViewForward(ViewRot.data[0][0], ViewRot.data[1][0], ViewRot.data[2][0]);
+	const D3DXVECTOR3 ViewUp(ViewRot.data[0][1], ViewRot.data[1][1], ViewRot.data[2][1]);
+	const D3DXVECTOR3 ViewRight(ViewRot.data[0][2], ViewRot.data[1][2], ViewRot.data[2][2]);
+	const NiFrustum& ViewFrustum = ViewCamera->Frustum;
+	auto sphereInView = [&](const D3DXVECTOR3& centre, float radius) {
+		const D3DXVECTOR3 v = centre - ViewPos;
+		const float z = D3DXVec3Dot(&v, &ViewForward);
+		const float x = D3DXVec3Dot(&v, &ViewRight);
+		const float y = D3DXVec3Dot(&v, &ViewUp);
+		if (z < -radius) return false;
+		if (x - ViewFrustum.Right * z > radius * sqrtf(1.0f + ViewFrustum.Right * ViewFrustum.Right)) return false;
+		if (ViewFrustum.Left * z - x > radius * sqrtf(1.0f + ViewFrustum.Left * ViewFrustum.Left)) return false;
+		if (y - ViewFrustum.Top * z > radius * sqrtf(1.0f + ViewFrustum.Top * ViewFrustum.Top)) return false;
+		if (ViewFrustum.Bottom * z - y > radius * sqrtf(1.0f + ViewFrustum.Bottom * ViewFrustum.Bottom)) return false;
+		return true;
+	};
 
 	// Creating list of lights in order of distance to the player
 	while (Entry) {
@@ -634,7 +902,8 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 		// select lights that will be tracked by removing culled lights and lights behind the player further away than their radius
 		// TODO: handle using frustum check
 		float drawDistance = 8000;//TheShaderManager->GameState.isExterior ? TheSettingManager->SettingsShadows.Exteriors.ShadowMapRadius[TheShadowManager->ShadowMapTypeEnum::MapLod] : TheSettingManager->SettingsShadows.Interiors.DrawDistance;
-		if ((inFront || Distance < radius) && (Distance + radius) < drawDistance) {
+		const bool inView = byView ? sphereInView(D3DXVECTOR3(LightPosition.x, LightPosition.y, LightPosition.z), radius) : inFront;
+		if ((inView || Distance < radius) && (Distance + radius) < drawDistance) {
 			SceneLights[(int)(Distance * 10000)] = Entry->data; // multiplying distance (used as key) before conversion to avoid overwriting in case of similar values
 		}
 
@@ -676,6 +945,13 @@ void ShaderManager::GetNearbyLights(ShadowSceneLight* ShadowLightsList[], NiPoin
 	else {
 		SpotLightList[0] = nullptr;
 	}
+
+	if (Settings->LightFadeTime > 0.0f) {
+		LightSlots::Select(SceneLights, ShadowLightsList, LightsList, ShadowLightsMax, Settings);
+		timer.LogTime("ShaderManager::GetNearbyLights");
+		return;
+	}
+	LightSlots::FullWeights();
 
 	std::map<int, ShadowSceneLight*>::iterator v = SceneLights.begin();
 	for (int i = 0; i < TrackedLightsMax + ShadowCubeMapsMax; i++) {

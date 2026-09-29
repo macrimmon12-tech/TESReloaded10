@@ -379,6 +379,9 @@ void ShadowsExteriorEffect::UpdateSettings() {
 	Settings.Interiors.ShadowCubeMapSize = TheSettingManager->GetSettingI("Shaders.ShadowsInteriors.Main", "ShadowCubeMapSize");
 	Settings.Interiors.Darkness = TheSettingManager->GetSettingF("Shaders.ShadowsInteriors.Main", "Darkness");
 	Settings.Interiors.LightRadiusMult = TheSettingManager->GetSettingF("Shaders.ShadowsInteriors.Main", "LightRadiusMult");
+	Settings.Interiors.LightFadeTime = max(0.0f, TheSettingManager->GetSettingF("Shaders.ShadowsInteriors.Main", "LightFadeTime"));
+	Settings.Interiors.LightSlotMargin = max(1.0f, TheSettingManager->GetSettingF("Shaders.ShadowsInteriors.Main", "LightSlotMargin"));
+	Settings.Interiors.LightsByView = TheSettingManager->GetSettingI("Shaders.ShadowsInteriors.Main", "LightsByView");
 	Settings.Interiors.DrawDistance = TheSettingManager->GetSettingF("Shaders.ShadowsInteriors.Main", "DrawDistance");
 	Settings.Interiors.UseCastShadowFlag = TheSettingManager->GetSettingF("Shaders.ShadowsInteriors.Main", "UseCastShadowFlag");
 	Settings.Interiors.PlayerShadowFirstPerson = TheSettingManager->GetSettingF("Shaders.ShadowsInteriors.Main", "PlayerShadowFirstPerson");
@@ -428,6 +431,7 @@ void ShadowsExteriorEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_ShadowCameraToLightTransformOrtho", (D3DXVECTOR4*)&ShadowMaps[MapOrtho].ShadowCameraToLight);
 	TheShaderManager->RegisterConstant("TESR_ShadowCubeMapLightPosition", &Constants.ShadowCubeMapLightPosition);
 	TheShaderManager->RegisterConstant("TESR_ShadowLightPosition", (D3DXVECTOR4*)&Constants.ShadowLightPosition);
+	TheShaderManager->RegisterConstant("TESR_ShadowLightWeight", (D3DXVECTOR4*)&Constants.ShadowLightWeight);
 }
 
 void ShadowsExteriorEffect::RegisterTextures() {
