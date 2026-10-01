@@ -9,6 +9,11 @@
 //
 // Registers used by vanilla: ModelViewProj c0-c3, FogParam c14, FogColor c15, EyePosition c16,
 // LightData c25. No relative addressing, so Shadow.hlsl's default c100/c104 pins are clear.
+// The camera matrices Shadow.hlsl rebuilds world positions with are moved out of c100-c107 in skinned vertex
+// shaders: the game's bone upload goes past Bones[54] (c97) and overwrote them, so actors read the sun shadow
+// at the wrong place. c240-c247 is beyond any bone write.
+#define SHADOW_INVPROJ_REG c240
+#define SHADOW_INVVIEW_REG c244
 #include "includes/Shadow.hlsl"
 
 row_major float4x4 ModelViewProj : register(c0);

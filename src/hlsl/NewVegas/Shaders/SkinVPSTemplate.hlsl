@@ -41,6 +41,13 @@
 
 #include "Includes/Helpers.hlsl"
 #include "Includes/SkinVPS.hlsl"
+// The camera matrices Shadow.hlsl rebuilds world positions with are moved out of c100-c107 in skinned vertex
+// shaders: the game's bone upload goes past Bones[54] (c97) and overwrote them, so actors read the sun shadow
+// at the wrong place. c240-c247 is beyond any bone write.
+#ifdef VS
+    #define SHADOW_INVPROJ_REG c240
+    #define SHADOW_INVVIEW_REG c244
+#endif
 #include "Includes/Shadow.hlsl"
 
 // Toggles.

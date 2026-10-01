@@ -17,6 +17,11 @@
 // Bones[54] occupies c44..c97 and is indexed RELATIVELY. Shadow.hlsl's default pins at
 // c100/c104 sit just past it -- which is exactly why those defaults were chosen. Do not add
 // constants below c100 here.
+// The camera matrices Shadow.hlsl rebuilds world positions with are moved out of c100-c107 in skinned vertex
+// shaders: the game's bone upload goes past Bones[54] (c97) and overwrote them, so actors read the sun shadow
+// at the wrong place. c240-c247 is beyond any bone write.
+#define SHADOW_INVPROJ_REG c240
+#define SHADOW_INVVIEW_REG c244
 #include "includes/Shadow.hlsl"
 #include "includes/Helpers.hlsl"
 #include "includes/SkinHelpers.hlsl"
