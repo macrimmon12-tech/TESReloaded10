@@ -116,6 +116,7 @@ public:
 		DitherBusterEffect*		DitherBuster;
 		SMAAEffect*				SMAA;
 		TAAEffect*				TAA;
+		CinematicDOFEffect*		CinematicDOF;
 	};
 
 	struct ShadersStruct{

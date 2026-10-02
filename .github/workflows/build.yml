@@ -9,17 +9,17 @@ env:
 
 jobs:
   build:
-    runs-on: windows-2019
+    runs-on: windows-2022
 
  # Steps
     steps:
       - name: "Checkout from latest commit: '${{ github.event.head_commit.message }}'"
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
             submodules: recursive
 
       - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v1.0.2
+        uses: microsoft/setup-msbuild@v2
 
       - name: Restore NuGet packages
         working-directory: ${{env.GITHUB_WORKSPACE}}
@@ -41,3 +41,113 @@ jobs:
         with:
           name: NewVegasReloaded-latest-build--${{ github.workflow_sha }}
           path: ${{env.ARTEFACT_NAME}}.zip
+
+  # Compiles every runtime effect with Microsoft's fxc, which the Windows runner ships with, so a
+  # shader that would fail to load in game shows up here instead. The game compiles these itself at
+  # load through D3DX9; fxc's fx_2_0 target is the same effect compiler family, run with the same
+  # defines EffectRecord passes (REVERSED_DEPTH as NVR runs, FORWARD_SHADOWS at its default). Separate
+  # from the build so a shader failure never holds up the DLL.
+  shaders:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile effect and game shaders (fxc)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $fxc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter fxc.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName | Select-Object -Last 1
+          if (-not $fxc) { Write-Host "::error::fxc.exe not found"; exit 1 }
+          Write-Host "Using $($fxc.FullName)"
+          $failed = @()
+          # Includes nested inside Includes/ name their neighbours from the Effects folder
+          # ("Includes/Blur.hlsl"), which is where the game resolves them; fxc looks beside the
+          # including file first, so the Effects folder goes on the include path as well.
+          $effects = (Resolve-Path src/hlsl/NewVegas/Effects).Path
+          foreach ($file in Get-ChildItem $effects -Filter *.fx.hlsl | Sort-Object Name) {
+            $out = & $fxc.FullName /nologo /T fx_2_0 /I $effects /D REVERSED_DEPTH=1 /D FORWARD_SHADOWS=0 /Fo "$env:RUNNER_TEMP\$($file.BaseName).fxo" $file.FullName 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              $failed += $file.Name
+              Write-Host "::error file=$($file.FullName)::$($file.Name) failed to compile"
+              $out | ForEach-Object { Write-Host "    $_" }
+            } else {
+              Write-Host "ok    $($file.Name)"
+              $out | Where-Object { "$_" -match 'warning' -and "$_" -notmatch 'X4717' } | ForEach-Object { Write-Host "    $_" }
+            }
+          }
+
+          # Game shaders: the replacements the game compiles through D3DXCompileShader, vs_3_0 or
+          # ps_3_0 by suffix with entry point main. ShaderRecord::LoadShader compiles each one with
+          # FORWARD_SHADOWS and SKYLIGHTING_MODE from the settings, and the two modes declare
+          # different constants, so every combination is compiled: a clash that exists in only one
+          # of them is still a shader that fails for anyone using that setting. Includes resolve
+          # from the Shaders folder, as in game.
+          $shaders = (Resolve-Path src/hlsl/NewVegas/Shaders).Path
+          $variants = @('/D FORWARD_SHADOWS=1 /D SKYLIGHTING_MODE=0', '/D FORWARD_SHADOWS=1 /D SKYLIGHTING_MODE=1',
+                        '/D FORWARD_SHADOWS=0 /D SKYLIGHTING_MODE=0', '/D FORWARD_SHADOWS=0 /D SKYLIGHTING_MODE=1')
+          foreach ($file in Get-ChildItem $shaders -File | Where-Object { $_.Name -match '\.(vso|pso)\.hlsl$' } | Sort-Object Name) {
+            $profile = if ($file.Name -match '\.vso\.hlsl$') { 'vs_3_0' } else { 'ps_3_0' }
+            $fileOk = $true
+            foreach ($variant in $variants) {
+              $defines = $variant -split ' '
+              $out = & $fxc.FullName /nologo /T $profile /E main /I $shaders /D REVERSED_DEPTH=1 @defines /Fo "$env:RUNNER_TEMP\$($file.BaseName).cso" $file.FullName 2>&1
+              if ($LASTEXITCODE -ne 0) {
+                $fileOk = $false
+                Write-Host "::error file=$($file.FullName)::$($file.Name) failed to compile with $variant"
+                $out | ForEach-Object { Write-Host "    $_" }
+              }
+            }
+            if ($fileOk) { Write-Host "ok    Shaders/$($file.Name)" } else { $failed += "Shaders/$($file.Name)" }
+          }
+
+          # The grass pixel shader's transparent-pixel early out only saves anything if it survives as a
+          # real dynamic branch with a discard in it; a flattened branch still runs all the lighting.
+          # Disassemble it and check, printing the branch and the instruction count for the log.
+          $grass = Join-Path $shaders 'GRASS23x000TMS.pso.hlsl'
+          $asm = "$env:RUNNER_TEMP\GRASS23x000TMS.asm"
+          & $fxc.FullName /nologo /T ps_3_0 /E main /I $shaders /D REVERSED_DEPTH=1 /D FORWARD_SHADOWS=1 /D SKYLIGHTING_MODE=0 /Fc $asm /Fo "$env:RUNNER_TEMP\grass.cso" $grass | Out-Null
+          $lines = Get-Content $asm
+          $branch = $lines | Select-String -Pattern '^\s*if'
+          $kill = $lines | Select-String -Pattern '^\s*texkill'
+          Write-Host "Grass PS: $(($lines | Select-String 'instruction slots used') -join ' ')"
+          Write-Host "Grass PS dynamic branches: $($branch.Count), texkill: $($kill.Count)"
+          $first = ($branch | Select-Object -First 1).LineNumber
+          if ($first) { $lines[($first - 6)..($first + 6)] | ForEach-Object { Write-Host "    $_" } }
+          if ($branch.Count -lt 1 -or $kill.Count -lt 1) {
+            Write-Host "::error file=$grass::early-out branch or discard missing from the compiled grass pixel shader"
+            $failed += 'GRASS23x000TMS early-out check'
+          }
+          # Derivatives (dsx/dsy, and texld's implicit ones) must all come before the first branch:
+          # inside a branch only part of a quad takes, they are undefined.
+          $gradients = $lines | Select-String -Pattern '^\s*(dsx|dsy|texld )'
+          $late = $gradients | Where-Object { $_.LineNumber -gt $first }
+          Write-Host "Grass PS gradient ops: $($gradients.Count), after the first branch: $($late.Count)"
+          # GRASS23x000.pso, the non-TMS grass pixel shader, is compiled from the same source with
+          # GRASS_TMS 0 (GrassShaders::Templates): make sure that variant compiles too.
+          foreach ($variant in $variants) {
+            $defines = $variant -split ' '
+            $out = & $fxc.FullName /nologo /T ps_3_0 /E main /I $shaders /D REVERSED_DEPTH=1 /D GRASS_TMS=0 @defines /Fo "$env:RUNNER_TEMP\grass_notms.cso" $grass 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error file=$grass::GRASS23x000.pso (GRASS_TMS 0) failed to compile with $variant"
+              $out | ForEach-Object { Write-Host "    $_" }
+              $failed += 'GRASS23x000.pso (GRASS_TMS 0)'
+            }
+          }
+          Write-Host "ok    Shaders/GRASS23x000.pso (GRASS_TMS 0 variant of GRASS23x000TMS.pso.hlsl)"
+
+          # The normal map is read with an explicit gradient (texldd), which is what makes it legal
+          # inside the detail branch.
+          $gradRead = $lines | Select-String -Pattern '^\s*texldd'
+          Write-Host "Grass PS explicit-gradient reads (normal map): $($gradRead.Count)"
+          if ($gradRead.Count -lt 1) {
+            Write-Host "::error file=$grass::normal map read (texldd) missing from the compiled grass pixel shader"
+            $failed += 'GRASS23x000TMS normal map read check'
+          }
+          if ($gradients.Count -lt 3 -or $late.Count -gt 0) {
+            $late | ForEach-Object { Write-Host "    late: $($_.Line)" }
+            Write-Host "::error file=$grass::gradient operations missing or moved inside the early-out branch"
+            $failed += 'GRASS23x000TMS gradient placement check'
+          }
+
+          if ($failed.Count -gt 0) { Write-Host "Failed: $($failed -join ', ')"; exit 1 }
