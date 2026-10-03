@@ -60,6 +60,9 @@ ScreenshotKey = 87          # Keycode for custom screenshot hotkey (removes HUD 
 HDRScreenshot = false       # Save screenshots in fbx (use with DXVK HDR)
 PresetManagerEnabled = false # Master toggle for automatic per-location Preset Manager resolution. Off = your own settings are authoritative; Save/Load/Delete in the Preset Manager panel still work. Defaults off: it silently wins the location-based settings that third-party tools like Cartographer -- which this feature supersedes -- also try to control, so turn it on deliberately once you're not running one of those alongside it.
 
+[_Main.Main.ReducedQuality]
+ParallaxLite = false                 # Cheaper terrain and object parallax: 8 search steps and one correction, with 2 terrain shadow taps. Terrain range capped at 1024 * screen height / 1440. Overrides terrain HighQuality; may reduce detail at grazing angles. Applies immediately.
+
 [_Main.Main.Precipitations]
 RemovePrecipitations = false   # Disables vanilla rain and other precipitations.
 
