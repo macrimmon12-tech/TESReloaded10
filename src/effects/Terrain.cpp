@@ -94,9 +94,12 @@ void TerrainShaders::UpdateConstants() {
 	ParallaxConstants.Data.x = ParallaxSettings.Enabled;
 	ParallaxConstants.Data.y = ParallaxSettings.Shadows;
 	ParallaxConstants.Data.z = ParallaxSettings.HeightBlend;
-	ParallaxConstants.Data.w = ParallaxSettings.HighQuality;
+	// .w: 0 = 8 steps, 1 = 16 steps with contact refinement, 2 = ParallaxLite.
+	const bool lite = TheSettingManager->SettingsMain.Main.ParallaxLite;
+	ParallaxConstants.Data.w = lite ? 2.0f : ParallaxSettings.HighQuality;
 
-	ParallaxConstants.ExtraData.x = ParallaxSettings.MaxDistance;
+	// Preserve a shorter configured range; scale the lite cap with screen height.
+	ParallaxConstants.ExtraData.x = lite ? min(ParallaxSettings.MaxDistance, 1024.0f * TheRenderManager->height / 1440.0f) : ParallaxSettings.MaxDistance;
 	ParallaxConstants.ExtraData.y = ParallaxSettings.Height;
 	ParallaxConstants.ExtraData.z = ParallaxSettings.ShadowsIntensity;
 };

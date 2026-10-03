@@ -397,6 +397,7 @@ void SettingManager::LoadSettings() {
 
 	if (!Config.configLoaded) Config.Init();
 
+	SettingsMain.Main.ParallaxLite = GetSettingI("Main.Main.ReducedQuality", "ParallaxLite");
 	SettingsMain.Main.RemoveUnderwater = GetSettingI("Main.Main.Water", "RemoveUnderwater");
 	SettingsMain.Main.RemovePrecipitations = GetSettingI("Main.Main.Precipitations", "RemovePrecipitations");
 	SettingsMain.Main.ForceReflections = GetSettingI("Main.Main.Water", "ForceReflections");

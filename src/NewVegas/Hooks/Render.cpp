@@ -1,5 +1,7 @@
 #pragma once
 
+static bool RenderingFirstPersonParticles = false;
+
 void (__thiscall* Render)(Main*, BSRenderedTexture*, int, int) = (void (__thiscall*)(Main*, BSRenderedTexture*, int, int))Hooks::Render;
 void __fastcall RenderHook(Main* This, UInt32 edx, BSRenderedTexture* RenderedTexture, int Arg2, int Arg3) {
 	
@@ -44,6 +46,26 @@ void __fastcall SetShadersHook(BSShader* This, UInt32 edx, UInt32 PassIndex) {
 	}
 	else {
 		Logger::Log("Error getting pixel shader for pass %s", Pointers::Functions::GetPassDescription(PassIndex));
+	}
+
+	// UNOFFICIAL lit particles (Shaders.Particles): the NOLIGHT replacements are shader model 3, and D3D9 cannot pair a
+	// 3.0 shader with the game's 2.x one. Where only one side of a NOLIGHT draw has a replacement -- NOLIGHTTEXVC.pso
+	// behind the game's glow/muzzle-flash vertex shaders, or NOLIGHT016/017.vso in front of the flame/spark pixel
+	// shader -- the draw gets the game's own pair. Skipped entirely while the collection is off.
+	if (VertexShader && PixelShader && TheShaderManager->Shaders.Particles && TheShaderManager->Shaders.Particles->Enabled) {
+		const bool nvrVertex = VertexShader->ShaderHandleBackup && VertexShader->ShaderHandle != VertexShader->ShaderHandleBackup;
+		const bool nvrPixel = PixelShader->ShaderHandleBackup && PixelShader->ShaderHandle != PixelShader->ShaderHandleBackup;
+		auto particleFamily = [](const char* name) { return name && (!strncmp(name, "NOLIGHT", 7) || !strncmp(name, "GDECAL", 6)); };
+		const bool family = particleFamily(VertexShader->Name) || particleFamily(PixelShader->Name);
+		// The first-person pass (the player's own muzzle flash, Pip-Boy glow) always gets the game's pair.
+		if (family && RenderingFirstPersonParticles) {
+			if (nvrVertex) VertexShader->ShaderHandle = (IDirect3DVertexShader9*)VertexShader->ShaderHandleBackup;
+			if (nvrPixel) PixelShader->ShaderHandle = (IDirect3DPixelShader9*)PixelShader->ShaderHandleBackup;
+		}
+		else if (nvrVertex != nvrPixel && family) {
+			if (nvrVertex) VertexShader->ShaderHandle = (IDirect3DVertexShader9*)VertexShader->ShaderHandleBackup;
+			else PixelShader->ShaderHandle = (IDirect3DPixelShader9*)PixelShader->ShaderHandleBackup;
+		}
 	}
 
 	// trace pipeline active shaders
@@ -111,7 +133,10 @@ void __fastcall RenderFirstPersonHook(Main* This, UInt32 edx, NiDX9Renderer* Ren
 	// Clear the depth buffer before rendering first person model to prevent clipping with world objects & other artefacts
 	TheRenderManager->Clear(NULL, NiRenderer::kClear_ZBUFFER);
 	//ThisCall(0x00874C10, Global);
+	const bool previousFirstPerson = RenderingFirstPersonParticles;
+	RenderingFirstPersonParticles = true;
 	(*RenderFirstPerson)(This, Renderer, Geo, SkySun, RenderedTexture);
+	RenderingFirstPersonParticles = previousFirstPerson;
 	TheRenderManager->ResolveDepthBuffer(TheTextureManager->DepthTextureViewModel);
 }
 

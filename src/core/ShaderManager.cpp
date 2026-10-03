@@ -89,6 +89,7 @@ void ShaderManager::Initialize() {
 	TheShaderManager->RegisterShaderCollection<SkyShaders>(&TheShaderManager->Shaders.Sky);
 	TheShaderManager->RegisterShaderCollection<SkinShaders>(&TheShaderManager->Shaders.Skin);
 	TheShaderManager->RegisterShaderCollection<GrassShaders>(&TheShaderManager->Shaders.Grass);
+	TheShaderManager->RegisterShaderCollection<ParticleShaders>(&TheShaderManager->Shaders.Particles);
 	TheShaderManager->RegisterShaderCollection<TerrainShaders>(&TheShaderManager->Shaders.Terrain);
 	
 	//setup map of constant names
@@ -527,6 +528,7 @@ ShaderCollection* ShaderManager::GetShaderCollection(const char* Name) {
 	// a ps_3_0 replacement too: D3D9 rejects a 2.x VS paired with a 3.0 PS.
 	if (!memcmp(Name, "STLEAF", 6)) return Shaders.PBR;
 	if (!memcmp(Name, "SKY", 3)) return Shaders.Sky;
+	if (!strncmp(Name, "NOLIGHT", 7) || !strncmp(Name, "GDECAL", 6)) return Shaders.Particles;
 	if (strstr(BloodShaders, Name)) return Shaders.Blood;
 
 	if (Shaders.PBR->GetTemplate(Name).Name != NULL) return Shaders.PBR;

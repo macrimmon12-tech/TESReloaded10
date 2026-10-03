@@ -60,6 +60,9 @@ ScreenshotKey = 87          # Keycode for custom screenshot hotkey (removes HUD 
 HDRScreenshot = false       # Save screenshots in fbx (use with DXVK HDR)
 PresetManagerEnabled = false # Master toggle for automatic per-location Preset Manager resolution. Off = your own settings are authoritative; Save/Load/Delete in the Preset Manager panel still work. Defaults off: it silently wins the location-based settings that third-party tools like Cartographer -- which this feature supersedes -- also try to control, so turn it on deliberately once you're not running one of those alongside it.
 
+[_Main.Main.ReducedQuality]
+ParallaxLite = false                 # Cheaper terrain and object parallax: 8 search steps and one correction, with 2 terrain shadow taps. Terrain range capped at 1024 * screen height / 1440. Overrides terrain HighQuality; may reduce detail at grazing angles. Applies immediately.
+
 [_Main.Main.Precipitations]
 RemovePrecipitations = false   # Disables vanilla rain and other precipitations.
 
@@ -563,6 +566,14 @@ GaussianWeight = 6.0
 
 [_Shaders.MotionBlur.Status]
 Enabled = false                      # Blur in direction of the camera when turning. 
+
+[_Shaders.Particles.Main]
+Strength = 1.0                       # UNOFFICIAL, optional: how much blood, smoke, dust and debris particles follow the lighting (0 = as the game draws them, unlit; 1 = fully lit).
+Brightness = 1.0                     # Overall brightness of lit particles. Raise if they look too dark next to the scene, lower if too bright.
+SunShare = 0.6                       # How much of the sun a particle catches outdoors (they are thin and see the sun from all sides). Shaded particles get only the ambient and lamps.
+
+[_Shaders.Particles.Status]
+Enabled = false                      # UNOFFICIAL, optional: lights blood, smoke, dust and debris particles and the blood decals on characters by the ambient, the sun (through the sun shadows) and nearby lamps, so they no longer glow in the shade, at night or indoors. Muzzle flashes, fire, sparks and glows stay as the game draws them. Off = exactly the game's own particle shaders.
 
 [_Shaders.PBR.Main]
 Roughness = 1.0                      # Roughness scale.

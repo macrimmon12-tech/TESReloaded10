@@ -127,6 +127,7 @@ public:
 		SkyShaders*				Sky;
 		SkinShaders*			Skin;
 		GrassShaders*			Grass;
+		ParticleShaders*        Particles;
 		TerrainShaders*			Terrain;
 	};
 
