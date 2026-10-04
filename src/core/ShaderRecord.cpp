@@ -175,15 +175,17 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	// want it pay nothing for it. Whether it RUNS is a separate, runtime decision made by
 	// TESR_ShadowForwardData -- see ShadowsExteriorEffect::UpdateSettings. Changing the setting
 	// alters the preprocessed source, so CheckPreprocessResult recompiles on next load.
-	AppendDefine("FORWARD_SHADOWS",
-		TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows") ? "1" : "0");
+	int forwardShadows = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows") ? 1 : 0;
+	AppendDefine("FORWARD_SHADOWS", forwardShadows ? "1" : "0");
+	TheShaderManager->CompiledForwardShadows = forwardShadows;
 
 	// Which skylighting model is compiled in. 0 = spherical harmonic irradiance, 1 = the older
 	// single directional sample. Compile time rather than a runtime branch: ps_3_0 flattens
 	// branches like this, so a runtime switch would make every lit pixel pay for BOTH paths.
 	// Changing the setting alters the preprocessed source, so the cache recompiles on next load.
-	AppendDefine("SKYLIGHTING_MODE",
-		TheSettingManager->GetSettingI("Shaders.PBR.Main", "SkylightingMode") ? "1" : "0");
+	int skylightingMode = TheSettingManager->GetSettingI("Shaders.PBR.Main", "SkylightingMode") ? 1 : 0;
+	AppendDefine("SKYLIGHTING_MODE", skylightingMode ? "1" : "0");
+	TheShaderManager->CompiledSkylightingMode = skylightingMode;
 
 	// Shadow atlas encoding: 0 = VSM, 1 = EVSM2, 2 = EVSM4. Compile time for the same reason as
 	// above -- Shadow.hlsl's GetSunShadow and ShadowMap.pso both branch on it with #if, not a
@@ -199,26 +201,14 @@ ShaderRecord* ShaderRecord::LoadShader(const char* Name, const char* SubPath, Sh
 	// "TESR_ShadowFormatData.x != SHADOW_FIXED_MODE" check only ever matched at Quality 3/Full,
 	// and forward shadows silently no-op'd (return unshadowed) at every other quality level.
 	{
-		int quality = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Quality");
-		int shadowMode;
-		switch (quality) {
-		case 0:
-		case 1:
-			shadowMode = 0; // VSM
-			break;
-		case 2:
-			shadowMode = 1; // EVSM2
-			break;
-		case 3:
-			shadowMode = 2; // EVSM4
-			break;
-		default: // 4 (Custom), or an out-of-range value -- fall back to the raw setting.
-			shadowMode = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.ShadowMaps", "Mode");
-			if (shadowMode < 0) shadowMode = 0;
-			if (shadowMode > 2) shadowMode = 2;
-			break;
-		}
+		int shadowMode = ShaderManager::ShadowModeFromSettings();
 		AppendDefine("SHADOW_FIXED_MODE", shadowMode == 0 ? "0" : shadowMode == 1 ? "1" : "2");
+
+		// Publish it: this is the only place the compiled-in encoding is decided, and
+		// ShadowsExteriorEffect has to hold the runtime Mode to it. Every shader in a session
+		// gets the same value - the setting cannot change between two of these calls without
+		// UpdateSettings having already pinned it back.
+		TheShaderManager->CompiledShadowMode = shadowMode;
 	}
 
 	HRESULT prepass = D3DXPreprocessShaderFromFileA(ShaderSourcePath, Macros, NULL, &ShaderSource, &Errors);
