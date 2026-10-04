@@ -84,6 +84,63 @@ IDirect3DBaseTexture9* TextureManager::GetTextureByName(std::string& Name) {
 }
 
 
+static bool IsBlockCompressed(D3DFORMAT Format) {
+	return Format == D3DFMT_DXT1 || Format == D3DFMT_DXT2 || Format == D3DFMT_DXT3 || Format == D3DFMT_DXT4 || Format == D3DFMT_DXT5;
+}
+
+/*
+* True when every byte of a stored mip level is zero.
+*/
+static bool IsLevelEmpty(IDirect3DTexture9* Texture, UINT Level) {
+	D3DSURFACE_DESC Desc;
+	D3DLOCKED_RECT Locked;
+	if (FAILED(Texture->GetLevelDesc(Level, &Desc)) || FAILED(Texture->LockRect(Level, &Locked, NULL, D3DLOCK_READONLY))) return false;
+	const UINT Rows = IsBlockCompressed(Desc.Format) ? (Desc.Height + 3) / 4 : Desc.Height;
+	bool Empty = true;
+	for (UINT y = 0; y < Rows && Empty; y++) {
+		const BYTE* Row = (const BYTE*)Locked.pBits + (size_t)y * Locked.Pitch;
+		for (INT x = 0; x < Locked.Pitch && Empty; x++) Empty = !Row[x];
+	}
+	Texture->UnlockRect(Level);
+	return Empty;
+}
+
+/*
+* D3DX builds the smaller mip levels of a file that has none of its own (a PNG, for example) from the full-size level. Seen
+* under DXVK: every smaller level comes back empty while the full-size level is intact, on a texture that changes from launch
+* to launch, and D3DXFilterTexture on the loaded texture leaves them empty too. Sampling then blends in black as the mip level
+* rises. D3DX does build a level correctly from a copy of the level above held in NVR's memory, so rebuild them that way.
+*/
+static void RepairMipLevels(IDirect3DTexture9* Texture, const std::string& TexturePath) {
+	const DWORD Levels = Texture->GetLevelCount();
+	if (Levels < 2 || IsLevelEmpty(Texture, 0) || !IsLevelEmpty(Texture, 1)) return;
+
+	HRESULT Result = D3D_OK;
+	for (DWORD Level = 1; Level < Levels && SUCCEEDED(Result); Level++) {
+		D3DSURFACE_DESC Desc;
+		D3DLOCKED_RECT Locked;
+		Texture->GetLevelDesc(Level - 1, &Desc);
+		Result = Texture->LockRect(Level - 1, &Locked, NULL, D3DLOCK_READONLY);
+		if (FAILED(Result)) break;
+		const UINT Rows = IsBlockCompressed(Desc.Format) ? (Desc.Height + 3) / 4 : Desc.Height;
+		const std::vector<BYTE> Above((const BYTE*)Locked.pBits, (const BYTE*)Locked.pBits + (size_t)Locked.Pitch * Rows);
+		const UINT Pitch = Locked.Pitch;
+		Texture->UnlockRect(Level - 1);
+
+		IDirect3DSurface9* Surface = nullptr;
+		Result = Texture->GetSurfaceLevel(Level, &Surface);
+		if (FAILED(Result)) break;
+		const RECT Source = { 0, 0, (LONG)Desc.Width, (LONG)Desc.Height };
+		Result = D3DXLoadSurfaceFromMemory(Surface, NULL, NULL, Above.data(), Desc.Format, Pitch, NULL, &Source, D3DX_FILTER_BOX, 0);
+		Surface->Release();
+	}
+
+	if (FAILED(Result) || IsLevelEmpty(Texture, 1))
+		Logger::Log("[ERROR] : Mip levels of %s came back empty and could not be rebuilt (%08X)", TexturePath.c_str(), (unsigned)Result);
+	else
+		Logger::Log("Mip levels of %s came back empty, rebuilt them", TexturePath.c_str());
+}
+
 /*
 * Loads the actual texture file or get it from cache based on type/Name
 */
@@ -95,6 +152,7 @@ IDirect3DBaseTexture9* TextureManager::GetFileTexture(std::string TexturePath, T
 	switch (Type) {
 	case TextureRecord::TextureRecordType::PlanarBuffer:
 		D3DXCreateTextureFromFileA(TheRenderManager->device, TexturePath.data(), (IDirect3DTexture9**)&Texture);
+		if (Texture) RepairMipLevels((IDirect3DTexture9*)Texture, TexturePath);
 		break;
 	case TextureRecord::TextureRecordType::VolumeBuffer:
 		D3DXCreateVolumeTextureFromFileA(TheRenderManager->device, TexturePath.data(), (IDirect3DVolumeTexture9**)&Texture);
