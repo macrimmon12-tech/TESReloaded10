@@ -791,10 +791,10 @@ bool ShaderManager::ShouldRenderShadowMaps() {
 /*
 * Renders a given effect to an arbitrary render target
 */
-void ShaderManager::RenderEffectToRT(IDirect3DSurface9* RenderTarget, EffectRecord* Effect, bool clearRenderTarget) {
+void ShaderManager::RenderEffectToRT(IDirect3DSurface9* RenderTarget, EffectRecord* Effect, bool clearRenderTarget, UINT technique) {
 	IDirect3DDevice9* Device = TheRenderManager->device;
 	Device->SetRenderTarget(0, RenderTarget);
-	Effect->Render(Device, RenderTarget, RenderTarget, 0, clearRenderTarget, RenderTarget);
+	Effect->Render(Device, RenderTarget, RenderTarget, technique, clearRenderTarget, RenderTarget);
 };
 
 
@@ -822,7 +822,17 @@ void ShaderManager::RenderEffectsPreTonemapping(IDirect3DSurface9* RenderTarget)
 		// separate lights in 2 batches
 		RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.PointShadows, true);
 		if (Effects.ShadowsExteriors->Settings.Interiors.LightPoints > 6) RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.PointShadows2, false);
-		if (GameState.isExterior) RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.SunShadows, false);
+		if (GameState.isExterior) {
+			RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.SunShadows, false);
+			// The screen-space buffer's temporal filter. Deferred path only: on the forward one the
+			// buffer holds just the contact shadows.
+			if (Effects.ShadowsExteriors->Settings.ShadowMaps.TemporalFilter && !Effects.ShadowsExteriors->ForwardShadowsRunning())
+				RenderEffectToRT(Effects.ShadowsExteriors->Textures.ShadowPassSurface, Effects.SunShadows, false, 2);
+			// The forward path's filtered cascade term, for next frame's object shaders.
+			if (Effects.ShadowsExteriors->ForwardTemporalActive())
+				RenderEffectToRT(Effects.ShadowsExteriors->Textures.ForwardBufferSurface, Effects.SunShadows, false, 1);
+			Effects.ShadowsExteriors->UpdateTemporalHistory();
+		}
 	}
 	else {
 		// Nothing above ran this frame, so ShadowPassSurface keeps whatever it last

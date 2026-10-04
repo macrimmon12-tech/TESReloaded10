@@ -20,6 +20,7 @@ public:
 
 	static const int Modes = 3;
 	static const int FormatBits = 2;
+	static const int MoversMax = 32;	// must match the arrays in SunShadows.fx
 
 	D3DFORMAT Formats[Modes][FormatBits] = {
 		{D3DFMT_G16R16, D3DFMT_G32R32F},
@@ -50,6 +51,14 @@ public:
 		D3DXVECTOR4		ShadowLightPosition[ShadowCubeMapsMax];
 		D3DXVECTOR4		ShadowMapRadius;
 		D3DXVECTOR4		ShadowBlur;
+		D3DXVECTOR4		TemporalData;	// x: enabled, y: history weight
+		D3DXVECTOR4		CameraDelta;	// xyz: current camera position minus the one the history was rendered from
+		D3DXMATRIX		PreviousViewProj;
+		D3DXMATRIX		PreviousViewTransform;
+		D3DXVECTOR4		MoverData;					// x: number of moving casters in the arrays below
+		D3DXVECTOR4		MoverAxes[3];				// the plane facing the sun (two axes), then the direction to the sun
+		D3DXVECTOR4		MoverSegments[MoversMax];	// xy: bound centre in that plane, zw: path back to where its shadow may linger
+		D3DXVECTOR4		MoverShapes[MoversMax];		// x: highest point towards the sun plus radius, y: 1 / |path|^2, z: 1 / (0.5625 r^2), w: history weight
 		// Forward sun shadows, runtime side. x: 1 when the forward path is SUPPRESSED.
 		//
 		// The polarity is deliberate. A constant that fails to reach a shader reads as zero,
@@ -106,6 +115,9 @@ public:
 		int					Anisotropy;
 		float				Distance;
 		float				CascadeLambda;
+		bool				TemporalFilter;
+		float				TemporalWeight;
+		bool				TemporalMovers;
 	};
 
 	struct OrthoStruct {
@@ -174,6 +186,21 @@ public:
 		IDirect3DTexture9* ShadowSpotlightTexture[SpotLightsMax];
 		IDirect3DSurface9* ShadowSpotlightSurface[SpotLightsMax];
 		IDirect3DSurface9* ShadowCubeMapDepthSurface;
+		// Last frame's resolved shadow, plus the depth and normals it was resolved against, so
+		// the reprojection can tell whether the pixel it lands on is the same surface.
+		IDirect3DTexture9* ShadowHistoryTexture;
+		IDirect3DSurface9* ShadowHistorySurface;
+		IDirect3DTexture9* DepthHistoryTexture;
+		IDirect3DSurface9* DepthHistorySurface;
+		IDirect3DTexture9* NormalsHistoryTexture;
+		IDirect3DSurface9* NormalsHistorySurface;
+		// The forward path's filtered cascade term (x) and the view depth it was found at (y):
+		// rendered into the buffer after the scene, copied to the history for the next frame's
+		// object shaders to reproject into.
+		IDirect3DTexture9* ForwardBufferTexture;
+		IDirect3DSurface9* ForwardBufferSurface;
+		IDirect3DTexture9* ForwardHistoryTexture;
+		IDirect3DSurface9* ForwardHistorySurface;
 	};
 	ShadowTextures	Textures;
 
@@ -199,6 +226,9 @@ public:
 	IDirect3DSurface9* ShadowMapOrthoDepthSurface;
 
 	void		clearShadowsBuffer();
+	bool		ForwardShadowsRunning();
+	bool		ForwardTemporalActive();
+	void		UpdateTemporalHistory();
 	void		UpdateConstants();
 	void		UpdateSettings();
 	void		RegisterConstants();
@@ -218,6 +248,9 @@ public:
 private:
 	bool		texturesInitialized;
 	int			heldShadowMode = -1;	// last Mode refused at runtime, so the log says it once
+	bool		historyValid = false;
+	bool		historyForward = false;	// which path the history was produced for
+	D3DXVECTOR4	historyCameraPosition = D3DXVECTOR4(0.0f, 0.0f, 0.0f, 0.0f);
 
 	bool		UpdateSettingsFromQuality(int quality);
 };

@@ -71,6 +71,27 @@ void ShadowsExteriorEffect::UpdateConstants() {
 		// not sun shadows enabled), so the sun-shadow path can't share it. See the interior
 		// branch below.
 		Constants.FormatData.z = 1.0f;
+
+		// Temporal reuse. The history was rendered from historyCameraPosition, and world space
+		// here is relative to the camera, so the shader needs the difference to shift a point
+		// back into the frame the history belongs to before projecting it with that frame's matrix.
+		D3DXVECTOR4 cameraPosition = TheRenderManager->CameraPosition;
+		D3DXVECTOR4 delta = cameraPosition - historyCameraPosition;
+		Constants.CameraDelta = D3DXVECTOR4(delta.x, delta.y, delta.z, 0.0f);
+
+		// A jump too large to be walking is a load or a fast travel, and the history belongs to
+		// somewhere else entirely. Reprojection cannot detect that - the matrix is still valid,
+		// it just describes a different place - so it has to be caught here.
+		bool forward = ForwardShadowsRunning();
+		bool cut = !historyValid || historyForward != forward || D3DXVec3Length((D3DXVECTOR3*)&delta) > 500.0f;
+
+		// The history belongs to the path that produced it, so switching path starts over. x filters
+		// the screen-space buffer, on the deferred path only - on the forward one it holds just the
+		// contact shadows, which stay unfiltered; z lets the forward pass and the object shaders use
+		// the forward history.
+		Constants.TemporalData.x = Settings.ShadowMaps.TemporalFilter && !cut && !forward;
+		Constants.TemporalData.y = Settings.ShadowMaps.TemporalWeight;
+		Constants.TemporalData.z = Settings.ShadowMaps.TemporalFilter && !cut && forward;
 	}
 	else {
 		// pass the enabled/disabled property of the shadow maps to the shadowfade constant
@@ -368,6 +389,12 @@ void ShadowsExteriorEffect::UpdateSettings() {
 	Settings.SunSmoothing.PitchStepSize = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.SunSmoothing", "PitchStepSize"), 0.0f, 15.0f);
 	Settings.SunSmoothing.MaxJumpAngle = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.SunSmoothing", "MaxJumpAngle"), 5.0f, 30.0f);
 
+	// Temporal reuse of the previous frame's shadow term. Read outside the quality presets so
+	// it stays tunable at any quality level.
+	Settings.ShadowMaps.TemporalFilter = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.ShadowMaps", "TemporalFilter");
+	Settings.ShadowMaps.TemporalWeight = std::clamp(TheSettingManager->GetSettingF("Shaders.ShadowsExteriors.ShadowMaps", "TemporalWeight"), 0.0f, 0.95f);
+	Settings.ShadowMaps.TemporalMovers = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.ShadowMaps", "TemporalMovers");
+
 	// Generic exterior shadows settings
 	Settings.Exteriors.Enabled = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "Enabled");
 	Settings.Exteriors.ForwardShadows = TheSettingManager->GetSettingI("Shaders.ShadowsExteriors.Main", "ForwardShadows");
@@ -468,12 +495,84 @@ void ShadowsExteriorEffect::clearShadowsBuffer() {
 }
 
 
+// Whether the forward path is actually applying the cascades. The setting alone does not say:
+// with it off at startup the forward code is compiled out of the game shaders, and the deferred
+// pass keeps the cascades however the setting is changed afterwards - so anything that stands
+// down for forward shadows has to ask this, not the setting.
+bool ShadowsExteriorEffect::ForwardShadowsRunning() {
+	return Settings.Exteriors.ForwardShadows && TheShaderManager->CompiledForwardShadows != 0;
+}
+
+
+// Whether the deferred pass has to build the forward path's filtered cascade term this frame.
+bool ShadowsExteriorEffect::ForwardTemporalActive() {
+	return Settings.ShadowMaps.TemporalFilter && ForwardShadowsRunning() && Textures.ForwardBufferSurface;
+}
+
+
+// Snapshot what the next frame will reproject from. Runs after the shadow pass has resolved,
+// so the shadow copy is the finished term - including the previous frame already blended into
+// it, which is what makes this an accumulation rather than a two frame average.
+void ShadowsExteriorEffect::UpdateTemporalHistory() {
+	if (!Settings.ShadowMaps.TemporalFilter) {
+		historyValid = false;
+		return;
+	}
+
+	bool forward = ForwardShadowsRunning();
+	if (forward && (!Textures.ForwardBufferSurface || !Textures.ForwardHistorySurface)) {
+		historyValid = false;
+		return;
+	}
+
+	IDirect3DDevice9* Device = TheRenderManager->device;
+	IDirect3DSurface9* depthSurface = TheShaderManager->Effects.CombineDepth->Textures.CombinedDepthSurface;
+	IDirect3DSurface9* normalsSurface = TheShaderManager->Effects.Normals->Textures.NormalsSurface;
+
+	if (!Textures.ShadowHistorySurface || !Textures.DepthHistorySurface || !Textures.NormalsHistorySurface ||
+		!depthSurface || !normalsSurface) {
+		historyValid = false;
+		return;
+	}
+
+	// The deferred path filters the screen-space buffer and tests its history's depth texel by texel
+	// against a copy of the depth buffer. The forward path filters the cascade term, which the object
+	// shaders read next frame, and which carries the depth it was found at itself.
+	if (forward) {
+		Device->StretchRect(Textures.ForwardBufferSurface, NULL, Textures.ForwardHistorySurface, NULL, D3DTEXF_NONE);
+	}
+	else {
+		Device->StretchRect(Textures.ShadowPassSurface, NULL, Textures.ShadowHistorySurface, NULL, D3DTEXF_NONE);
+		Device->StretchRect(depthSurface, NULL, Textures.DepthHistorySurface, NULL, D3DTEXF_NONE);
+	}
+	// Normals are stored in VIEW space, so a raw copy rotates with the camera and would read as
+	// a different surface every time the player turns. Keep the view matrix that produced them
+	// so the shader can put them back into world space before comparing.
+	Device->StretchRect(normalsSurface, NULL, Textures.NormalsHistorySurface, NULL, D3DTEXF_NONE);
+
+	Constants.PreviousViewProj = TheRenderManager->ViewProjMatrix;
+	Constants.PreviousViewTransform = TheRenderManager->viewMatrix;
+	historyCameraPosition = TheRenderManager->CameraPosition;
+	historyForward = forward;
+	historyValid = true;
+}
+
+
 void ShadowsExteriorEffect::RegisterConstants() {
 	TheShaderManager->RegisterConstant("TESR_SmoothedSunDir", &Constants.SmoothedSunDir);
 	TheShaderManager->RegisterConstant("TESR_ShadowData", &Constants.Data);
 	TheShaderManager->RegisterConstant("TESR_ShadowFormatData", &Constants.FormatData);
 	TheShaderManager->RegisterConstant("TESR_ShadowForwardData", &Constants.ForwardData);
 	TheShaderManager->RegisterConstant("TESR_ShadowBlur", &Constants.ShadowBlur);
+	TheShaderManager->RegisterConstant("TESR_ShadowTemporalData", &Constants.TemporalData);
+	TheShaderManager->RegisterConstant("TESR_ShadowCameraDelta", &Constants.CameraDelta);
+	TheShaderManager->RegisterConstant("TESR_ShadowPreviousViewProj", (D3DXVECTOR4*)&Constants.PreviousViewProj);
+	TheShaderManager->RegisterConstant("TESR_ShadowPreviousViewTransform", (D3DXVECTOR4*)&Constants.PreviousViewTransform);
+	Constants.MoverData = D3DXVECTOR4(0.0f, 0.0f, 0.0f, 0.0f);
+	TheShaderManager->RegisterConstant("TESR_ShadowMoverData", &Constants.MoverData);
+	TheShaderManager->RegisterConstant("TESR_ShadowMoverAxes", Constants.MoverAxes);
+	TheShaderManager->RegisterConstant("TESR_ShadowMoverSegments", Constants.MoverSegments);
+	TheShaderManager->RegisterConstant("TESR_ShadowMoverShapes", Constants.MoverShapes);
 	TheShaderManager->RegisterConstant("TESR_ShadowScreenSpaceData", &Constants.ScreenSpaceData);
 	TheShaderManager->RegisterConstant("TESR_OrthoData", &Constants.OrthoData);
 	TheShaderManager->RegisterConstant("TESR_ShadowFade", &Constants.ShadowFade);
@@ -506,8 +605,19 @@ void ShadowsExteriorEffect::RegisterTextures() {
 	if (!Settings.ShadowMaps.MSAA)
 		TheRenderManager->device->CreateDepthStencilSurface(ShadowAtlasSize, ShadowAtlasSize, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, true, &ShadowAtlasDepthSurface, NULL);
 	else {
-		TheRenderManager->device->CreateRenderTarget(ShadowAtlasSize, ShadowAtlasSize, Settings.ShadowMaps.Format, D3DMULTISAMPLE_4_SAMPLES, 0, 0, &ShadowAtlasSurfaceMSAA, NULL);
-		TheRenderManager->device->CreateDepthStencilSurface(ShadowAtlasSize, ShadowAtlasSize, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, true, &ShadowAtlasDepthSurface, NULL);
+		// A multisampled atlas is four times the size of the atlas itself, which at 32 bit and a
+		// 2048 cascade resolution is over a gigabyte - and not all hardware can multisample a 128
+		// bit format at all. Failing silently here leaves a null surface and no shadows, with
+		// nothing in the log to say why.
+		ShadowAtlasSurfaceMSAA = nullptr;
+		HRESULT msaaResult = TheRenderManager->device->CreateRenderTarget(ShadowAtlasSize, ShadowAtlasSize, Settings.ShadowMaps.Format, D3DMULTISAMPLE_4_SAMPLES, 0, 0, &ShadowAtlasSurfaceMSAA, NULL);
+		if (FAILED(msaaResult) || !ShadowAtlasSurfaceMSAA) {
+			ShadowAtlasSurfaceMSAA = nullptr;
+			Logger::Log("[ERROR] Could not create the multisampled shadow atlas (%ux%u, format %i). Falling back to no MSAA - lower CascadeResolution or set Format to 0 if shadows are missing.", ShadowAtlasSize, ShadowAtlasSize, (int)Settings.ShadowMaps.Format);
+		}
+		// The depth surface has to match the colour target it is paired with, so it follows whether
+		// the multisampled one actually exists rather than whether it was asked for.
+		TheRenderManager->device->CreateDepthStencilSurface(ShadowAtlasSize, ShadowAtlasSize, D3DFMT_D24S8, ShadowAtlasSurfaceMSAA ? D3DMULTISAMPLE_4_SAMPLES : D3DMULTISAMPLE_NONE, 0, true, &ShadowAtlasDepthSurface, NULL);
 	}
 
 	for (int i = 0; i <= MapLod; i++) {
@@ -552,6 +662,16 @@ void ShadowsExteriorEffect::RegisterTextures() {
 
 	// Initialize shadow buffer
 	TheTextureManager->InitTexture("TESR_PointShadowBuffer", &Textures.ShadowPassTexture, &Textures.ShadowPassSurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G16R16);
+
+	// Formats must match their copy sources - these are filled with StretchRect, not rendered
+	// to, and StretchRect between differing formats is driver and DXVK dependent.
+	TheTextureManager->InitTexture("TESR_ShadowHistoryBuffer", &Textures.ShadowHistoryTexture, &Textures.ShadowHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G16R16);
+	TheTextureManager->InitTexture("TESR_ShadowDepthHistoryBuffer", &Textures.DepthHistoryTexture, &Textures.DepthHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G32R32F);
+	TheTextureManager->InitTexture("TESR_ShadowNormalsHistoryBuffer", &Textures.NormalsHistoryTexture, &Textures.NormalsHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_A16B16G16R16F);
+	// 32 bit: y holds a view depth, which runs well past fp16's range. The buffer is rendered to;
+	// the history is filled from it with StretchRect, so the two formats match.
+	TheTextureManager->InitTexture("TESR_ShadowForwardBuffer", &Textures.ForwardBufferTexture, &Textures.ForwardBufferSurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G32R32F);
+	TheTextureManager->InitTexture("TESR_ShadowForwardHistory", &Textures.ForwardHistoryTexture, &Textures.ForwardHistorySurface, TheRenderManager->width, TheRenderManager->height, D3DFMT_G32R32F);
 
 	texturesInitialized = true;
 }
@@ -602,8 +722,19 @@ void ShadowsExteriorEffect::RecreateTextures(bool cascades, bool ortho, bool cub
 		if (!Settings.ShadowMaps.MSAA)
 			TheRenderManager->device->CreateDepthStencilSurface(ShadowAtlasSize, ShadowAtlasSize, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, true, &ShadowAtlasDepthSurface, NULL);
 		else {
-			TheRenderManager->device->CreateRenderTarget(ShadowAtlasSize, ShadowAtlasSize, Settings.ShadowMaps.Format, D3DMULTISAMPLE_4_SAMPLES, 0, 0, &ShadowAtlasSurfaceMSAA, NULL);
-			TheRenderManager->device->CreateDepthStencilSurface(ShadowAtlasSize, ShadowAtlasSize, D3DFMT_D24S8, D3DMULTISAMPLE_4_SAMPLES, 0, true, &ShadowAtlasDepthSurface, NULL);
+			// A multisampled atlas is four times the size of the atlas itself, which at 32 bit and a
+			// 2048 cascade resolution is over a gigabyte - and not all hardware can multisample a 128
+			// bit format at all. Failing silently here leaves a null surface and no shadows, with
+			// nothing in the log to say why.
+			ShadowAtlasSurfaceMSAA = nullptr;
+			HRESULT msaaResult = TheRenderManager->device->CreateRenderTarget(ShadowAtlasSize, ShadowAtlasSize, Settings.ShadowMaps.Format, D3DMULTISAMPLE_4_SAMPLES, 0, 0, &ShadowAtlasSurfaceMSAA, NULL);
+			if (FAILED(msaaResult) || !ShadowAtlasSurfaceMSAA) {
+				ShadowAtlasSurfaceMSAA = nullptr;
+				Logger::Log("[ERROR] Could not create the multisampled shadow atlas (%ux%u, format %i). Falling back to no MSAA - lower CascadeResolution or set Format to 0 if shadows are missing.", ShadowAtlasSize, ShadowAtlasSize, (int)Settings.ShadowMaps.Format);
+			}
+			// The depth surface has to match the colour target it is paired with, so it follows whether
+			// the multisampled one actually exists rather than whether it was asked for.
+			TheRenderManager->device->CreateDepthStencilSurface(ShadowAtlasSize, ShadowAtlasSize, D3DFMT_D24S8, ShadowAtlasSurfaceMSAA ? D3DMULTISAMPLE_4_SAMPLES : D3DMULTISAMPLE_NONE, 0, true, &ShadowAtlasDepthSurface, NULL);
 		}
 
 		for (int i = 0; i <= MapLod; i++) {
@@ -696,6 +827,13 @@ D3DXVECTOR3 ShadowsExteriorEffect::CalculateSmoothedSunDir() {
 		// Apply smoothing only if the change is small
 		if (angleDifference < maxJumpAngle) {
 			D3DXVec3Lerp(&SmoothedSunDir, &SmoothedSunDir, &SunDir, smoothingFactor);
+			// Lerping between two unit vectors cuts the corner, so the result is short. It is
+			// used as a direction to place the light eye at
+			// shadowFrustumCenter + SunDir * sphereRadius, where a short vector pulls the eye
+			// in and shifts the depth normalisation of the whole cascade. With the sun
+			// quantised the target is static and this converges back to unit length; without
+			// it the target moves every frame and the vector stays permanently short.
+			D3DXVec3Normalize(&SmoothedSunDir, &SmoothedSunDir);
 		}
 		else {
 			SmoothedSunDir = SunDir;
@@ -835,13 +973,18 @@ D3DXMATRIX ShadowsExteriorEffect::GetCascadeViewProj(ShadowMapSettings* ShadowMa
 		float dist = D3DXVec3Length(&centerToCorner);
 		sphereRadius = max(sphereRadius, dist);
 	}
-	sphereRadius = std::ceil(sphereRadius * 16.0f) / 16.0f;
-
 	// Modify sphere radius to compensate for lower than default FOV (aiming, zooming, ...).
 	float defaultWorldFOV = *(float*)(0x120315C + 4);
 	float currentWorldFOV = WorldSceneGraph->cameraFOV;
 	float radiusFOVCompensation = tan(defaultWorldFOV * 0.5f * (3.1416f / 180.0f)) / tan(currentWorldFOV * 0.5f * (3.1416f / 180.0f));
 	sphereRadius *= radiusFOVCompensation;
+
+	// Quantise last. The radius sets the texel size, and the texel grid is what the snapping
+	// below aligns to, so it has to stop moving before anything can be aligned to it. This
+	// used to run before the FOV compensation, which promptly undid it - leaving the extents
+	// drifting continuously with aiming and weapon sway, so the snap was aligning to a grid
+	// of changing pitch.
+	sphereRadius = std::ceil(sphereRadius * 16.0f) / 16.0f;
 
 	maxExtents = D3DXVECTOR3(sphereRadius, sphereRadius, sphereRadius);
 	minExtents = -maxExtents;
@@ -873,11 +1016,33 @@ D3DXMATRIX ShadowsExteriorEffect::GetCascadeViewProj(ShadowMapSettings* ShadowMa
 	D3DXMatrixOrthoOffCenterRH(&shadowProj, minExtents.x, maxExtents.x, minExtents.y, maxExtents.y, nearPlane, farPlane);
 	shadowViewProj = shadowView * shadowProj;
 
-	// Create the rounding matrix, by projecting the world-space origin and determining
-	// the fractional offset in texel space.
+	// Snap the projection to the texel grid so the shadow lattice stays pinned to the world
+	// instead of sliding under a moving camera. The correction applied is
+	// frac(L(anchor) / texel), so the anchor has to be a fixed world point - but it also has
+	// to be a NEAR one, and that is where this went wrong.
+	//
+	// Rotating the light moves a point's light space position in proportion to its distance
+	// from the light. In camera relative space (-cameraPosition) is the world ORIGIN, which
+	// out in a worldspace is tens of thousands of units away. A sun step of a few 1e-5 radians
+	// sweeps it past several texels every frame, so frac() returns essentially a random number
+	// and the correction meant to stabilise the map displaces it randomly instead. The camera
+	// walking does the same thing more slowly, which is why this is visible with QuantizeSun
+	// on as well - quantising freezes the sun's contribution to the phase, not the camera's.
+	//
+	// Anchoring to a power-of-two world grid near the camera keeps the anchor fixed for long
+	// stretches, while cutting the lever arm from the whole worldspace coordinate down to
+	// roughly the cascade radius. Scaling the grid with that radius keeps both the residual
+	// jitter and the once-per-grid-step re-anchor constant in texels across all four cascades.
+	//
+	// Rotation within a cascade is not the problem: it moves geometry by sphereRadius * dTheta,
+	// which at 2048 texels is around 0.04 texels per frame.
 	float sMapSize = ShadowMap->ShadowMapResolution;
-	// We are working in camera relative world space - camera position is our fixed point for stabilization.
-	D3DXVECTOR4 shadowOrigin(-cameraPosition.x, -cameraPosition.y, -cameraPosition.z, 1.0f);
+	float anchorGrid = std::exp2(std::ceil(std::log2(max(sphereRadius, 1.0f))));
+	D3DXVECTOR4 shadowOrigin(
+		std::floor(cameraPosition.x / anchorGrid + 0.5f) * anchorGrid - cameraPosition.x,
+		std::floor(cameraPosition.y / anchorGrid + 0.5f) * anchorGrid - cameraPosition.y,
+		std::floor(cameraPosition.z / anchorGrid + 0.5f) * anchorGrid - cameraPosition.z,
+		1.0f);
 	D3DXVec4Transform(&shadowOrigin, &shadowOrigin, &shadowViewProj);
 	D3DXVec4Scale(&shadowOrigin, &shadowOrigin, sMapSize / 2.0f);
 	D3DXVECTOR4 roundedOrigin, roundOffset;
