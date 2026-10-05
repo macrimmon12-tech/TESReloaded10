@@ -484,6 +484,26 @@ void ShadowsExteriorEffect::UpdateSettings() {
 }
 
 
+/*
+* The exterior apply multiplies the scene by the sun-shadow term that SunShadows writes into the red
+* channel of TESR_PointShadowBuffer. When SunShadows is not running (its effect file failed to compile --
+* seen on a tester's install with an outdated Effects/Includes/Normals.hlsl -- or it was switched off),
+* that channel holds only the point-light term, about 0 outdoors, and the apply darkened the WHOLE image
+* by the Darkness setting. Skip the apply instead (this also skips the composite apply in the fog pass).
+*/
+bool ShadowsExteriorEffect::ShouldRender() {
+	SunShadowsEffect* sun = TheShaderManager->Effects.SunShadows;
+	if (!TheShaderManager->GameState.isExterior || (sun && sun->Enabled && sun->Effect)) return true;
+	static bool reported = false;
+	if (!reported) {
+		Logger::Log("Exterior shadow apply skipped: the SunShadows effect is not running (look for a SunShadows.fx.hlsl "
+			"error above, usually a missing or outdated file in Shaders\\NewVegasReloaded\\Effects\\Includes). Without it the "
+			"shadow pass would darken the whole image by the Darkness setting.");
+		reported = true;
+	}
+	return false;
+}
+
 void ShadowsExteriorEffect::clearShadowsBuffer() {
 	// clear shadows buffer
 	IDirect3DSurface9* currentRT;
@@ -784,8 +804,10 @@ void ShadowsExteriorEffect::RecreateTextures(bool cascades, bool ortho, bool cub
 		TheShaderManager->Effects.WetWorld->ClearSampler("TESR_OrthoMapBuffer", 19);
 	}
 
-	// Reset shadow manager frame counter.
+	// Reset shadow manager frame counter, and refresh every cascade next frame: the staggered
+	// schedule would otherwise leave freshly created cascades uninitialised for several frames.
 	TheShadowManager->FrameCounter = 0;
+	TheShadowManager->ForceAllCascades = true;
 }
 
 

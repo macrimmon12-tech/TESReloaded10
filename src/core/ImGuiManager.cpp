@@ -3,6 +3,7 @@
 #include "imgui_internal.h"
 #include "imgui_impl_dx9.h"
 #include "imgui_impl_win32.h"
+#include "GpuProfiler.h"
 #include <sstream>
 #include <iomanip>
 #include <ctime>
@@ -2708,12 +2709,32 @@ static void RenderMainMenuToast() {
 		msg.c_str());
 }
 
+// A small dim marker in the top-right corner while the F10 GPU/CPU profiler is running, so it is not
+// left on by accident. Drawn on the foreground list, so it needs no window and shows with the menu closed.
+static void RenderProfilerIndicator() {
+	if (!GpuTimer::Enabled) return;
+
+	const char* label = "PROF";
+	const ImVec2 display = ImGui::GetIO().DisplaySize;
+	const ImVec2 textSize = ImGui::CalcTextSize(label);
+	const float radius = 3.0f, margin = 8.0f, gap = 5.0f;
+	const ImVec2 textPos(display.x - margin - textSize.x, margin);
+	const ImVec2 center(textPos.x - gap - radius, margin + textSize.y * 0.5f);
+
+	ImDrawList* draw = ImGui::GetForegroundDrawList();
+	draw->AddText(ImVec2(textPos.x + 1, textPos.y + 1), IM_COL32(0, 0, 0, 110), label);
+	draw->AddText(textPos, IM_COL32(210, 210, 210, 120), label);
+	draw->AddCircleFilled(center, radius, IM_COL32(230, 60, 60, 170));
+}
+
 void ImGuiManager::BuildUI() {
 	// Main menu: show toast only, no settings window
 	if (InterfaceManager->IsActive(Menu::MenuType::kMenuType_Main)) {
 		RenderMainMenuToast();
 		return;
 	}
+
+	RenderProfilerIndicator();
 
 	if (!Visible) return;
 

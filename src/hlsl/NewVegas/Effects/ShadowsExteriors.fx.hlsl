@@ -54,14 +54,16 @@ float4 Shadow(VSOUT IN) : COLOR0
 	float4 color = tex2D(TESR_RenderedBuffer, IN.UVCoord);
 	float2 uv = IN.UVCoord;
 
-	float depth = readDepth(uv);
-	float3 camera_vector = toWorld(uv) * depth;
-	float uniformDepth = length(camera_vector);
-	float4 world_pos = float4(TESR_CameraPosition.xyz + camera_vector, 1.0f);
-	float3 world_normal = GetWorldNormal(IN.UVCoord);
-
-	// early out for underwater surface (if camera is underwater and surface to shade is close to water level with normal pointing downward)
-	if (TESR_WaterSettings.z == 1 && world_pos.z < (TESR_WaterSettings.x + 2) && world_pos.z > (TESR_WaterSettings.x - 2) && dot(world_normal, float3(0, 0, -1)) > 0.999) return color;
+	// World position and normals are only needed for the underwater water-plane exception.
+	// Keeping them behind this coherent branch removes two texture reads and two matrix/vector
+	// reconstructions from every ordinary exterior pixel.
+	[branch] if (TESR_WaterSettings.z == 1) {
+		float depth = readDepthLod(uv);
+		float3 camera_vector = toWorld(uv) * depth;
+		float4 world_pos = float4(TESR_CameraPosition.xyz + camera_vector, 1.0f);
+		float3 world_normal = GetWorldNormalLod(uv);
+		if (world_pos.z < (TESR_WaterSettings.x + 2) && world_pos.z > (TESR_WaterSettings.x - 2) && dot(world_normal, float3(0, 0, -1)) > 0.999) return color;
+	}
 
 	float2 Shadow = tex2D(TESR_PointShadowBuffer, IN.UVCoord).rg;
 	Shadow.r = lerp(TESR_ShadowFade.x, 1.0f, Shadow.r); // fade shadows to light when sun is low

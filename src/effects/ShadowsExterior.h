@@ -229,6 +229,7 @@ public:
 	bool		ForwardShadowsRunning();
 	bool		ForwardTemporalActive();
 	void		UpdateTemporalHistory();
+	bool		ShouldRender() override;
 	void		UpdateConstants();
 	void		UpdateSettings();
 	void		RegisterConstants();

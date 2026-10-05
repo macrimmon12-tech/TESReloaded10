@@ -412,6 +412,39 @@ void SettingManager::LoadSettings() {
 	SettingsMain.Main.SkipFog = GetSettingI("Main.Main.Misc", "SkipFog");
 	SettingsMain.Main.RenderEffects = GetSettingI("Main.Main.Misc", "RenderEffects");
 	SettingsMain.Main.RenderPreTonemapping = GetSettingI("Main.Main.Misc", "RenderPreTonemapping");
+	// Settings only resolve when they exist in the defaults file (Configuration::FillNode), so these
+	// live in [_Main.Main.Performance] / [_Main.Main.ReducedQuality] there and show up as switches in
+	// the in-game menu. A key missing from an older defaults file reads as its fallback, so a
+	// DLL-only update keeps the lossless ones on and the image-changing ones off.
+	auto boolSetting = [this](const char* section, const char* key, bool fallback) {
+		Configuration::ConfigNode node;
+		return Config.FillNode(&node, section, key) ? node.BoolValue : fallback;
+	};
+	const char* performance = "Main.Main.Performance";
+	SettingsMain.Main.DisableFrameChain = !boolSetting(performance, "FrameChain", true);
+	SettingsMain.Main.DisableWorldSceneGuard = !boolSetting(performance, "WorldSceneGuard", true);
+	SettingsMain.Main.DisableCompositeApply = !boolSetting(performance, "CompositeApply", true);
+	SettingsMain.Main.DisableChainGameTexture = !boolSetting(performance, "ChainUsesGameTexture", true);
+	// Off unless asked for: on native D3D9 (GTX 1070) the driver drops the two-target draw without
+	// an error, leaving depth and normals stale.
+	SettingsMain.Main.DisableMergedNormals = !boolSetting(performance, "MergedDepthNormals", false);
+	SettingsMain.Main.SlimDepthBuffer = boolSetting(performance, "SlimDepthBuffer", true);
+	const char* reducedQuality = "Main.Main.ReducedQuality";
+	SettingsMain.Main.GodRaysLowRes = boolSetting(reducedQuality, "GodRaysLowRes", false);
+	SettingsMain.Main.AOLowRes = boolSetting(reducedQuality, "AOLowRes", false);
+	SettingsMain.Main.FXAA = boolSetting(reducedQuality, "FXAA", false);
+	{
+		Configuration::ConfigNode node;
+		const int interval = Config.FillNode(&node, reducedQuality, "PointShadowInterval") ? node.IntValue : 1;
+		SettingsMain.Main.PointShadowInterval = max(1, min(interval, 4));
+	}
+	SettingsMain.Main.CheapReflections = boolSetting(reducedQuality, "CheapReflections", false);
+	SettingsMain.Main.StaggeredSunShadows = boolSetting(reducedQuality, "StaggeredSunShadows", false);
+	{
+		Configuration::ConfigNode node;
+		const int interval = Config.FillNode(&node, reducedQuality, "NearCascadeInterval") ? node.IntValue : 1;
+		SettingsMain.Main.NearCascadeInterval = max(1, min(interval, 2));
+	}
 	SettingsMain.Main.PresetManagerEnabled = GetSettingI("Main.Main.Misc", "PresetManagerEnabled");
 
 	SettingsMain.FrameRate.SmartControl = GetSettingI("Main.FrameRate.SmartControl", "SmartControl");

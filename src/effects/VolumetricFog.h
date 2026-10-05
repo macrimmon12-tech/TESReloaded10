@@ -43,4 +43,25 @@ public:
 	// cached from UpdateSettings (Shaders.ShadowsExteriors.Main/NightMinDarkness), consumed by
 	// UpdateConstants to drive the moon-phase night-ambient ceiling
 	float	nightMinDarkness;
+	bool	packedFogFailed = false;
+	bool	dedicatedFogFailed = false;
+	// [0]: fog multiply + depth, [1]: fog add -- written together as MRTs by the estimate pass
+	IDirect3DTexture9* fogTexture[2] = {};
+	IDirect3DSurface9* fogSurface[2] = {};
+
+	// Composite apply (set by ShaderManager for one Render call): the dedicated reconstruct also
+	// applies the exterior sun-shadow composite and/or the deferred AO combine, saving their own
+	// full-resolution passes. compositeApplied reports whether that happened.
+	bool	compositeShadow = false;
+	bool	compositeAO = false;
+	IDirect3DTexture9* compositeAOTexture = nullptr;
+	bool	compositeApplied = false;
+	bool	CanComposite(IDirect3DSurface9* aoSurface);
+
+	void	RegisterTextures();
+	bool	RenderDedicated(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTarget,
+		IDirect3DSurface9* RenderedSurface);
+	void Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTarget,
+		IDirect3DSurface9* RenderedSurface, UINT techniqueIndex, bool ClearRenderTarget,
+		IDirect3DSurface9* SourceBuffer) override;
 };

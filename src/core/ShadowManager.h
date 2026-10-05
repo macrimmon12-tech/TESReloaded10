@@ -25,7 +25,7 @@ public:
 	void					RenderShadowSpotlight(NiSpotLight** Lights, UInt32 LightIndex);
 	void					RenderShadowMaps();
 	void					ClearShadowCascade(D3DVIEWPORT9* ViewPort, D3DXVECTOR4* ClearColor);
-	void                    BlurShadowAtlas();
+	void                    BlurShadowAtlas(unsigned cascadeMask);
 
 	ShadowRenderPass*				geometryPass;
 	AlphaShadowRenderPass*			alphaPass;
@@ -53,6 +53,7 @@ public:
 	float					shadowMapsRenderTime;
 	bool					ShadowShadersLoaded;
 	int						FrameCounter;
+	bool					ForceAllCascades = true; // next frame refreshes every cascade (fresh or recreated atlas)
 
 	// Actors drawn into the sun cascades, this frame and the one before. The temporal filter cannot
 	// tell a moving actor's shadow from a static one, so it is told where they are - see PublishMovers.

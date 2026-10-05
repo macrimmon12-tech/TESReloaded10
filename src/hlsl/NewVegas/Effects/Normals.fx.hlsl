@@ -1,69 +1,6 @@
 float4 TESR_ReciprocalResolution;
 
 sampler2D TESR_DepthBuffer : register(s0) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = NONE; MINFILTER = NONE; MIPFILTER = NONE; };
-sampler2D TESR_NormalsBuffer : register(s1) = sampler_state { ADDRESSU = CLAMP; ADDRESSV = CLAMP; MAGFILTER = NONE; MINFILTER = NONE; MIPFILTER = NONE; };
-
-static const float dropTreshold = 0.82;
-static const float blurRadius = 0.6;
-static const int KernelSize = 24;
-static const float2 OffsetMaskH = float2(1.0f, 0.0f);
-static const float2 OffsetMaskV = float2(0.0f, 1.0f);
-
-static const float BlurNormalsWeights[KernelSize] = 
-{
-	0.019956226f,
-	0.021463016f,
-	0.032969806f,
-	0.044476596f,
-	0.055983386f,
-	0.067490176f,
-	0.078996966f,
-	0.080503756f,
-	0.092010546f,
-	0.105024126f,
-	0.116530916f,
-	0.128037706f,
-	0.128037706f,
-	0.116530916f,
-	0.105024126f,
-	0.092010546f,
-	0.080503756f,
-	0.078996966f,
-	0.067490176f,
-	0.055983386f,
-	0.044476596f,
-	0.032969806f,
-	0.021463016f,
-	0.019956226f
-};
-
-static const float2 BlurNormalsOffsets[KernelSize] = 
-{
-	float2(-12.0f * TESR_ReciprocalResolution.x, -12.0f * TESR_ReciprocalResolution.y),
-	float2(-11.0f * TESR_ReciprocalResolution.x, -11.0f * TESR_ReciprocalResolution.y),
-	float2(-10.0f * TESR_ReciprocalResolution.x, -10.0f * TESR_ReciprocalResolution.y),
-	float2( -9.0f * TESR_ReciprocalResolution.x,  -9.0f * TESR_ReciprocalResolution.y),
-	float2( -8.0f * TESR_ReciprocalResolution.x,  -8.0f * TESR_ReciprocalResolution.y),
-	float2( -7.0f * TESR_ReciprocalResolution.x,  -7.0f * TESR_ReciprocalResolution.y),
-	float2( -6.0f * TESR_ReciprocalResolution.x,  -6.0f * TESR_ReciprocalResolution.y),
-	float2( -5.0f * TESR_ReciprocalResolution.x,  -5.0f * TESR_ReciprocalResolution.y),
-	float2( -4.0f * TESR_ReciprocalResolution.x,  -4.0f * TESR_ReciprocalResolution.y),
-	float2( -3.0f * TESR_ReciprocalResolution.x,  -3.0f * TESR_ReciprocalResolution.y),
-	float2( -2.0f * TESR_ReciprocalResolution.x,  -2.0f * TESR_ReciprocalResolution.y),
-	float2( -1.0f * TESR_ReciprocalResolution.x,  -1.0f * TESR_ReciprocalResolution.y),
-	float2(  1.0f * TESR_ReciprocalResolution.x,   1.0f * TESR_ReciprocalResolution.y),
-	float2(  2.0f * TESR_ReciprocalResolution.x,   2.0f * TESR_ReciprocalResolution.y),
-	float2(  3.0f * TESR_ReciprocalResolution.x,   3.0f * TESR_ReciprocalResolution.y),
-	float2(  4.0f * TESR_ReciprocalResolution.x,   4.0f * TESR_ReciprocalResolution.y),
-	float2(  5.0f * TESR_ReciprocalResolution.x,   5.0f * TESR_ReciprocalResolution.y),
-	float2(  6.0f * TESR_ReciprocalResolution.x,   6.0f * TESR_ReciprocalResolution.y),
-	float2(  7.0f * TESR_ReciprocalResolution.x,   7.0f * TESR_ReciprocalResolution.y),
-	float2(  8.0f * TESR_ReciprocalResolution.x,   8.0f * TESR_ReciprocalResolution.y),
-	float2(  9.0f * TESR_ReciprocalResolution.x,   9.0f * TESR_ReciprocalResolution.y),
-	float2( 10.0f * TESR_ReciprocalResolution.x,  10.0f * TESR_ReciprocalResolution.y),
-	float2( 11.0f * TESR_ReciprocalResolution.x,  11.0f * TESR_ReciprocalResolution.y),
-	float2( 12.0f * TESR_ReciprocalResolution.x,  12.0f * TESR_ReciprocalResolution.y)
-};
 
 
 struct VSOUT
@@ -89,6 +26,19 @@ VSOUT FrameVS(VSIN IN)
 #include "Includes/Depth.hlsl"
 #include "Includes/Helpers.hlsl"
 
+// (linear depth, post-projection depth) for a texel; the second is recomputed from the first
+// because the depth buffer may be a single channel (see projectedDepthFromLinear).
+float2 DepthPair(float2 uv)
+{
+	float linear01 = tex2D(TESR_DepthBuffer, uv).x;
+	return float2(linear01, projectedDepthFromLinear(linear01));
+}
+
+float3 ReconstructPositionFromDepth(float2 uv, float depth)
+{
+	float4 viewSpace = mul(float4(uv.x * 2 - 1, (1 - uv.y) * 2 - 1, depth, 1), TESR_InvProjectionTransform);
+	return viewSpace.xyz / viewSpace.w;
+}
 
 float4 ComputeNormals(VSOUT IN) :COLOR0
 {
@@ -103,33 +53,32 @@ float4 ComputeNormals(VSOUT IN) :COLOR0
 	float4 bottomUv = uv.xyxy + float4(0.0, 1.0, 0.0, 2.0) * TESR_ReciprocalResolution.xyxy; 
 	float4 topUv =uv.xyxy + float4(0.0, -1.0, 0.0, -2.0) * TESR_ReciprocalResolution.xyxy; 
 
-	float depth = readDepth(uv);
+	// Each sample contains linear depth in x and device depth in y. Reuse the same nine
+	// reads for edge selection and position reconstruction; the old shader fetched the five
+	// reconstruction samples a second time.
+	float2 centerDepth = DepthPair(uv);
+	float2 rightDepth1 = DepthPair(rightUv.xy);
+	float2 leftDepth1 = DepthPair(leftUv.xy);
+	float2 rightDepth2 = DepthPair(rightUv.zw);
+	float2 leftDepth2 = DepthPair(leftUv.zw);
+	float2 topDepth1 = DepthPair(topUv.xy);
+	float2 bottomDepth1 = DepthPair(bottomUv.xy);
+	float2 topDepth2 = DepthPair(topUv.zw);
+	float2 bottomDepth2 = DepthPair(bottomUv.zw);
 
-	// get depth values at 1 & 2 pixels offsets from current along the horizontal axis
-	float4 H = float4(
-		readDepth(rightUv.xy),
-		readDepth(leftUv.xy),
-		readDepth(rightUv.zw),
-		readDepth(leftUv.zw)
-	);
-
-	// get depth values at 1 & 2 pixels offsets from current along the vertical axis
-	float4 V = float4(
-		readDepth(topUv.xy),
-		readDepth(bottomUv.xy),
-		readDepth(topUv.zw),
-		readDepth(bottomUv.zw)
-	);
+	float depth = centerDepth.x * farZ;
+	float4 H = float4(rightDepth1.x, leftDepth1.x, rightDepth2.x, leftDepth2.x) * farZ;
+	float4 V = float4(topDepth1.x, bottomDepth1.x, topDepth2.x, bottomDepth2.x) * farZ;
 
 	float2 he = abs((2 * H.xy - H.zw) - depth);
 	float2 ve = abs((2 * V.xy - V.zw) - depth);
 
 	// pick horizontal and vertical diff with the smallest depth difference from slopes
-	float3 centerPoint = reconstructPosition(uv);
-	float3 rightPoint = reconstructPosition(rightUv.xy);
-	float3 leftPoint = reconstructPosition(leftUv.xy);
-	float3 topPoint = reconstructPosition(topUv.xy);
-	float3 bottomPoint = reconstructPosition(bottomUv.xy);
+	float3 centerPoint = ReconstructPositionFromDepth(uv, centerDepth.y);
+	float3 rightPoint = ReconstructPositionFromDepth(rightUv.xy, rightDepth1.y);
+	float3 leftPoint = ReconstructPositionFromDepth(leftUv.xy, leftDepth1.y);
+	float3 topPoint = ReconstructPositionFromDepth(topUv.xy, topDepth1.y);
+	float3 bottomPoint = ReconstructPositionFromDepth(bottomUv.xy, bottomDepth1.y);
 	float3 left = centerPoint - leftPoint;
 	float3 right = rightPoint - centerPoint;
 	float3 down = centerPoint - bottomPoint;
@@ -144,32 +93,6 @@ float4 ComputeNormals(VSOUT IN) :COLOR0
 
 	return float4 (compress(viewNormal), 1.0);
 }
- 
-
-float4 BlurNormals(VSOUT IN, uniform float2 OffsetMask) : COLOR0
-{
-	float WeightSum = 0.12f * saturate(1 - dropTreshold);
-	float3 normal = expand(tex2D(TESR_NormalsBuffer, IN.UVCoord).rgb);
-	float3 finalNormal = normal * WeightSum;
-	float depth = readDepth(IN.UVCoord);
-	float depthBasedRadius = abs(log(depth/farZ)) * blurRadius;
-	float depthDrop = (depth/farZ) * 7000; // difference of depth beyond which the sample will not count towards the blur
-
-	for (int i = 0; i < KernelSize; i++) {
-		float2 uvOff = (BlurNormalsOffsets[i] * OffsetMask) * depthBasedRadius;
-		float3 newNormal = expand(tex2D(TESR_NormalsBuffer, IN.UVCoord + uvOff).rgb);
-		float depth2 = readDepth(IN.UVCoord + uvOff);
-		float useForBlur = abs(float(depth - depth2)) <= depthDrop;
-
-		float weight = BlurNormalsWeights[i] * saturate(dot(newNormal, normal) - dropTreshold * 0.75f) * useForBlur;
-
-		finalNormal += weight * newNormal;
-		WeightSum += weight;
-	}
-	
-	finalNormal /= WeightSum;
-    return float4(compress(finalNormal), 1.0f);
-}
 
 
 technique
@@ -178,15 +101,5 @@ technique
 	{ 
 		VertexShader = compile vs_3_0 FrameVS();
 		PixelShader = compile ps_3_0 ComputeNormals();
-	}
-	pass
-	{ 
-		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 BlurNormals(OffsetMaskH);
-	}
-	pass
-	{ 
-		VertexShader = compile vs_3_0 FrameVS();
-		PixelShader = compile ps_3_0 BlurNormals(OffsetMaskV);
 	}
 }

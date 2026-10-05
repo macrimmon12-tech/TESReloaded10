@@ -11,6 +11,9 @@
 
 #define SamplerStatesMax 12
 #define ShadowCubeMapsMax 12
+// PointShadows.fx / PointShadows2.fx sample the cubemaps of slots 0..10 only; the last slot's light is lit without a
+// shadow lookup, so its cubemap is never read and is not drawn.
+#define ShadowCubeMapsSampled (ShadowCubeMapsMax - 1)
 #define TrackedLightsMax 12
 #define SpotLightsMax 1
 

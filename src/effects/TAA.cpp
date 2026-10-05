@@ -165,6 +165,11 @@ void TAAEffect::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTarget
 	}
 
 	auto timer = TimeLogger();
+	// This path renders into the game target and copies it into RenderedSurface itself. With the copy-free frame
+	// chain the current image may sit in a chain texture instead, so hand it to the game target first (as the
+	// packed god-ray path does) and use the current RenderedSurface, which the sync can move.
+	TheShaderManager->Chain.Sync();
+	RenderedSurface = TheTextureManager->RenderedSurface;
 
 	// A new cell means a loading screen or a teleport: last frame's history shows another place.
 	if (TheShaderManager->GameState.isCellChanged) historyValid = false;

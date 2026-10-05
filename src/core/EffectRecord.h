@@ -20,6 +20,12 @@ public:
 
 	bool 					IsLoaded();
 	bool					Enabled;
+	bool					usesSourceBuffer = true; // false when the effect declares no TESR_SourceBuffer sampler
+	// True when a pass can leave destination pixels unwritten or depends on their contents
+	// (clip/discard, blending, stencil, colour write masks). Under the frame chain such passes
+	// get their destination pre-filled with the current image, matching the old in-place result.
+	bool					needsPrefill = true;
+	void					RebindSlotTextures();
 	float					renderTime;
 	float					constantUpdateTime;
 

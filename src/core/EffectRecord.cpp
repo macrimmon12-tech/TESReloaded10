@@ -1,3 +1,4 @@
+#include <regex>
 /*
 * Class that wraps an effect shader, in order to load it/render it/set constants.
 */
@@ -221,10 +222,25 @@ void EffectRecord::CreateCT(ID3DXBuffer* ShaderSource, ID3DXConstantTable* Const
 	UInt32 TextureIndex = 0;
 
 	Effect->GetDesc(&ConstantTableDesc);
+	usesSourceBuffer = false;
+
+	// Scan the preprocessed source (includes expanded) for anything that makes a pass leave
+	// pixels unwritten or read the destination. Unknown source stays conservative.
+	needsPrefill = true;
+	if (ShaderSource && ShaderSource->GetBufferPointer()) {
+		static const std::regex partialWrite(
+			R"(\bclip\s*\(|\bdiscard\b|AlphaBlendEnable\s*=\s*(true|1)|StencilEnable\s*=\s*(true|1)|)"
+			R"(ColorWriteEnable|SeparateAlphaBlendEnable\s*=\s*(true|1)|AlphaTestEnable\s*=\s*(true|1))",
+			std::regex::icase | std::regex::optimize);
+		std::string source((const char*)ShaderSource->GetBufferPointer(), ShaderSource->GetBufferSize());
+		needsPrefill = std::regex_search(source, partialWrite);
+	}
+	if (needsPrefill) Logger::Log("%s: partial-write passes, frame chain pre-fills its destination.", Name);
 	for (UINT c = 0; c < ConstantTableDesc.Parameters; c++) {
 		Handle = Effect->GetParameter(NULL, c);
 		Effect->GetParameterDesc(Handle, &ConstantDesc);
 		if (memcmp(ConstantDesc.Name, "TESR_", 5)) continue;
+		if (!strcmp(ConstantDesc.Name, "TESR_SourceBuffer")) usesSourceBuffer = true;
 		if ((ConstantDesc.Class == D3DXPC_VECTOR || ConstantDesc.Class == D3DXPC_MATRIX_ROWS)) FloatShaderValuesCount += 1;
 		if (ConstantDesc.Class == D3DXPC_OBJECT && ConstantDesc.Type >= D3DXPT_SAMPLER && ConstantDesc.Type <= D3DXPT_SAMPLERCUBE) TextureShaderValuesCount += 1;
 	}
@@ -280,6 +296,9 @@ void EffectRecord::SetCT() {
 	ShaderTextureValue* Sampler;
 	for (UInt32 c = 0; c < TextureShaderValuesCount; c++) {
 		Sampler = &TextureShaderValues[c];
+		// Follow the TextureManager slot rather than the pointer cached at first bind, so the
+		// frame chain's swapped rendered buffer is picked up.
+		if (Sampler->Texture->TextureRef) Sampler->Texture->Texture = *Sampler->Texture->TextureRef;
 		if (!Sampler->Texture->Texture) {
 			Sampler->Texture->BindTexture(Sampler->Name);
 
@@ -342,6 +361,20 @@ bool EffectRecord::SwitchEffect() {
 }
 
 
+/*
+* Re-binds samplers that follow a TextureManager slot, for use after BeginPass when a slot's
+* texture changed since SetCT (the frame chain swaps TESR_RenderedBuffer between passes).
+*/
+void EffectRecord::RebindSlotTextures() {
+	for (UInt32 c = 0; c < TextureShaderValuesCount; c++) {
+		ShaderTextureValue* Sampler = &TextureShaderValues[c];
+		if (!Sampler->Texture || !Sampler->Texture->TextureRef || !*Sampler->Texture->TextureRef) continue;
+		if (Sampler->Texture->Texture == *Sampler->Texture->TextureRef) continue;
+		Sampler->Texture->Texture = *Sampler->Texture->TextureRef;
+		TheRenderManager->device->SetTexture(Sampler->RegisterIndex, Sampler->Texture->Texture);
+	}
+}
+
 /**
 * Renders the given effect shader.
 */
@@ -353,7 +386,48 @@ void EffectRecord::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTar
 	}
 
 	auto timer = TimeLogger();
-	if (SourceBuffer) Device->StretchRect(RenderTarget, NULL, SourceBuffer, NULL, D3DTEXF_LINEAR);
+
+	FrameChain& chain = TheShaderManager->Chain;
+	if (chain.Owns(RenderTarget, RenderedSurface)) {
+		// Copy-free path: each pass renders into the chain's spare texture, which then becomes the
+		// current image (and so TESR_RenderedBuffer) for the next pass and the next effect.
+		if (SourceBuffer && usesSourceBuffer && SourceBuffer != RenderTarget)
+			Device->StretchRect(TheTextureManager->RenderedSurface, NULL, SourceBuffer, NULL, D3DTEXF_LINEAR);
+		D3DXHANDLE technique = Effect->GetTechnique(techniqueIndex);
+		Effect->SetTechnique(technique);
+		SetCT();
+		UINT Passes = 0;
+		if (SUCCEEDED(Effect->Begin(&Passes, NULL))) {
+			const bool prefill = !ClearRenderTarget && needsPrefill;
+			for (UINT p = 0; p < Passes; p++) {
+				// The last pass of the chain's final effect renders straight into the game target, so
+				// the chain has no copy to make when it ends. Not worth it for a pass that has to be
+				// pre-filled: that is the same copy, just earlier.
+				const bool direct = p == Passes - 1 && !prefill && chain.IsDirectFinal(this);
+				IDirect3DSurface9* destination = direct ? chain.FinalSurface() : chain.Output();
+				if (prefill)
+					Device->StretchRect(TheTextureManager->RenderedSurface, NULL, destination, NULL, D3DTEXF_NONE);
+				Device->SetRenderTarget(0, destination);
+				if (ClearRenderTarget) Device->Clear(0L, NULL, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 0, 0, 0), 1.0f, 0L);
+				Effect->BeginPass(p);
+				RebindSlotTextures(); // the current image moved after the previous pass
+				Device->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2);
+				Effect->EndPass();
+				if (direct) chain.CommitFinal();
+				else chain.Commit();
+			}
+			Effect->End();
+		}
+		Device->SetRenderTarget(0, RenderTarget);
+		std::string name = "EffectRecord::Render " + std::string(Name);
+		renderTime = timer.LogTime(name.c_str());
+		return;
+	}
+
+	// Effects that never sample TESR_SourceBuffer do not need the full-resolution copy. Every
+	// effect that does sample it declares the sampler and so still refreshes it here itself.
+	if (SourceBuffer && usesSourceBuffer && SourceBuffer != RenderTarget)
+		Device->StretchRect(RenderTarget, NULL, SourceBuffer, NULL, D3DTEXF_LINEAR);
 
 	try {
 		D3DXHANDLE technique = Effect->GetTechnique(techniqueIndex);
@@ -366,7 +440,7 @@ void EffectRecord::Render(IDirect3DDevice9* Device, IDirect3DSurface9* RenderTar
 			Effect->BeginPass(p);
 			Device->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0, 2);
 			Effect->EndPass();
-			if (RenderedSurface) Device->StretchRect(RenderTarget, NULL, RenderedSurface, NULL, D3DTEXF_LINEAR); // copy the result from the pass into the texture
+			if (RenderedSurface && RenderedSurface != RenderTarget) Device->StretchRect(RenderTarget, NULL, RenderedSurface, NULL, D3DTEXF_LINEAR); // copy the result from the pass into the texture
 		}
 		Effect->End();
 	}
